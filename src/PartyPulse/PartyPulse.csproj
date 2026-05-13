@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Dalamud.NET.Sdk/15.0.0">
+  <PropertyGroup>
+    <Version>0.0.0.1</Version>
+    <PackageProjectUrl>https://github.com/goatcorp/SamplePlugin</PackageProjectUrl>
+    <PackageLicenseExpression>AGPL-3.0-or-later</PackageLicenseExpression>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="src\**" />
+    <EmbeddedResource Remove="src\**" />
+  </ItemGroup>
+
+    <ItemGroup>
+        <Content Include="Assets\icon.png">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+            <Visible>false</Visible>
+        </Content>
+        <Content Include="PartyPulse.json" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Update="DalamudPackager" Version="15.0.0" />
+        <PackageReference Update="DotNet.ReproducibleBuilds" Version="2.0.2" />
+    </ItemGroup>
+</Project>

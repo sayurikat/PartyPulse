@@ -1,0 +1,17 @@
+{
+    "Author": "Sayurikat",
+    "Name": "Party Pulse",
+    "Punchline": "Party Tools for FFXIV Venues.", //A short one-liner that shows up in /xlplugins.
+    "Description": "Making it easier to attend venue games and manage venue.\n/pulse help", //A description that shows up in /xlplugins. List any major slash-command(s).
+    "ApplicableVersion": "any",
+    "Tags": [
+        "venue",
+        "nightlife",
+        "manager",
+        "party",
+        "games",
+        "staff",
+        "vip",
+        "bar"
+    ]
+}

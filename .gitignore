@@ -1,0 +1,35 @@
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Build output
+bin/
+obj/
+[Bb]in/
+[Oo]bj/
+
+# Rider / JetBrains
+.idea/
+
+# VS project evaluation/cache
+ProjectEvaluation/
+*.bin
+*.sqlite
+*.db
+
+# NuGet
+packages/
+*.nupkg
+project.assets.json
+*.nuget.dgspec.json
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Local secrets/config
+*.local.json
+appsettings.Development.json
