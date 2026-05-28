@@ -26,7 +26,7 @@
         "Name": "Sayus Gag Extender",
         "Punchline": "Extension for GagSpeak.",
         "Description": "Extension features for GagSpeak.",
-        "Changelog": "Get puppeteer aliases from GagSpeak and share with Controller.",
+        "Changelog": "Whitelist jobs per character, improved moodle manager.",
         "IsHide": false,
         "InternalName": "SayusGagExtender",
         "AssemblyVersion": "0.7.1.0",
