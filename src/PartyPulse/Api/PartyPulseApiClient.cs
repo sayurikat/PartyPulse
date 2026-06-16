@@ -6,6 +6,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Linq;
 using PartyPulse.Models;
 
 namespace PartyPulse.Api;
@@ -144,6 +145,7 @@ public sealed class PartyPulseApiClient : IDisposable
         string relativePath,
         string accessToken,
         object? body,
+        Func<TResponse, bool> validator,
         CancellationToken cancellationToken)
     {
         var message = new HttpRequestMessage(method, new Uri(baseUri, relativePath.TrimStart('/')));
@@ -153,8 +155,108 @@ public sealed class PartyPulseApiClient : IDisposable
             message.Content = JsonContent.Create(body, options: JsonOptions);
         }
 
-        return await SendJsonAsync<TResponse>(message, static _ => true, cancellationToken);
+        return await SendJsonAsync(message, validator, cancellationToken);
     }
+
+
+    public Task<ApiResult<VenueUserManagementViewResponse>> GetVenueUsersAsync(
+        Uri baseUri,
+        string accessToken,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<VenueUserManagementViewResponse>(
+            baseUri,
+            HttpMethod.Get,
+            "api/v1/venue-users",
+            accessToken,
+            null,
+            ValidateVenueUserManagementViewResponse,
+            cancellationToken);
+
+    public Task<ApiResult<CreateVenueUserResponse>> CreateVenueUserAsync(
+        Uri baseUri,
+        string accessToken,
+        CreateVenueUserRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<CreateVenueUserResponse>(
+            baseUri,
+            HttpMethod.Post,
+            "api/v1/venue-users",
+            accessToken,
+            request,
+            ValidateCreateVenueUserResponse,
+            cancellationToken);
+
+    public Task<ApiResult<VenueUserOperationResponse>> UpdateVenueUserProfileAsync(
+        Uri baseUri,
+        string accessToken,
+        int userId,
+        UpdateVenueUserProfileRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<VenueUserOperationResponse>(
+            baseUri,
+            HttpMethod.Put,
+            $"api/v1/venue-users/{userId}",
+            accessToken,
+            request,
+            ValidateVenueUserOperationResponse,
+            cancellationToken);
+
+    public Task<ApiResult<SetVenueUserPermissionsResponse>> SetVenueUserPermissionsAsync(
+        Uri baseUri,
+        string accessToken,
+        int userId,
+        SetVenueUserPermissionsRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<SetVenueUserPermissionsResponse>(
+            baseUri,
+            HttpMethod.Put,
+            $"api/v1/venue-users/{userId}/permissions",
+            accessToken,
+            request,
+            ValidateSetVenueUserPermissionsResponse,
+            cancellationToken);
+
+    public Task<ApiResult<CreateRecoveryCodeResponse>> CreateVenueUserRecoveryCodeAsync(
+        Uri baseUri,
+        string accessToken,
+        int userId,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<CreateRecoveryCodeResponse>(
+            baseUri,
+            HttpMethod.Post,
+            $"api/v1/venue-users/{userId}/recovery-code",
+            accessToken,
+            null,
+            ValidateCreateRecoveryCodeResponse,
+            cancellationToken);
+
+    private static bool ValidateVenueUserManagementViewResponse(VenueUserManagementViewResponse payload) =>
+        payload.Capabilities is not null &&
+        payload.AvailablePermissions is not null &&
+        payload.Users is not null &&
+        payload.AvailablePermissions.All(static permission =>
+            permission is not null && !string.IsNullOrWhiteSpace(permission.PermissionKey)) &&
+        payload.Users.All(static user =>
+            user is not null &&
+            user.UserId > 0 &&
+            !string.IsNullOrWhiteSpace(user.DisplayName) &&
+            user.Permissions is not null);
+
+    private static bool ValidateCreateVenueUserResponse(CreateVenueUserResponse payload) =>
+        payload.UserId > 0 &&
+        !string.IsNullOrWhiteSpace(payload.InviteCode) &&
+        payload.InviteExpiresAt > DateTimeOffset.UtcNow;
+
+    private static bool ValidateVenueUserOperationResponse(VenueUserOperationResponse payload) =>
+        payload.UserId > 0;
+
+    private static bool ValidateSetVenueUserPermissionsResponse(SetVenueUserPermissionsResponse payload) =>
+        payload.UserId > 0 && payload.AssignedPermissionCount >= 0;
+
+    private static bool ValidateCreateRecoveryCodeResponse(CreateRecoveryCodeResponse payload) =>
+        payload.UserId > 0 &&
+        !string.IsNullOrWhiteSpace(payload.RecoveryCode) &&
+        payload.RecoveryCodeExpiresAt > DateTimeOffset.UtcNow;
 
     public void Dispose() => httpClient.Dispose();
 

@@ -14,6 +14,11 @@ The current milestone provides:
 - refresh-token authentication and explicit rotation confirmation;
 - access tokens kept in memory only;
 - per-device refresh tokens persisted through Dalamud configuration;
+- permission-gated venue-user listing and management;
+- one-time invite and recovery-code issuance, with codes shown in the UI and local chat;
+- profile editing for display names and Discord handles;
+- dynamic granular-permission checkboxes backed by the server permission catalog;
+- target-assisted user creation;
 - placeholder tabs for VIP, staff, payout, bar, games, and greeter modules.
 
 ## Visitor flow
@@ -31,6 +36,13 @@ The settings window also accepts the public code and, while the player is standi
 A saved visitor venue can be upgraded in place. Enter the owner-issued invite code under that venue in Settings. The plugin sends the venue's public code, current character/home world, device name, and invite code. It immediately persists the returned device ID and refresh token before confirming authentication.
 
 Normal startup authentication uses the public venue code and the stored per-device refresh token. If confirmation is lost, the pending token remains recoverable on the next refresh.
+
+
+## Venue-user management
+
+Authenticated users with `venue.users.view` receive a User List tab. Additional actions are independently controlled by `venue.users.create`, `venue.users.edit`, `venue.users.recover`, and `venue.users.permissions.manage`. The special `venue.owner` permission remains outside the normal checklist and satisfies every venue permission check.
+
+Creating a user returns a one-time invite code. Creating a recovery code invalidates older unused recovery codes; existing devices are revoked only when the recovery code is redeemed. Raw codes are kept only in memory by the plugin and are also printed to local PartyPulse chat output for copying.
 
 ## Development
 

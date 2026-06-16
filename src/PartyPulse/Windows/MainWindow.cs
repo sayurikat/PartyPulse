@@ -1,16 +1,22 @@
 using System;
+using System.Linq;
+using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Utility;
 using Dalamud.Interface.Windowing;
+using PartyPulse.Api;
 using PartyPulse.Authentication;
 using PartyPulse.Models;
-using System.Numerics;
+using PartyPulse.VenueUsers;
 
 namespace PartyPulse.Windows;
 
 public sealed class MainWindow : Window, IDisposable
 {
     private readonly Plugin plugin;
+    private Guid addUserProfileId;
+    private string addUserDisplayName = string.Empty;
+    private string addUserDiscordHandle = string.Empty;
 
     public MainWindow(Plugin plugin)
         : base("Party Pulse###PartyPulseMain")
@@ -19,7 +25,7 @@ public sealed class MainWindow : Window, IDisposable
 
         SizeConstraints = new WindowSizeConstraints
         {
-            MinimumSize = new Vector2(620, 440),
+            MinimumSize = new Vector2(720, 500),
             MaximumSize = new Vector2(float.MaxValue, float.MaxValue),
         };
     }
@@ -30,12 +36,12 @@ public sealed class MainWindow : Window, IDisposable
 
     public override void Draw()
     {
-        DrawHeader();
+        var selectedVenue = DrawHeader();
         ImGui.Separator();
-        DrawFeatureTabs();
+        DrawFeatureTabs(selectedVenue);
     }
 
-    private void DrawHeader()
+    private VenueConnectionConfiguration? DrawHeader()
     {
         var selectedVenue = DrawVenueSelector();
 
@@ -49,7 +55,7 @@ public sealed class MainWindow : Window, IDisposable
         {
             ImGui.Spacing();
             ImGui.TextWrapped("No venue is saved. Open Settings or use /pulse addvenue PULSE-XXXXXX.");
-            return;
+            return null;
         }
 
         if (selectedVenue.IsRegistered)
@@ -69,11 +75,14 @@ public sealed class MainWindow : Window, IDisposable
         if (selectedVenue.IsRegistered)
         {
             DrawConnectionStatus(plugin.Authentication.GetSnapshot(selectedVenue));
+            plugin.EnsureVenueUsersLoaded(selectedVenue);
         }
         else
         {
             ImGui.TextDisabled("Visitor mode — public venue information only.");
         }
+
+        return selectedVenue;
     }
 
     private VenueConnectionConfiguration? DrawVenueSelector()
@@ -130,14 +139,25 @@ public sealed class MainWindow : Window, IDisposable
         }
     }
 
-    private void DrawFeatureTabs()
+    private void DrawFeatureTabs(VenueConnectionConfiguration? selectedVenue)
     {
         if (!ImGui.BeginTabBar("PartyPulseFeatureTabs"))
         {
             return;
         }
 
-        DrawOverviewTab();
+        DrawOverviewTab(selectedVenue);
+
+        if (selectedVenue?.IsRegistered == true)
+        {
+            var userSnapshot = plugin.UserManagement.GetSnapshot(selectedVenue);
+            if (userSnapshot.Status == VenueUserManagementStatus.Ready &&
+                userSnapshot.View?.Capabilities.CanView == true)
+            {
+                DrawUsersTab(selectedVenue, userSnapshot);
+            }
+        }
+
         DrawPlaceholderTab("VIP", "VIP purchases, Discord identity, role automation, and payout totals will live here.");
         DrawPlaceholderTab("Staff", "Clock-in state, staff tools, macros, timers, and Party Finder controls will live here.");
         DrawPlaceholderTab("Payout", "Manager payout calculations, adjustments, finalization, and payment actions will live here.");
@@ -148,14 +168,13 @@ public sealed class MainWindow : Window, IDisposable
         ImGui.EndTabBar();
     }
 
-    private void DrawOverviewTab()
+    private void DrawOverviewTab(VenueConnectionConfiguration? selectedVenue)
     {
         if (!ImGui.BeginTabItem("Overview"))
         {
             return;
         }
 
-        var selectedVenue = plugin.Configuration.GetSelectedVenue();
         if (plugin.IdentityProvider.TryGetCurrent(out var identity, out var reason))
         {
             ImGui.TextUnformatted($"Character: {identity!.DisplayName}");
@@ -169,6 +188,150 @@ public sealed class MainWindow : Window, IDisposable
         ImGui.TextUnformatted($"Address: {selectedVenue?.AddressDisplay ?? "Not configured"}");
         ImGui.TextUnformatted($"Access: {(selectedVenue?.IsRegistered == true ? "Authenticated staff" : "Visitor")}");
         ImGui.TextWrapped("Public venue data is available to visitors. Staff features use the same saved venue after an invite or recovery code registers this device.");
+
+        ImGui.EndTabItem();
+    }
+
+    private void DrawUsersTab(
+        VenueConnectionConfiguration venue,
+        VenueUserManagementSnapshot snapshot)
+    {
+        if (!ImGui.BeginTabItem("User List"))
+        {
+            return;
+        }
+
+        var view = snapshot.View!;
+        var isBusy = plugin.UserManagement.IsBusy(venue.ProfileId);
+        if (addUserProfileId != venue.ProfileId)
+        {
+            addUserProfileId = venue.ProfileId;
+            addUserDisplayName = string.Empty;
+            addUserDiscordHandle = string.Empty;
+        }
+
+        ImGui.BeginDisabled(isBusy);
+        if (ImGui.Button("Refresh users"))
+        {
+            plugin.RefreshVenueUsers(venue);
+        }
+        ImGui.EndDisabled();
+
+        if (view.Capabilities.CanCreate)
+        {
+            ImGui.Spacing();
+            ImGui.TextUnformatted("Add venue user");
+            ImGui.SetNextItemWidth(250 * ImGuiHelpers.GlobalScale);
+            ImGui.InputText("Display name", ref addUserDisplayName, 50);
+            ImGui.SetNextItemWidth(250 * ImGuiHelpers.GlobalScale);
+            ImGui.InputText("Discord handle (optional)", ref addUserDiscordHandle, 50);
+
+            ImGui.BeginDisabled(isBusy || string.IsNullOrWhiteSpace(addUserDisplayName));
+            if (ImGui.Button("Create user"))
+            {
+                plugin.CreateVenueUser(venue, addUserDisplayName, addUserDiscordHandle);
+            }
+            ImGui.EndDisabled();
+
+            if (plugin.TargetProvider.TryGetCurrentTarget(out var target, out var targetReason))
+            {
+                ImGui.SameLine();
+                ImGui.BeginDisabled(isBusy);
+                if (ImGui.Button($"Add target: {target!.DisplayName}"))
+                {
+                    addUserDisplayName = target.CharacterName;
+                    plugin.CreateVenueUser(venue, target.CharacterName, addUserDiscordHandle);
+                }
+                ImGui.EndDisabled();
+            }
+            else
+            {
+                ImGui.SameLine();
+                ImGui.TextDisabled(targetReason);
+            }
+        }
+
+        if (snapshot.LastInviteCode is { } inviteCode)
+        {
+            ImGui.Spacing();
+            ImGui.TextWrapped($"Invite code for {inviteCode.DisplayName}: {inviteCode.Code}");
+            ImGui.TextDisabled($"Expires: {inviteCode.ExpiresAt.ToLocalTime():g}");
+            if (ImGui.Button("Copy latest invite code"))
+            {
+                ImGui.SetClipboardText(inviteCode.Code);
+            }
+        }
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        var tableFlags =
+            ImGuiTableFlags.Borders |
+            ImGuiTableFlags.RowBg |
+            ImGuiTableFlags.Resizable |
+            ImGuiTableFlags.ScrollY |
+            ImGuiTableFlags.SizingStretchProp;
+
+        if (ImGui.BeginTable("VenueUsers", 5, tableFlags, new Vector2(0, 300 * ImGuiHelpers.GlobalScale)))
+        {
+            ImGui.TableSetupColumn("Display name");
+            ImGui.TableSetupColumn("Discord");
+            ImGui.TableSetupColumn("Character");
+            ImGui.TableSetupColumn("Access");
+            ImGui.TableSetupColumn("##Actions", ImGuiTableColumnFlags.WidthFixed, 70 * ImGuiHelpers.GlobalScale);
+            ImGui.TableHeadersRow();
+
+            foreach (var user in view.Users)
+            {
+                ImGui.PushID(user.UserId);
+                ImGui.TableNextRow();
+
+                ImGui.TableSetColumnIndex(0);
+                ImGui.TextUnformatted(user.DisplayName);
+                if (user.DisabledAt is not null)
+                {
+                    ImGui.SameLine();
+                    ImGui.TextDisabled("(disabled)");
+                }
+
+                ImGui.TableSetColumnIndex(1);
+                ImGui.TextUnformatted(user.DiscordDisplay);
+                if (!string.IsNullOrWhiteSpace(user.DiscordName) && !string.IsNullOrWhiteSpace(user.DiscordHandle))
+                {
+                    ImGui.TextDisabled($"@{user.DiscordHandle}");
+                }
+
+                ImGui.TableSetColumnIndex(2);
+                ImGui.TextUnformatted(user.CharacterDisplay);
+
+                ImGui.TableSetColumnIndex(3);
+                if (user.IsOwner)
+                {
+                    ImGui.TextColored(new Vector4(1f, 0.78f, 0.25f, 1f), "Owner");
+                }
+                else
+                {
+                    ImGui.TextUnformatted($"{user.Permissions.Count} permission(s)");
+                }
+
+                ImGui.TableSetColumnIndex(4);
+                var canOpenEditor =
+                    view.Capabilities.CanEdit ||
+                    view.Capabilities.CanRecover ||
+                    view.Capabilities.CanManagePermissions;
+                ImGui.BeginDisabled(!canOpenEditor);
+                if (ImGui.SmallButton("Edit"))
+                {
+                    plugin.OpenVenueUserEditor(venue, user);
+                }
+                ImGui.EndDisabled();
+
+                ImGui.PopID();
+            }
+
+            ImGui.EndTable();
+        }
 
         ImGui.EndTabItem();
     }

@@ -223,6 +223,7 @@ public sealed class ConfigWindow : Window, IDisposable
         {
             var removed = configuration.VenueConnections[removeIndex];
             plugin.Authentication.RemoveProfile(removed.ProfileId);
+            plugin.UserManagement.RemoveProfile(removed.ProfileId);
             inviteCodes.Remove(removed.ProfileId);
             recoveryCodes.Remove(removed.ProfileId);
             configuration.VenueConnections.RemoveAt(removeIndex);

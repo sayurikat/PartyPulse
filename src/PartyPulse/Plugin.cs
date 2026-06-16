@@ -11,6 +11,7 @@ using PartyPulse.Api;
 using PartyPulse.Authentication;
 using PartyPulse.Models;
 using PartyPulse.Services;
+using PartyPulse.VenueUsers;
 using PartyPulse.Windows;
 
 namespace PartyPulse;
@@ -25,6 +26,7 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService] internal static IClientState ClientState { get; private set; } = null!;
     [PluginService] internal static IPlayerState PlayerState { get; private set; } = null!;
     [PluginService] internal static IDataManager DataManager { get; private set; } = null!;
+    [PluginService] internal static ITargetManager TargetManager { get; private set; } = null!;
     [PluginService] internal static ITextureProvider TextureProvider { get; private set; } = null!;
     [PluginService] internal static IFramework Framework { get; private set; } = null!;
     [PluginService] internal static IPluginLog Log { get; private set; } = null!;
@@ -33,6 +35,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly PartyPulseApiClient apiClient;
     private readonly ConfigWindow configWindow;
     private readonly MainWindow mainWindow;
+    private readonly VenueUserEditWindow venueUserEditWindow;
 
     private PlayerIdentity? observedIdentity;
     private bool autoConnectStarted;
@@ -48,14 +51,23 @@ public sealed class Plugin : IDalamudPlugin
 
         IdentityProvider = new PlayerIdentityProvider(PlayerState);
         LocationProvider = new VenueLocationProvider(PlayerState, ClientState, DataManager);
+        TargetProvider = new TargetPlayerProvider(TargetManager);
         apiClient = new PartyPulseApiClient();
         VenueDirectory = new VenueDirectoryManager(Configuration, apiClient, Framework, Log);
         Authentication = new AuthenticationManager(Configuration, apiClient, Framework, Log);
+        UserManagement = new VenueUserManagementManager(
+            Configuration,
+            Authentication,
+            apiClient,
+            IdentityProvider,
+            Log);
 
         configWindow = new ConfigWindow(this);
         mainWindow = new MainWindow(this);
+        venueUserEditWindow = new VenueUserEditWindow(this);
         WindowSystem.AddWindow(configWindow);
         WindowSystem.AddWindow(mainWindow);
+        WindowSystem.AddWindow(venueUserEditWindow);
 
         CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
         {
@@ -80,6 +92,10 @@ public sealed class Plugin : IDalamudPlugin
 
     public PlayerIdentityProvider IdentityProvider { get; }
 
+    public TargetPlayerProvider TargetProvider { get; }
+
+    public VenueUserManagementManager UserManagement { get; }
+
     public WindowSystem WindowSystem { get; } = new("PartyPulse");
 
     public CancellationToken LifetimeToken => lifetimeCancellation.Token;
@@ -103,6 +119,8 @@ public sealed class Plugin : IDalamudPlugin
         WindowSystem.RemoveAllWindows();
         configWindow.Dispose();
         mainWindow.Dispose();
+        venueUserEditWindow.Dispose();
+        UserManagement.Dispose();
         Authentication.Dispose();
         VenueDirectory.Dispose();
         apiClient.Dispose();
@@ -200,6 +218,59 @@ public sealed class Plugin : IDalamudPlugin
             $"recover venue {venue.VenueCode}");
     }
 
+
+    public void EnsureVenueUsersLoaded(VenueConnectionConfiguration venue)
+    {
+        if (!UserManagement.ShouldLoad(venue))
+        {
+            return;
+        }
+
+        Observe(
+            UserManagement.LoadAsync(venue, false, LifetimeToken),
+            $"load venue users for {venue.VenueCode}");
+    }
+
+    public void RefreshVenueUsers(VenueConnectionConfiguration venue) =>
+        Observe(
+            UserManagement.LoadAsync(venue, true, LifetimeToken),
+            $"refresh venue users for {venue.VenueCode}");
+
+    public void CreateVenueUser(
+        VenueConnectionConfiguration venue,
+        string displayName,
+        string? discordHandle) =>
+        Observe(
+            CreateVenueUserAndReportAsync(venue, displayName, discordHandle),
+            $"create venue user for {venue.VenueCode}");
+
+    public void UpdateVenueUserProfile(
+        VenueConnectionConfiguration venue,
+        int userId,
+        string displayName,
+        string? discordHandle) =>
+        Observe(
+            UpdateVenueUserProfileAndReportAsync(venue, userId, displayName, discordHandle),
+            $"update venue user {userId} for {venue.VenueCode}");
+
+    public void UpdateVenueUserPermissions(
+        VenueConnectionConfiguration venue,
+        int userId,
+        string[] permissionKeys) =>
+        Observe(
+            UpdateVenueUserPermissionsAndReportAsync(venue, userId, permissionKeys),
+            $"update permissions for venue user {userId} at {venue.VenueCode}");
+
+    public void CreateVenueUserRecoveryCode(
+        VenueConnectionConfiguration venue,
+        VenueUserSummary user) =>
+        Observe(
+            CreateVenueUserRecoveryCodeAndReportAsync(venue, user),
+            $"create recovery code for venue user {user.UserId} at {venue.VenueCode}");
+
+    public void OpenVenueUserEditor(VenueConnectionConfiguration venue, VenueUserSummary user) =>
+        venueUserEditWindow.Open(venue.ProfileId, user.UserId);
+
     private void OnCommand(string command, string arguments)
     {
         var trimmed = arguments.Trim();
@@ -238,6 +309,7 @@ public sealed class Plugin : IDalamudPlugin
                 observedIdentity = null;
                 autoConnectStarted = false;
                 Authentication.ClearAccessTokens("Character logged out or changed.");
+                UserManagement.Clear("Character logged out or changed.");
             }
 
             return;
@@ -248,6 +320,7 @@ public sealed class Plugin : IDalamudPlugin
             observedIdentity = identity;
             autoConnectStarted = false;
             Authentication.ClearAccessTokens("Character changed; authentication must be renewed.");
+            UserManagement.Clear("Character changed; venue-user data was cleared.");
         }
 
         if (!Configuration.AutoConnect)
@@ -281,6 +354,95 @@ public sealed class Plugin : IDalamudPlugin
             Configuration.ApiBaseUrl,
             LifetimeToken);
         ReportVenueLookup(result);
+    }
+
+    private async Task CreateVenueUserAndReportAsync(
+        VenueConnectionConfiguration venue,
+        string displayName,
+        string? discordHandle)
+    {
+        var result = await UserManagement.CreateAsync(
+            venue,
+            displayName,
+            discordHandle,
+            LifetimeToken);
+
+        if (result.Success && result.Value is not null)
+        {
+            ChatGui.Print(
+                $"Created venue user '{displayName}'. Invite code: {result.Value.InviteCode} (expires {result.Value.InviteExpiresAt.ToLocalTime():g}).",
+                "PartyPulse");
+            return;
+        }
+
+        ReportUserManagementFailure(result.Failure, "The venue user could not be created.");
+    }
+
+    private async Task UpdateVenueUserProfileAndReportAsync(
+        VenueConnectionConfiguration venue,
+        int userId,
+        string displayName,
+        string? discordHandle)
+    {
+        var result = await UserManagement.UpdateProfileAsync(
+            venue,
+            userId,
+            displayName,
+            discordHandle,
+            LifetimeToken);
+
+        if (result.Success)
+        {
+            ChatGui.Print($"Updated venue user '{displayName}'.", "PartyPulse");
+            return;
+        }
+
+        ReportUserManagementFailure(result.Failure, "The venue user could not be updated.");
+    }
+
+    private async Task UpdateVenueUserPermissionsAndReportAsync(
+        VenueConnectionConfiguration venue,
+        int userId,
+        string[] permissionKeys)
+    {
+        var result = await UserManagement.SetPermissionsAsync(
+            venue,
+            userId,
+            permissionKeys,
+            LifetimeToken);
+
+        if (result.Success)
+        {
+            ChatGui.Print($"Updated permissions for venue user #{userId}.", "PartyPulse");
+            return;
+        }
+
+        ReportUserManagementFailure(result.Failure, "Venue-user permissions could not be updated.");
+    }
+
+    private async Task CreateVenueUserRecoveryCodeAndReportAsync(
+        VenueConnectionConfiguration venue,
+        VenueUserSummary user)
+    {
+        var result = await UserManagement.CreateRecoveryCodeAsync(
+            venue,
+            user,
+            LifetimeToken);
+
+        if (result.Success && result.Value is not null)
+        {
+            ChatGui.Print(
+                $"Recovery code for '{user.DisplayName}': {result.Value.RecoveryCode} (expires {result.Value.RecoveryCodeExpiresAt.ToLocalTime():g}).",
+                "PartyPulse");
+            return;
+        }
+
+        ReportUserManagementFailure(result.Failure, "The recovery code could not be created.");
+    }
+
+    private static void ReportUserManagementFailure(ApiFailure? failure, string fallback)
+    {
+        ChatGui.PrintError(failure?.Message ?? fallback, "PartyPulse");
     }
 
     private static void ReportVenueLookup(ApiResult<VenueConnectionConfiguration> result)
