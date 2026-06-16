@@ -136,6 +136,42 @@ public sealed class Plugin : IDalamudPlugin
             "authenticate configured venues");
     }
 
+    public void RedeemInvite(VenueConnectionConfiguration venue, string inviteCode)
+    {
+        if (!IdentityProvider.TryGetCurrent(out var identity, out var reason))
+        {
+            Authentication.SetClientError(venue, reason);
+            return;
+        }
+
+        Observe(
+            Authentication.RedeemInviteAsync(
+                venue,
+                identity!,
+                inviteCode,
+                Configuration.ApiBaseUrl,
+                LifetimeToken),
+            $"redeem invite for venue {venue.VenueId}");
+    }
+
+    public void RecoverVenue(VenueConnectionConfiguration venue, string recoveryCode)
+    {
+        if (!IdentityProvider.TryGetCurrent(out var identity, out var reason))
+        {
+            Authentication.SetClientError(venue, reason);
+            return;
+        }
+
+        Observe(
+            Authentication.RecoverAsync(
+                venue,
+                identity!,
+                recoveryCode,
+                Configuration.ApiBaseUrl,
+                LifetimeToken),
+            $"recover venue {venue.VenueId}");
+    }
+
     private void OnCommand(string command, string arguments)
     {
         if (arguments.Trim().Equals("config", StringComparison.OrdinalIgnoreCase))

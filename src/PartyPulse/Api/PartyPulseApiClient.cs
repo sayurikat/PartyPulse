@@ -1,11 +1,11 @@
 using System;
-using System.Net.Http;
-using System.Threading;
-using System.Threading.Tasks;
 using System.Net;
+using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace PartyPulse.Api;
 
@@ -59,71 +59,53 @@ public sealed class PartyPulseApiClient : IDisposable
         return true;
     }
 
-    public async Task<ApiResult<RefreshTokenResponse>> RefreshAsync(
+    public Task<ApiResult<RefreshTokenResponse>> RefreshAsync(
         Uri baseUri,
         RefreshTokenRequest request,
+        CancellationToken cancellationToken) =>
+        SendJsonAsync<RefreshTokenResponse>(
+            new HttpRequestMessage(HttpMethod.Post, new Uri(baseUri, "api/v1/auth/refresh"))
+            {
+                Content = JsonContent.Create(request, options: JsonOptions),
+            },
+            ValidateRefreshResponse,
+            cancellationToken);
+
+    public Task<ApiResult<DeviceAuthenticationResponse>> RedeemInviteAsync(
+        Uri baseUri,
+        RedeemInviteRequest request,
+        CancellationToken cancellationToken) =>
+        SendJsonAsync<DeviceAuthenticationResponse>(
+            new HttpRequestMessage(HttpMethod.Post, new Uri(baseUri, "api/v1/auth/invite/redeem"))
+            {
+                Content = JsonContent.Create(request, options: JsonOptions),
+            },
+            ValidateDeviceAuthenticationResponse,
+            cancellationToken);
+
+    public Task<ApiResult<DeviceAuthenticationResponse>> RecoverAsync(
+        Uri baseUri,
+        RecoverAccountRequest request,
+        CancellationToken cancellationToken) =>
+        SendJsonAsync<DeviceAuthenticationResponse>(
+            new HttpRequestMessage(HttpMethod.Post, new Uri(baseUri, "api/v1/auth/recover"))
+            {
+                Content = JsonContent.Create(request, options: JsonOptions),
+            },
+            ValidateDeviceAuthenticationResponse,
+            cancellationToken);
+
+    public Task<ApiResult<AuthenticationConfirmationResponse>> ConfirmAuthenticationAsync(
+        Uri baseUri,
+        string accessToken,
         CancellationToken cancellationToken)
     {
-        using var message = new HttpRequestMessage(
-            HttpMethod.Post,
-            new Uri(baseUri, "api/v1/auth/refresh"))
-        {
-            Content = JsonContent.Create(request, options: JsonOptions),
-        };
-
-        message.Headers.CacheControl = new CacheControlHeaderValue { NoStore = true };
-
-        try
-        {
-            using var response = await httpClient.SendAsync(
-                message,
-                HttpCompletionOption.ResponseHeadersRead,
-                cancellationToken);
-
-            if (!response.IsSuccessStatusCode)
-            {
-                return ApiResult<RefreshTokenResponse>.Failed(await CreateFailureAsync(response, cancellationToken));
-            }
-
-            RefreshTokenResponse? payload;
-            try
-            {
-                payload = await response.Content.ReadFromJsonAsync<RefreshTokenResponse>(JsonOptions, cancellationToken);
-            }
-            catch (JsonException)
-            {
-                payload = null;
-            }
-
-            if (payload is null ||
-                string.IsNullOrWhiteSpace(payload.AccessToken) ||
-                string.IsNullOrWhiteSpace(payload.RefreshToken) ||
-                !string.Equals(payload.TokenType, "Bearer", StringComparison.OrdinalIgnoreCase) ||
-                payload.AccessTokenExpiresAt <= DateTimeOffset.UtcNow)
-            {
-                return ApiResult<RefreshTokenResponse>.Failed(new ApiFailure(
-                    ApiFailureKind.InvalidResponse,
-                    "INVALID_API_RESPONSE",
-                    "The API returned an incomplete authentication response.",
-                    response.StatusCode));
-            }
-
-            return ApiResult<RefreshTokenResponse>.Succeeded(payload);
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            return ApiResult<RefreshTokenResponse>.Failed(new ApiFailure(
-                ApiFailureKind.Transport,
-                "REQUEST_TIMEOUT",
-                "The API request timed out."));
-        }
-        catch (HttpRequestException exception)
-        {
-            return ApiResult<RefreshTokenResponse>.Failed(new ApiFailure(
-                ApiFailureKind.Transport,
-                "NETWORK_ERROR",
-                exception.Message));
-        }
+        var message = new HttpRequestMessage(HttpMethod.Post, new Uri(baseUri, "api/v1/auth/confirm"));
+        message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        return SendJsonAsync<AuthenticationConfirmationResponse>(
+            message,
+            ValidateConfirmationResponse,
+            cancellationToken);
     }
 
     public async Task<ApiResult<TResponse>> SendAuthorizedAsync<TResponse>(
@@ -134,64 +116,94 @@ public sealed class PartyPulseApiClient : IDisposable
         object? body,
         CancellationToken cancellationToken)
     {
-        using var message = new HttpRequestMessage(method, new Uri(baseUri, relativePath.TrimStart('/')));
+        var message = new HttpRequestMessage(method, new Uri(baseUri, relativePath.TrimStart('/')));
         message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-        message.Headers.CacheControl = new CacheControlHeaderValue { NoStore = true };
-
         if (body is not null)
         {
             message.Content = JsonContent.Create(body, options: JsonOptions);
         }
 
-        try
-        {
-            using var response = await httpClient.SendAsync(
-                message,
-                HttpCompletionOption.ResponseHeadersRead,
-                cancellationToken);
-
-            if (!response.IsSuccessStatusCode)
-            {
-                return ApiResult<TResponse>.Failed(await CreateFailureAsync(response, cancellationToken));
-            }
-
-            try
-            {
-                var payload = await response.Content.ReadFromJsonAsync<TResponse>(JsonOptions, cancellationToken);
-                return payload is null
-                    ? ApiResult<TResponse>.Failed(new ApiFailure(
-                        ApiFailureKind.InvalidResponse,
-                        "INVALID_API_RESPONSE",
-                        "The API returned an empty response.",
-                        response.StatusCode))
-                    : ApiResult<TResponse>.Succeeded(payload);
-            }
-            catch (JsonException)
-            {
-                return ApiResult<TResponse>.Failed(new ApiFailure(
-                    ApiFailureKind.InvalidResponse,
-                    "INVALID_API_RESPONSE",
-                    "The API returned invalid JSON.",
-                    response.StatusCode));
-            }
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            return ApiResult<TResponse>.Failed(new ApiFailure(
-                ApiFailureKind.Transport,
-                "REQUEST_TIMEOUT",
-                "The API request timed out."));
-        }
-        catch (HttpRequestException exception)
-        {
-            return ApiResult<TResponse>.Failed(new ApiFailure(
-                ApiFailureKind.Transport,
-                "NETWORK_ERROR",
-                exception.Message));
-        }
+        return await SendJsonAsync<TResponse>(message, static _ => true, cancellationToken);
     }
 
     public void Dispose() => httpClient.Dispose();
+
+    private async Task<ApiResult<TResponse>> SendJsonAsync<TResponse>(
+        HttpRequestMessage message,
+        Func<TResponse, bool> validator,
+        CancellationToken cancellationToken)
+    {
+        using (message)
+        {
+            message.Headers.CacheControl = new CacheControlHeaderValue { NoStore = true };
+
+            try
+            {
+                using var response = await httpClient.SendAsync(
+                    message,
+                    HttpCompletionOption.ResponseHeadersRead,
+                    cancellationToken);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    return ApiResult<TResponse>.Failed(await CreateFailureAsync(response, cancellationToken));
+                }
+
+                TResponse? payload;
+                try
+                {
+                    payload = await response.Content.ReadFromJsonAsync<TResponse>(JsonOptions, cancellationToken);
+                }
+                catch (JsonException)
+                {
+                    payload = default;
+                }
+
+                if (payload is null || !validator(payload))
+                {
+                    return ApiResult<TResponse>.Failed(new ApiFailure(
+                        ApiFailureKind.InvalidResponse,
+                        "INVALID_API_RESPONSE",
+                        "The API returned an incomplete or invalid response.",
+                        response.StatusCode));
+                }
+
+                return ApiResult<TResponse>.Succeeded(payload);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                return ApiResult<TResponse>.Failed(new ApiFailure(
+                    ApiFailureKind.Transport,
+                    "REQUEST_TIMEOUT",
+                    "The API request timed out."));
+            }
+            catch (HttpRequestException exception)
+            {
+                return ApiResult<TResponse>.Failed(new ApiFailure(
+                    ApiFailureKind.Transport,
+                    "NETWORK_ERROR",
+                    exception.Message));
+            }
+        }
+    }
+
+    private static bool ValidateRefreshResponse(RefreshTokenResponse payload) =>
+        !string.IsNullOrWhiteSpace(payload.AccessToken) &&
+        !string.IsNullOrWhiteSpace(payload.RefreshToken) &&
+        string.Equals(payload.TokenType, "Bearer", StringComparison.OrdinalIgnoreCase) &&
+        payload.AccessTokenExpiresAt > DateTimeOffset.UtcNow;
+
+    private static bool ValidateDeviceAuthenticationResponse(DeviceAuthenticationResponse payload) =>
+        payload.DeviceId > 0 &&
+        !string.IsNullOrWhiteSpace(payload.AccessToken) &&
+        !string.IsNullOrWhiteSpace(payload.RefreshToken) &&
+        string.Equals(payload.TokenType, "Bearer", StringComparison.OrdinalIgnoreCase) &&
+        payload.AccessTokenExpiresAt > DateTimeOffset.UtcNow;
+
+    private static bool ValidateConfirmationResponse(AuthenticationConfirmationResponse payload) =>
+        !string.IsNullOrWhiteSpace(payload.AccessToken) &&
+        string.Equals(payload.TokenType, "Bearer", StringComparison.OrdinalIgnoreCase) &&
+        payload.AccessTokenExpiresAt > DateTimeOffset.UtcNow;
 
     private static async Task<ApiFailure> CreateFailureAsync(
         HttpResponseMessage response,
@@ -221,12 +233,12 @@ public sealed class PartyPulseApiClient : IDisposable
         var code = string.IsNullOrWhiteSpace(problem?.Code)
             ? $"HTTP_{(int)response.StatusCode}"
             : problem.Code;
-        var message = !string.IsNullOrWhiteSpace(problem?.Detail)
+        var failureMessage = !string.IsNullOrWhiteSpace(problem?.Detail)
             ? problem.Detail
             : !string.IsNullOrWhiteSpace(problem?.Title)
                 ? problem.Title
                 : "The API rejected the request.";
 
-        return new ApiFailure(kind, code, message, response.StatusCode, problem?.TraceId, retryAfter);
+        return new ApiFailure(kind, code, failureMessage, response.StatusCode, problem?.TraceId, retryAfter);
     }
 }

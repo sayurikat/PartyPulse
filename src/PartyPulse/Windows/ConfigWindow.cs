@@ -1,11 +1,12 @@
 using System;
+using System.Collections.Generic;
+using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Utility;
 using Dalamud.Interface.Windowing;
 using PartyPulse.Api;
 using PartyPulse.Authentication;
 using PartyPulse.Models;
-using System.Numerics;
 
 namespace PartyPulse.Windows;
 
@@ -13,6 +14,8 @@ public sealed class ConfigWindow : Window, IDisposable
 {
     private readonly Plugin plugin;
     private readonly Configuration configuration;
+    private readonly Dictionary<Guid, string> inviteCodes = [];
+    private readonly Dictionary<Guid, string> recoveryCodes = [];
     private bool dirty;
 
     public ConfigWindow(Plugin plugin)
@@ -23,13 +26,15 @@ public sealed class ConfigWindow : Window, IDisposable
 
         SizeConstraints = new WindowSizeConstraints
         {
-            MinimumSize = new Vector2(560, 420),
+            MinimumSize = new Vector2(600, 500),
             MaximumSize = new Vector2(float.MaxValue, float.MaxValue),
         };
     }
 
     public void Dispose()
     {
+        inviteCodes.Clear();
+        recoveryCodes.Clear();
     }
 
     public override void PreDraw()
@@ -105,7 +110,7 @@ public sealed class ConfigWindow : Window, IDisposable
     private void DrawVenueConnections()
     {
         ImGui.TextUnformatted("Venue connections");
-        ImGui.TextWrapped("Each venue profile keeps its own device ID and refresh token. Access tokens remain in memory only.");
+        ImGui.TextWrapped("Create one profile per venue. Register the first device with an owner-issued invite code. Recovery codes revoke every other device for that venue user.");
 
         var removeIndex = -1;
         for (var index = 0; index < configuration.VenueConnections.Count; index++)
@@ -115,51 +120,21 @@ public sealed class ConfigWindow : Window, IDisposable
 
             if (ImGui.CollapsingHeader(venue.DisplayLabel, ImGuiTreeNodeFlags.DefaultOpen))
             {
-                var displayName = venue.DisplayName;
-                ImGui.SetNextItemWidth(260 * ImGuiHelpers.GlobalScale);
-                if (ImGui.InputText("Display name", ref displayName, 80))
+                DrawVenueIdentityFields(venue);
+                ImGui.Spacing();
+
+                if (venue.IsRegistered)
                 {
-                    venue.DisplayName = displayName;
-                    dirty = true;
+                    DrawRegisteredDevice(venue);
+                }
+                else
+                {
+                    DrawInviteRegistration(venue);
                 }
 
-                var venueId = venue.VenueId;
-                ImGui.SetNextItemWidth(160 * ImGuiHelpers.GlobalScale);
-                if (ImGui.InputInt("Venue ID", ref venueId))
-                {
-                    venue.VenueId = Math.Max(0, venueId);
-                    dirty = true;
-                }
-
-                var deviceId = venue.DeviceId;
-                ImGui.SetNextItemWidth(160 * ImGuiHelpers.GlobalScale);
-                if (ImGui.InputInt("Device ID", ref deviceId))
-                {
-                    venue.DeviceId = Math.Max(0, deviceId);
-                    dirty = true;
-                }
-
-                var deviceName = venue.DeviceName;
-                ImGui.SetNextItemWidth(260 * ImGuiHelpers.GlobalScale);
-                if (ImGui.InputText("Device name", ref deviceName, 80))
-                {
-                    venue.DeviceName = deviceName;
-                    dirty = true;
-                }
-
-                var refreshToken = venue.RefreshToken;
-                ImGui.SetNextItemWidth(-1);
-                if (ImGui.InputText(
-                        "Refresh token",
-                        ref refreshToken,
-                        128,
-                        ImGuiInputTextFlags.Password))
-                {
-                    venue.RefreshToken = refreshToken.Trim();
-                    dirty = true;
-                }
-
-                ImGui.TextDisabled($"Stored token length: {venue.RefreshToken.Length}");
+                ImGui.Spacing();
+                DrawRecovery(venue);
+                ImGui.Spacing();
 
                 var snapshot = plugin.Authentication.GetSnapshot(venue);
                 DrawStatusText(snapshot.Message, snapshot.Status);
@@ -168,16 +143,18 @@ public sealed class ConfigWindow : Window, IDisposable
                     ImGui.TextDisabled($"Access token expires: {expiresAt.ToLocalTime():g}");
                 }
 
-                if (ImGui.Button("Save and authenticate"))
+                if (venue.IsRegistered && ImGui.Button("Save and authenticate"))
                 {
-                    SaveChanges();
-                    configuration.SelectedVenueProfileId = venue.ProfileId;
-                    configuration.Save();
+                    SaveAndSelect(venue);
                     plugin.ConnectVenue(venue);
                 }
 
-                ImGui.SameLine();
-                if (ImGui.Button("Remove"))
+                if (venue.IsRegistered)
+                {
+                    ImGui.SameLine();
+                }
+
+                if (ImGui.Button("Remove profile"))
                 {
                     removeIndex = index;
                 }
@@ -191,6 +168,8 @@ public sealed class ConfigWindow : Window, IDisposable
         {
             var removed = configuration.VenueConnections[removeIndex];
             plugin.Authentication.RemoveProfile(removed.ProfileId);
+            inviteCodes.Remove(removed.ProfileId);
+            recoveryCodes.Remove(removed.ProfileId);
             configuration.VenueConnections.RemoveAt(removeIndex);
             configuration.Normalize();
             configuration.Save();
@@ -206,6 +185,86 @@ public sealed class ConfigWindow : Window, IDisposable
         }
     }
 
+    private void DrawVenueIdentityFields(VenueConnectionConfiguration venue)
+    {
+        var displayName = venue.DisplayName;
+        ImGui.SetNextItemWidth(260 * ImGuiHelpers.GlobalScale);
+        if (ImGui.InputText("Display name", ref displayName, 80))
+        {
+            venue.DisplayName = displayName;
+            dirty = true;
+        }
+
+        var venueId = venue.VenueId;
+        ImGui.SetNextItemWidth(160 * ImGuiHelpers.GlobalScale);
+        if (ImGui.InputInt("Venue ID", ref venueId))
+        {
+            venue.VenueId = Math.Max(0, venueId);
+            dirty = true;
+        }
+
+        var deviceName = venue.DeviceName;
+        ImGui.SetNextItemWidth(260 * ImGuiHelpers.GlobalScale);
+        if (ImGui.InputText("Device name", ref deviceName, 50))
+        {
+            venue.DeviceName = deviceName;
+            dirty = true;
+        }
+    }
+
+    private void DrawRegisteredDevice(VenueConnectionConfiguration venue)
+    {
+        ImGui.TextUnformatted($"Registered device ID: {venue.DeviceId}");
+        ImGui.TextDisabled($"Stored refresh token length: {venue.RefreshToken.Length}");
+        if (venue.RefreshTokenUpdatedAt is { } updatedAt)
+        {
+            ImGui.TextDisabled($"Refresh token last updated: {updatedAt.ToLocalTime():g}");
+        }
+    }
+
+    private void DrawInviteRegistration(VenueConnectionConfiguration venue)
+    {
+        ImGui.TextUnformatted("First-time registration");
+        ImGui.TextWrapped("Enter the one-time invite code supplied by the venue owner or server administrator.");
+
+        var code = inviteCodes.GetValueOrDefault(venue.ProfileId, string.Empty);
+        ImGui.SetNextItemWidth(-1);
+        if (ImGui.InputText("Invite code", ref code, 80, ImGuiInputTextFlags.Password))
+        {
+            inviteCodes[venue.ProfileId] = code;
+        }
+
+        if (ImGui.Button("Register device with invite"))
+        {
+            SaveAndSelect(venue);
+            plugin.RedeemInvite(venue, code);
+        }
+    }
+
+    private void DrawRecovery(VenueConnectionConfiguration venue)
+    {
+        if (!ImGui.TreeNode("Account recovery"))
+        {
+            return;
+        }
+
+        ImGui.TextWrapped("Recovery revokes every other device for this venue user and registers this machine as the replacement device.");
+        var code = recoveryCodes.GetValueOrDefault(venue.ProfileId, string.Empty);
+        ImGui.SetNextItemWidth(-1);
+        if (ImGui.InputText("Recovery code", ref code, 80, ImGuiInputTextFlags.Password))
+        {
+            recoveryCodes[venue.ProfileId] = code;
+        }
+
+        if (ImGui.Button("Recover and replace devices"))
+        {
+            SaveAndSelect(venue);
+            plugin.RecoverVenue(venue, code);
+        }
+
+        ImGui.TreePop();
+    }
+
     private void DrawFooter()
     {
         if (ImGui.Button(dirty ? "Save changes *" : "Save changes"))
@@ -214,11 +273,18 @@ public sealed class ConfigWindow : Window, IDisposable
         }
 
         ImGui.SameLine();
-        if (ImGui.Button("Authenticate all configured venues"))
+        if (ImGui.Button("Authenticate all registered venues"))
         {
             SaveChanges();
             plugin.ConnectAllConfiguredVenues();
         }
+    }
+
+    private void SaveAndSelect(VenueConnectionConfiguration venue)
+    {
+        SaveChanges();
+        configuration.SelectedVenueProfileId = venue.ProfileId;
+        configuration.Save();
     }
 
     private void SaveChanges()

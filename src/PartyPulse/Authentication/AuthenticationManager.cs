@@ -1,11 +1,11 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Dalamud.Plugin.Services;
 using PartyPulse.Api;
 using PartyPulse.Models;
-using System.Collections.Concurrent;
 
 namespace PartyPulse.Authentication;
 
@@ -18,7 +18,7 @@ public sealed class AuthenticationManager : IDisposable
     private readonly IFramework framework;
     private readonly IPluginLog log;
     private readonly ConcurrentDictionary<Guid, SessionState> sessions = new();
-    private readonly ConcurrentDictionary<string, SemaphoreSlim> refreshLocks = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> authenticationLocks = new(StringComparer.Ordinal);
 
     public AuthenticationManager(
         Configuration configuration,
@@ -34,14 +34,22 @@ public sealed class AuthenticationManager : IDisposable
 
     public AuthenticationSnapshot GetSnapshot(VenueConnectionConfiguration venue)
     {
-        if (!venue.TryValidate(out var validationError))
+        if (sessions.TryGetValue(venue.ProfileId, out var activeState) &&
+            activeState.Status is AuthenticationStatus.Connecting or
+                AuthenticationStatus.Failed or
+                AuthenticationStatus.WaitingForPlayer)
+        {
+            return activeState.ToSnapshot();
+        }
+
+        if (!venue.TryValidateForRefresh(out var validationError))
         {
             return new AuthenticationSnapshot(
                 AuthenticationStatus.NotConfigured,
                 validationError,
                 null,
-                null,
-                null);
+                activeState?.LastAttemptAt,
+                activeState?.LastSuccessAt);
         }
 
         if (!sessions.TryGetValue(venue.ProfileId, out var state))
@@ -73,6 +81,7 @@ public sealed class AuthenticationManager : IDisposable
                 message,
                 null,
                 null,
+                false,
                 DateTimeOffset.UtcNow,
                 null),
             (_, previous) => previous with
@@ -81,6 +90,7 @@ public sealed class AuthenticationManager : IDisposable
                 Message = message,
                 AccessToken = null,
                 AccessTokenExpiresAt = null,
+                ConfirmationPending = false,
                 LastAttemptAt = DateTimeOffset.UtcNow,
             });
     }
@@ -95,7 +105,7 @@ public sealed class AuthenticationManager : IDisposable
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (!venue.TryValidate(out _))
+            if (!venue.TryValidateForRefresh(out _))
             {
                 continue;
             }
@@ -110,45 +120,24 @@ public sealed class AuthenticationManager : IDisposable
         string apiBaseUrl,
         CancellationToken cancellationToken)
     {
-        if (!venue.TryValidate(out var validationError))
+        if (!venue.TryValidateForRefresh(out var validationError))
         {
-            var failure = new ApiFailure(
-                ApiFailureKind.Validation,
-                "INVALID_VENUE_CONFIGURATION",
-                validationError);
+            var failure = ValidationFailure(validationError);
             SetFailure(venue.ProfileId, failure);
             return ApiResult<RefreshTokenResponse>.Failed(failure);
         }
 
-        if (!PartyPulseApiClient.TryCreateBaseUri(apiBaseUrl, out var baseUri, out var urlError))
+        if (!TryGetBaseUri(apiBaseUrl, venue.ProfileId, out var baseUri, out var baseUriFailure))
         {
-            var failure = new ApiFailure(
-                ApiFailureKind.Validation,
-                "INVALID_API_URL",
-                urlError);
-            SetFailure(venue.ProfileId, failure);
-            return ApiResult<RefreshTokenResponse>.Failed(failure);
+            return ApiResult<RefreshTokenResponse>.Failed(baseUriFailure!);
         }
 
-        var lockKey = $"{venue.VenueId}:{venue.DeviceId}";
-        var gate = refreshLocks.GetOrAdd(lockKey, _ => new SemaphoreSlim(1, 1));
+        var gate = GetAuthenticationLock(venue);
         await gate.WaitAsync(cancellationToken);
 
         try
         {
-            var attemptAt = DateTimeOffset.UtcNow;
-            sessions.AddOrUpdate(
-                venue.ProfileId,
-                _ => SessionState.Connecting(attemptAt),
-                (_, previous) => previous with
-                {
-                    Status = AuthenticationStatus.Connecting,
-                    Message = $"Authenticating {identity.DisplayName}...",
-                    AccessToken = null,
-                    AccessTokenExpiresAt = null,
-                    LastAttemptAt = attemptAt,
-                });
-
+            var attemptAt = BeginConnecting(venue, $"Authenticating {identity.DisplayName}...");
             var request = new RefreshTokenRequest(
                 venue.VenueId,
                 identity.CharacterName,
@@ -165,24 +154,22 @@ public sealed class AuthenticationManager : IDisposable
 
             var response = result.Value;
             await PersistRefreshTokenAsync(venue, response.RefreshToken, cancellationToken);
-
-            var successAt = DateTimeOffset.UtcNow;
-            sessions[venue.ProfileId] = new SessionState(
-                AuthenticationStatus.Connected,
-                $"Connected as {identity.DisplayName}.",
+            await CompleteAuthenticationAsync(
+                venue,
+                identity,
+                baseUri!,
                 response.AccessToken,
                 response.AccessTokenExpiresAt,
                 attemptAt,
-                successAt);
+                cancellationToken);
 
             log.Information(
-                "Authenticated venue profile {ProfileId} for venue {VenueId}, device {DeviceId}, character {CharacterName} @ {WorldName}. Access token expires at {ExpiresAt}.",
+                "Authenticated venue profile {ProfileId} for venue {VenueId}, device {DeviceId}, character {CharacterName} @ {WorldName}.",
                 venue.ProfileId,
                 venue.VenueId,
                 venue.DeviceId,
                 identity.CharacterName,
-                identity.WorldName,
-                response.AccessTokenExpiresAt);
+                identity.WorldName);
 
             return result;
         }
@@ -192,6 +179,22 @@ public sealed class AuthenticationManager : IDisposable
         }
     }
 
+    public Task<ApiResult<DeviceAuthenticationResponse>> RedeemInviteAsync(
+        VenueConnectionConfiguration venue,
+        PlayerIdentity identity,
+        string inviteCode,
+        string apiBaseUrl,
+        CancellationToken cancellationToken) =>
+        BootstrapAsync(venue, identity, inviteCode, apiBaseUrl, true, cancellationToken);
+
+    public Task<ApiResult<DeviceAuthenticationResponse>> RecoverAsync(
+        VenueConnectionConfiguration venue,
+        PlayerIdentity identity,
+        string recoveryCode,
+        string apiBaseUrl,
+        CancellationToken cancellationToken) =>
+        BootstrapAsync(venue, identity, recoveryCode, apiBaseUrl, false, cancellationToken);
+
     public async Task<AccessTokenResult> EnsureAccessTokenAsync(
         VenueConnectionConfiguration venue,
         PlayerIdentity identity,
@@ -200,16 +203,27 @@ public sealed class AuthenticationManager : IDisposable
     {
         if (TryGetValidAccessToken(venue.ProfileId, MinimumUsableAccessTokenLifetime, out var accessToken))
         {
+            if (sessions.TryGetValue(venue.ProfileId, out var state) && state.ConfirmationPending)
+            {
+                await TryConfirmPendingAsync(venue, identity, apiBaseUrl, cancellationToken);
+                TryGetValidAccessToken(venue.ProfileId, TimeSpan.Zero, out accessToken);
+            }
+
             return AccessTokenResult.Succeeded(accessToken!);
         }
 
         var refreshResult = await RefreshAsync(venue, identity, apiBaseUrl, cancellationToken);
-        if (!refreshResult.Success || refreshResult.Value is null)
+        if (!refreshResult.Success)
         {
             return AccessTokenResult.Failed(refreshResult.Failure!);
         }
 
-        return AccessTokenResult.Succeeded(refreshResult.Value.AccessToken);
+        return TryGetValidAccessToken(venue.ProfileId, TimeSpan.Zero, out accessToken)
+            ? AccessTokenResult.Succeeded(accessToken!)
+            : AccessTokenResult.Failed(new ApiFailure(
+                ApiFailureKind.InvalidResponse,
+                "ACCESS_TOKEN_NOT_AVAILABLE",
+                "Authentication completed without a usable access token."));
     }
 
     public bool TryGetValidAccessToken(
@@ -242,6 +256,7 @@ public sealed class AuthenticationManager : IDisposable
                 Message = message,
                 AccessToken = null,
                 AccessTokenExpiresAt = null,
+                ConfirmationPending = false,
             };
         }
     }
@@ -250,13 +265,233 @@ public sealed class AuthenticationManager : IDisposable
 
     public void Dispose()
     {
-        foreach (var gate in refreshLocks.Values)
+        foreach (var gate in authenticationLocks.Values)
         {
             gate.Dispose();
         }
 
-        refreshLocks.Clear();
+        authenticationLocks.Clear();
         sessions.Clear();
+    }
+
+    private async Task<ApiResult<DeviceAuthenticationResponse>> BootstrapAsync(
+        VenueConnectionConfiguration venue,
+        PlayerIdentity identity,
+        string code,
+        string apiBaseUrl,
+        bool isInvite,
+        CancellationToken cancellationToken)
+    {
+        if (!venue.TryValidateForEnrollment(out var validationError))
+        {
+            var failure = ValidationFailure(validationError);
+            SetFailure(venue.ProfileId, failure);
+            return ApiResult<DeviceAuthenticationResponse>.Failed(failure);
+        }
+
+        if (string.IsNullOrWhiteSpace(code))
+        {
+            var failure = ValidationFailure(isInvite ? "An invite code is required." : "A recovery code is required.");
+            SetFailure(venue.ProfileId, failure);
+            return ApiResult<DeviceAuthenticationResponse>.Failed(failure);
+        }
+
+        if (!TryGetBaseUri(apiBaseUrl, venue.ProfileId, out var baseUri, out var baseUriFailure))
+        {
+            return ApiResult<DeviceAuthenticationResponse>.Failed(baseUriFailure!);
+        }
+
+        var gate = GetAuthenticationLock(venue);
+        await gate.WaitAsync(cancellationToken);
+
+        try
+        {
+            var operation = isInvite ? "Registering device" : "Recovering account";
+            var attemptAt = BeginConnecting(venue, $"{operation} for {identity.DisplayName}...");
+
+            ApiResult<DeviceAuthenticationResponse> result;
+            if (isInvite)
+            {
+                result = await apiClient.RedeemInviteAsync(
+                    baseUri!,
+                    new RedeemInviteRequest(
+                        venue.VenueId,
+                        identity.CharacterName,
+                        identity.WorldName,
+                        venue.DeviceName.Trim(),
+                        code.Trim()),
+                    cancellationToken);
+            }
+            else
+            {
+                result = await apiClient.RecoverAsync(
+                    baseUri!,
+                    new RecoverAccountRequest(
+                        venue.VenueId,
+                        identity.CharacterName,
+                        identity.WorldName,
+                        venue.DeviceName.Trim(),
+                        code.Trim()),
+                    cancellationToken);
+            }
+
+            if (!result.Success || result.Value is null)
+            {
+                SetFailure(venue.ProfileId, result.Failure!);
+                return result;
+            }
+
+            var response = result.Value;
+            await PersistDeviceRegistrationAsync(
+                venue,
+                response.DeviceId,
+                response.RefreshToken,
+                cancellationToken);
+
+            await CompleteAuthenticationAsync(
+                venue,
+                identity,
+                baseUri!,
+                response.AccessToken,
+                response.AccessTokenExpiresAt,
+                attemptAt,
+                cancellationToken);
+
+            log.Information(
+                "{Operation} completed for venue profile {ProfileId}, venue {VenueId}, device {DeviceId}, character {CharacterName} @ {WorldName}.",
+                isInvite ? "Invite redemption" : "Account recovery",
+                venue.ProfileId,
+                venue.VenueId,
+                venue.DeviceId,
+                identity.CharacterName,
+                identity.WorldName);
+
+            return result;
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    private async Task CompleteAuthenticationAsync(
+        VenueConnectionConfiguration venue,
+        PlayerIdentity identity,
+        Uri baseUri,
+        string accessToken,
+        DateTimeOffset accessTokenExpiresAt,
+        DateTimeOffset attemptAt,
+        CancellationToken cancellationToken)
+    {
+        var confirmation = await apiClient.ConfirmAuthenticationAsync(
+            baseUri,
+            accessToken,
+            cancellationToken);
+
+        var successAt = DateTimeOffset.UtcNow;
+        if (confirmation.Success && confirmation.Value is not null)
+        {
+            sessions[venue.ProfileId] = new SessionState(
+                AuthenticationStatus.Connected,
+                $"Connected as {identity.DisplayName}.",
+                confirmation.Value.AccessToken,
+                confirmation.Value.AccessTokenExpiresAt,
+                false,
+                attemptAt,
+                successAt);
+            return;
+        }
+
+        sessions[venue.ProfileId] = new SessionState(
+            AuthenticationStatus.Connected,
+            $"Connected as {identity.DisplayName}; token confirmation will retry automatically.",
+            accessToken,
+            accessTokenExpiresAt,
+            true,
+            attemptAt,
+            successAt);
+
+        log.Warning(
+            "Authentication confirmation remains pending for profile {ProfileId}. Code: {Code}; status: {Status}; trace: {TraceId}.",
+            venue.ProfileId,
+            confirmation.Failure?.Code,
+            confirmation.Failure?.StatusCode,
+            confirmation.Failure?.TraceId);
+    }
+
+    private async Task TryConfirmPendingAsync(
+        VenueConnectionConfiguration venue,
+        PlayerIdentity identity,
+        string apiBaseUrl,
+        CancellationToken cancellationToken)
+    {
+        if (!sessions.TryGetValue(venue.ProfileId, out var state) ||
+            !state.ConfirmationPending ||
+            string.IsNullOrWhiteSpace(state.AccessToken) ||
+            !PartyPulseApiClient.TryCreateBaseUri(apiBaseUrl, out var baseUri, out _))
+        {
+            return;
+        }
+
+        var result = await apiClient.ConfirmAuthenticationAsync(baseUri!, state.AccessToken, cancellationToken);
+        if (!result.Success || result.Value is null)
+        {
+            return;
+        }
+
+        sessions[venue.ProfileId] = state with
+        {
+            Message = $"Connected as {identity.DisplayName}.",
+            AccessToken = result.Value.AccessToken,
+            AccessTokenExpiresAt = result.Value.AccessTokenExpiresAt,
+            ConfirmationPending = false,
+            LastSuccessAt = DateTimeOffset.UtcNow,
+        };
+    }
+
+    private SemaphoreSlim GetAuthenticationLock(VenueConnectionConfiguration venue) =>
+        authenticationLocks.GetOrAdd(
+            venue.DeviceId > 0
+                ? $"{venue.VenueId}:{venue.DeviceId}"
+                : $"profile:{venue.ProfileId:N}",
+            _ => new SemaphoreSlim(1, 1));
+
+    private DateTimeOffset BeginConnecting(VenueConnectionConfiguration venue, string message)
+    {
+        var attemptAt = DateTimeOffset.UtcNow;
+        sessions.AddOrUpdate(
+            venue.ProfileId,
+            _ => SessionState.Connecting(attemptAt, message),
+            (_, previous) => previous with
+            {
+                Status = AuthenticationStatus.Connecting,
+                Message = message,
+                AccessToken = null,
+                AccessTokenExpiresAt = null,
+                ConfirmationPending = false,
+                LastAttemptAt = attemptAt,
+            });
+        return attemptAt;
+    }
+
+    private bool TryGetBaseUri(
+        string apiBaseUrl,
+        Guid profileId,
+        out Uri? baseUri,
+        out ApiFailure? failure)
+    {
+        if (PartyPulseApiClient.TryCreateBaseUri(apiBaseUrl, out baseUri, out var urlError))
+        {
+            failure = null;
+            return true;
+        }
+
+        failure = new ApiFailure(
+            ApiFailureKind.Validation,
+            "INVALID_API_URL",
+            urlError);
+        SetFailure(profileId, failure);
+        return false;
     }
 
     private async Task PersistRefreshTokenAsync(
@@ -287,6 +522,43 @@ public sealed class AuthenticationManager : IDisposable
             cancellationToken: cancellationToken);
     }
 
+    private async Task PersistDeviceRegistrationAsync(
+        VenueConnectionConfiguration venue,
+        int deviceId,
+        string refreshToken,
+        CancellationToken cancellationToken)
+    {
+        await framework.RunOnTick(
+            () =>
+            {
+                var previousDeviceId = venue.DeviceId;
+                var previousToken = venue.RefreshToken;
+                var previousUpdatedAt = venue.RefreshTokenUpdatedAt;
+
+                venue.DeviceId = deviceId;
+                venue.RefreshToken = refreshToken;
+                venue.RefreshTokenUpdatedAt = DateTimeOffset.UtcNow;
+
+                try
+                {
+                    configuration.Save();
+                }
+                catch
+                {
+                    venue.DeviceId = previousDeviceId;
+                    venue.RefreshToken = previousToken;
+                    venue.RefreshTokenUpdatedAt = previousUpdatedAt;
+                    throw;
+                }
+            },
+            cancellationToken: cancellationToken);
+    }
+
+    private static ApiFailure ValidationFailure(string message) => new(
+        ApiFailureKind.Validation,
+        "INVALID_VENUE_CONFIGURATION",
+        message);
+
     private void SetFailure(Guid profileId, ApiFailure failure)
     {
         var message = failure.TraceId is { Length: > 0 }
@@ -302,6 +574,7 @@ public sealed class AuthenticationManager : IDisposable
                 Message = message,
                 AccessToken = null,
                 AccessTokenExpiresAt = null,
+                ConfirmationPending = false,
                 LastAttemptAt = DateTimeOffset.UtcNow,
             });
 
@@ -318,14 +591,16 @@ public sealed class AuthenticationManager : IDisposable
         string Message,
         string? AccessToken,
         DateTimeOffset? AccessTokenExpiresAt,
+        bool ConfirmationPending,
         DateTimeOffset? LastAttemptAt,
         DateTimeOffset? LastSuccessAt)
     {
-        public static SessionState Connecting(DateTimeOffset attemptedAt) => new(
+        public static SessionState Connecting(DateTimeOffset attemptedAt, string message) => new(
             AuthenticationStatus.Connecting,
-            "Authenticating...",
+            message,
             null,
             null,
+            false,
             attemptedAt,
             null);
 
@@ -334,6 +609,7 @@ public sealed class AuthenticationManager : IDisposable
             message,
             null,
             null,
+            false,
             DateTimeOffset.UtcNow,
             null);
 

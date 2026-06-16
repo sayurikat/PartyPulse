@@ -7,24 +7,30 @@ The current milestone provides:
 - multi-venue connection profiles;
 - venue selection in the main window;
 - character and home-world discovery through Dalamud;
+- first-device registration with a one-time invite code;
+- account recovery that revokes all other devices for that venue user;
 - refresh-token authentication against the deployed PartyPulse API;
+- explicit authentication confirmation after the refresh token is safely persisted;
 - access tokens kept in memory only;
 - per-device refresh tokens persisted through Dalamud configuration;
-- serialized refresh requests per venue/device;
+- serialized authentication requests per venue/device;
 - scalable API, authentication, model, service, and feature-tab structure;
 - placeholder tabs for VIP, staff, payout, bar, games, and greeter modules.
 
-## Current API contract
+## Authentication flow
 
-The plugin authenticates through:
+A new venue profile starts with a venue ID and device name. The user enters either:
+
+- an invite code for first-time registration; or
+- a recovery code to replace all prior devices.
+
+The plugin reads the current character and home world from the game, sends the code to the API, immediately persists the returned device ID and refresh token, then confirms receipt with the short-lived access token. Normal startup authentication uses:
 
 ```text
 POST /api/v1/auth/refresh
 ```
 
-It sends the configured venue ID, device ID, persisted refresh token, and the current character name/home world read from the game. On success it immediately saves the newly returned refresh token and keeps the short-lived JWT access token in memory.
-
-The API currently carries `refresh_rotation_id` in the JWT, but the API/SQL confirmation endpoint is not implemented yet. The plugin therefore does not invent a confirmation call. Future authenticated feature requests can use `AuthenticationManager.EnsureAccessTokenAsync` and `PartyPulseApiClient.SendAuthorizedAsync` once the corresponding API endpoints exist.
+The plugin immediately saves each newly returned refresh token before confirming its rotation. If the confirmation request is lost, the pending token remains recoverable on the next refresh.
 
 ## Development
 

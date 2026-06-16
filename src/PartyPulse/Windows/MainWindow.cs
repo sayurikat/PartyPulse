@@ -153,7 +153,7 @@ public sealed class MainWindow : Window, IDisposable
 
         ImGui.TextUnformatted($"API: {plugin.Configuration.ApiBaseUrl}");
         ImGui.TextUnformatted($"Venue: {selectedVenue?.DisplayLabel ?? "Not configured"}");
-        ImGui.TextWrapped("The plugin foundation is connected to the existing /api/v1/auth/refresh contract. Future feature modules should obtain a valid access token through AuthenticationManager before making authorized API calls.");
+        ImGui.TextWrapped("The plugin foundation supports invite registration, account recovery, refresh-token rotation confirmation, and authenticated requests. Future feature modules should obtain a valid access token through AuthenticationManager before calling their API endpoints.");
 
         ImGui.EndTabItem();
     }
