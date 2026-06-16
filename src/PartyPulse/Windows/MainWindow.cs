@@ -1,120 +1,173 @@
-using Dalamud.Bindings.ImGui;
-using Dalamud.Interface.Textures;
-using Dalamud.Interface.Utility;
-using Dalamud.Interface.Utility.Raii;
-using Dalamud.Interface.Windowing;
-using Lumina.Excel.Sheets;
 using System;
-using System.IO;
+using Dalamud.Bindings.ImGui;
+using Dalamud.Interface.Utility;
+using Dalamud.Interface.Windowing;
+using PartyPulse.Authentication;
+using PartyPulse.Models;
 using System.Numerics;
 
 namespace PartyPulse.Windows;
 
-public class MainWindow : Window, IDisposable
+public sealed class MainWindow : Window, IDisposable
 {
     private readonly Plugin plugin;
 
-    // We give this window a hidden ID using ##.
-    // The user will see "My Amazing Window" as window title,
-    // but for ImGui the ID is "My Amazing Window##With a hidden ID"
     public MainWindow(Plugin plugin)
-        : base("Party Pulse##With a hidden ID", ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse)
+        : base("Party Pulse###PartyPulseMain")
     {
+        this.plugin = plugin;
+
         SizeConstraints = new WindowSizeConstraints
         {
-            MinimumSize = new Vector2(375, 330),
-            MaximumSize = new Vector2(float.MaxValue, float.MaxValue)
+            MinimumSize = new Vector2(620, 440),
+            MaximumSize = new Vector2(float.MaxValue, float.MaxValue),
         };
-
-        this.plugin = plugin;
     }
 
-    public void Dispose() { }
+    public void Dispose()
+    {
+    }
 
     public override void Draw()
     {
-        ImGui.Text($"The random config bool is {plugin.Configuration.SomePropertyToBeSavedAndWithADefault}");
+        DrawHeader();
+        ImGui.Separator();
+        DrawFeatureTabs();
+    }
 
-        if (ImGui.Button("Show Settings"))
+    private void DrawHeader()
+    {
+        var selectedVenue = DrawVenueSelector();
+
+        ImGui.SameLine();
+        if (ImGui.Button("Settings"))
         {
             plugin.ToggleConfigUi();
         }
 
-        ImGui.Spacing();
-
-        // Normally a BeginChild() would have to be followed by an unconditional EndChild(),
-        // ImRaii takes care of this after the scope ends.
-        // This works for all ImGui functions that require specific handling, examples are BeginTable() or Indent().
-        using (var child = ImRaii.Child("SomeChildWithAScrollbar", Vector2.Zero, true))
+        if (selectedVenue is null)
         {
-            // Check if this child is drawing
-            if (child.Success)
+            ImGui.Spacing();
+            ImGui.TextWrapped("No venue connection is configured. Open Settings to add a venue ID, device ID, and refresh token.");
+            return;
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Authenticate"))
+        {
+            plugin.ConnectVenue(selectedVenue);
+        }
+
+        var snapshot = plugin.Authentication.GetSnapshot(selectedVenue);
+        DrawConnectionStatus(snapshot);
+    }
+
+    private VenueConnectionConfiguration? DrawVenueSelector()
+    {
+        var configuration = plugin.Configuration;
+        var selected = configuration.GetSelectedVenue();
+        var preview = selected?.DisplayLabel ?? "Select venue";
+
+        ImGui.SetNextItemWidth(260 * ImGuiHelpers.GlobalScale);
+        if (ImGui.BeginCombo("##VenueSelector", preview))
+        {
+            foreach (var venue in configuration.VenueConnections)
             {
-                //ImGui.SetNextItemWidth(200 * ImGuiHelpers.GlobalScale);
-                var iconPath = Path.Combine(Plugin.PluginInterface.AssemblyLocation.Directory?.FullName!, @"Assets\icon.png");
-                var icon = Plugin.TextureProvider.GetFromFile(iconPath).GetWrapOrDefault();
-                if (icon != null)
+                var isSelected = selected?.ProfileId == venue.ProfileId;
+                if (ImGui.Selectable(venue.DisplayLabel, isSelected))
                 {
-                    using (ImRaii.PushIndent(0f))
-                    {
-                        ImGui.Image(icon.Handle, new Vector2(200, 200) * ImGuiHelpers.GlobalScale);
-                    }
-                }
-                else
-                {
-                    ImGui.Text("Image not found.");
+                    configuration.SelectedVenueProfileId = venue.ProfileId;
+                    configuration.Save();
+                    selected = venue;
                 }
 
-                // Example for other services that Dalamud provides.
-                // PlayerState provides a wrapper filled with information about the player character.
-
-                var playerState = Plugin.PlayerState;
-                if (!playerState.IsLoaded)
+                if (isSelected)
                 {
-                    ImGui.Text("Our local player is currently not logged in.");
-                    return;
-                }
-                
-                if (!playerState.ClassJob.IsValid)
-                {
-                    ImGui.Text("Our current job is currently not valid.");
-                    return;
-                }
-                
-                ImGui.AlignTextToFramePadding();
-                ImGui.Text($"Current job:");
-                
-                // Scaling hardcoded pixel values is important, as otherwise users with HUD scales above or below 100%
-                // won't be able to see everything.
-                ImGui.SameLine(120 * ImGuiHelpers.GlobalScale);
-                
-                // Get the icon id from a known offset + the class jobs id
-                var jobIconId = 62100 + playerState.ClassJob.RowId;
-                var iconTexture = Plugin.TextureProvider.GetFromGameIcon(new GameIconLookup(jobIconId)).GetWrapOrEmpty();
-                ImGui.Image(iconTexture.Handle, new Vector2(28, 28) * ImGuiHelpers.GlobalScale);
-                
-                ImGui.SameLine();
-                
-                // If you want to see the Macro representation of this SeString use `.ToMacroString()`
-                // More info about SeStrings: https://dalamud.dev/plugin-development/sestring/
-                ImGui.Text(playerState.ClassJob.Value.Abbreviation.ToString());
-                
-                ImGui.SameLine();
-                ImGui.Text($" [Level {playerState.Level}]");
-                
-                // Example for querying Lumina, getting the name of our current area.
-                var territoryId = Plugin.ClientState.TerritoryType;
-                if (Plugin.DataManager.GetExcelSheet<TerritoryType>().TryGetRow(territoryId, out var territoryRow))
-                {
-                    ImGui.Text($"Current location:");
-                    ImGui.SameLine(120 * ImGuiHelpers.GlobalScale);
-                    ImGui.Text(territoryRow.PlaceName.Value.Name.ToString());
-                }
-                else
-                {
-                    ImGui.Text("Invalid territory.");
+                    ImGui.SetItemDefaultFocus();
                 }
             }
+
+            ImGui.EndCombo();
         }
+
+        return selected;
+    }
+
+    private void DrawConnectionStatus(AuthenticationSnapshot snapshot)
+    {
+        ImGui.Spacing();
+
+        var color = snapshot.Status switch
+        {
+            AuthenticationStatus.Connected => new Vector4(0.35f, 0.85f, 0.45f, 1f),
+            AuthenticationStatus.Connecting => new Vector4(0.35f, 0.7f, 1f, 1f),
+            AuthenticationStatus.WaitingForPlayer => new Vector4(1f, 0.8f, 0.35f, 1f),
+            AuthenticationStatus.Failed => new Vector4(1f, 0.4f, 0.4f, 1f),
+            AuthenticationStatus.Expired => new Vector4(1f, 0.65f, 0.3f, 1f),
+            _ => new Vector4(0.65f, 0.65f, 0.65f, 1f),
+        };
+
+        ImGui.TextColored(color, snapshot.Message);
+
+        if (snapshot.AccessTokenExpiresAt is { } expiresAt)
+        {
+            ImGui.SameLine();
+            ImGui.TextDisabled($"Token expires {expiresAt.ToLocalTime():t}");
+        }
+    }
+
+    private void DrawFeatureTabs()
+    {
+        if (!ImGui.BeginTabBar("PartyPulseFeatureTabs"))
+        {
+            return;
+        }
+
+        DrawOverviewTab();
+        DrawPlaceholderTab("VIP", "VIP purchases, Discord identity, role automation, and payout totals will live here.");
+        DrawPlaceholderTab("Staff", "Clock-in state, staff tools, macros, timers, and Party Finder controls will live here.");
+        DrawPlaceholderTab("Payout", "Manager payout calculations, adjustments, finalization, and payment actions will live here.");
+        DrawPlaceholderTab("Bar", "Bar sales, gambashots, jackpots, and buyout tracking will live here.");
+        DrawPlaceholderTab("Games", "Venue-wide game state, rolls, host controls, and timers will live here.");
+        DrawPlaceholderTab("Greeter", "Target-aware greeting actions and VIP-specific greeting selection will live here.");
+
+        ImGui.EndTabBar();
+    }
+
+    private void DrawOverviewTab()
+    {
+        if (!ImGui.BeginTabItem("Overview"))
+        {
+            return;
+        }
+
+        var selectedVenue = plugin.Configuration.GetSelectedVenue();
+        if (plugin.IdentityProvider.TryGetCurrent(out var identity, out var reason))
+        {
+            ImGui.TextUnformatted($"Character: {identity!.DisplayName}");
+        }
+        else
+        {
+            ImGui.TextDisabled(reason);
+        }
+
+        ImGui.TextUnformatted($"API: {plugin.Configuration.ApiBaseUrl}");
+        ImGui.TextUnformatted($"Venue: {selectedVenue?.DisplayLabel ?? "Not configured"}");
+        ImGui.TextWrapped("The plugin foundation is connected to the existing /api/v1/auth/refresh contract. Future feature modules should obtain a valid access token through AuthenticationManager before making authorized API calls.");
+
+        ImGui.EndTabItem();
+    }
+
+    private static void DrawPlaceholderTab(string title, string description)
+    {
+        if (!ImGui.BeginTabItem(title))
+        {
+            return;
+        }
+
+        ImGui.TextWrapped(description);
+        ImGui.Spacing();
+        ImGui.TextDisabled("Foundation placeholder — no business operation is sent yet.");
+        ImGui.EndTabItem();
     }
 }

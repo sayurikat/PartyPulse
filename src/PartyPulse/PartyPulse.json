@@ -1,17 +1,18 @@
 {
-    "Author": "Sayurikat",
-    "Name": "Party Pulse",
-    "Punchline": "Party Tools for FFXIV Venues.", //A short one-liner that shows up in /xlplugins.
-    "Description": "Making it easier to attend venue games and manage venue.\n/pulse help", //A description that shows up in /xlplugins. List any major slash-command(s).
-    "ApplicableVersion": "any",
-    "Tags": [
-        "venue",
-        "nightlife",
-        "manager",
-        "party",
-        "games",
-        "staff",
-        "vip",
-        "bar"
-    ]
+  "Author": "Sayurikat",
+  "Name": "Party Pulse",
+  "Punchline": "Party tools for FFXIV venues.",
+  "Description": "Makes it easier to attend venue games and manage venue operations. Use /pulse to open Party Pulse.",
+  "ApplicableVersion": "any",
+  "RepoUrl": "https://github.com/sayurikat/PartyPulse",
+  "Tags": [
+    "venue",
+    "nightlife",
+    "manager",
+    "party",
+    "games",
+    "staff",
+    "vip",
+    "bar"
+  ]
 }
