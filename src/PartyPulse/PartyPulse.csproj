@@ -5,6 +5,7 @@
     <PackageProjectUrl>https://github.com/sayurikat/PartyPulse</PackageProjectUrl>
     <PackageLicenseExpression>AGPL-3.0-or-later</PackageLicenseExpression>
     <IsPackable>false</IsPackable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
     <ItemGroup>
         <Content Include="Assets\icon.png">

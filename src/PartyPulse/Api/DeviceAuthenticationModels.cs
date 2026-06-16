@@ -3,14 +3,14 @@ using System;
 namespace PartyPulse.Api;
 
 public sealed record RedeemInviteRequest(
-    int VenueId,
+    string VenueCode,
     string CharacterName,
     string WorldName,
     string DeviceName,
     string InviteCode);
 
 public sealed record RecoverAccountRequest(
-    int VenueId,
+    string VenueCode,
     string CharacterName,
     string WorldName,
     string DeviceName,

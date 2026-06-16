@@ -6,6 +6,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using PartyPulse.Models;
 
 namespace PartyPulse.Api;
 
@@ -57,6 +58,35 @@ public sealed class PartyPulseApiClient : IDisposable
         baseUri = new Uri(parsed.AbsoluteUri.TrimEnd('/') + "/", UriKind.Absolute);
         error = string.Empty;
         return true;
+    }
+
+    public Task<ApiResult<PublicVenueResponse>> GetPublicVenueByCodeAsync(
+        Uri baseUri,
+        string venueCode,
+        CancellationToken cancellationToken)
+    {
+        var normalizedCode = VenueConnectionConfiguration.NormalizeVenueCode(venueCode);
+        var path = $"api/v1/venues/code/{Uri.EscapeDataString(normalizedCode)}";
+        return SendJsonAsync<PublicVenueResponse>(
+            new HttpRequestMessage(HttpMethod.Get, new Uri(baseUri, path)),
+            ValidatePublicVenueResponse,
+            cancellationToken);
+    }
+
+    public Task<ApiResult<PublicVenueResponse>> GetPublicVenueByAddressAsync(
+        Uri baseUri,
+        VenueAddress address,
+        CancellationToken cancellationToken)
+    {
+        var path = "api/v1/venues/address" +
+            $"?worldName={Uri.EscapeDataString(address.WorldName)}" +
+            $"&cityName={Uri.EscapeDataString(address.CityName)}" +
+            $"&ward={address.Ward}" +
+            $"&plot={address.Plot}";
+        return SendJsonAsync<PublicVenueResponse>(
+            new HttpRequestMessage(HttpMethod.Get, new Uri(baseUri, path)),
+            ValidatePublicVenueResponse,
+            cancellationToken);
     }
 
     public Task<ApiResult<RefreshTokenResponse>> RefreshAsync(
@@ -186,6 +216,11 @@ public sealed class PartyPulseApiClient : IDisposable
             }
         }
     }
+
+    private static bool ValidatePublicVenueResponse(PublicVenueResponse payload) =>
+        payload.VenueId > 0 &&
+        VenueConnectionConfiguration.TryNormalizeVenueCode(payload.VenueCode, out _) &&
+        !string.IsNullOrWhiteSpace(payload.VenueName);
 
     private static bool ValidateRefreshResponse(RefreshTokenResponse payload) =>
         !string.IsNullOrWhiteSpace(payload.AccessToken) &&

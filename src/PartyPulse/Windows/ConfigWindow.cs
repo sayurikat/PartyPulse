@@ -7,6 +7,7 @@ using Dalamud.Interface.Windowing;
 using PartyPulse.Api;
 using PartyPulse.Authentication;
 using PartyPulse.Models;
+using PartyPulse.Services;
 
 namespace PartyPulse.Windows;
 
@@ -16,6 +17,7 @@ public sealed class ConfigWindow : Window, IDisposable
     private readonly Configuration configuration;
     private readonly Dictionary<Guid, string> inviteCodes = [];
     private readonly Dictionary<Guid, string> recoveryCodes = [];
+    private string venueCodeInput = string.Empty;
     private bool dirty;
 
     public ConfigWindow(Plugin plugin)
@@ -26,7 +28,7 @@ public sealed class ConfigWindow : Window, IDisposable
 
         SizeConstraints = new WindowSizeConstraints
         {
-            MinimumSize = new Vector2(600, 500),
+            MinimumSize = new Vector2(620, 560),
             MaximumSize = new Vector2(float.MaxValue, float.MaxValue),
         };
     }
@@ -57,6 +59,12 @@ public sealed class ConfigWindow : Window, IDisposable
         ImGui.Spacing();
         DrawPlayerStatus();
         ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+        DrawAddVenue();
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
         DrawVenueConnections();
         ImGui.Spacing();
         DrawFooter();
@@ -80,7 +88,7 @@ public sealed class ConfigWindow : Window, IDisposable
         }
 
         var autoConnect = configuration.AutoConnect;
-        if (ImGui.Checkbox("Authenticate configured venues automatically after login", ref autoConnect))
+        if (ImGui.Checkbox("Authenticate registered staff venues automatically after login", ref autoConnect))
         {
             configuration.AutoConnect = autoConnect;
             dirty = true;
@@ -107,10 +115,52 @@ public sealed class ConfigWindow : Window, IDisposable
         }
     }
 
+    private void DrawAddVenue()
+    {
+        ImGui.TextUnformatted("Add public venue");
+        ImGui.TextWrapped("Visitors only need the public venue code or the venue's in-game housing location. Staff can redeem an invite on the same saved venue afterwards.");
+
+        ImGui.TextUnformatted("Venue code");
+        ImGui.SetNextItemWidth(260 * ImGuiHelpers.GlobalScale);
+        ImGui.InputText("##VenueCode", ref venueCodeInput, 32);
+        ImGui.SameLine();
+        if (ImGui.Button("Add by code"))
+        {
+            plugin.AddVenueByCode(venueCodeInput);
+        }
+
+        if (plugin.LocationProvider.TryGetCurrentHousingAddress(out var address, out var reason))
+        {
+            if (ImGui.Button($"Add venue for {address!.DisplayText}"))
+            {
+                plugin.AddVenueAtCurrentLocation();
+            }
+        }
+        else
+        {
+            ImGui.TextDisabled(reason);
+        }
+
+        var lookup = plugin.VenueDirectory.GetSnapshot();
+        var lookupStatus = lookup.Status switch
+        {
+            VenueDirectoryStatus.LookingUp => AuthenticationStatus.Connecting,
+            VenueDirectoryStatus.Added => AuthenticationStatus.Connected,
+            VenueDirectoryStatus.Failed => AuthenticationStatus.Failed,
+            _ => AuthenticationStatus.Disconnected,
+        };
+        DrawStatusText(lookup.Message, lookupStatus);
+    }
+
     private void DrawVenueConnections()
     {
-        ImGui.TextUnformatted("Venue connections");
-        ImGui.TextWrapped("Create one profile per venue. Register the first device with an owner-issued invite code. Recovery codes revoke every other device for that venue user.");
+        ImGui.TextUnformatted("Saved venues");
+
+        if (configuration.VenueConnections.Count == 0)
+        {
+            ImGui.TextDisabled("No venues have been added yet.");
+            return;
+        }
 
         var removeIndex = -1;
         for (var index = 0; index < configuration.VenueConnections.Count; index++)
@@ -120,7 +170,9 @@ public sealed class ConfigWindow : Window, IDisposable
 
             if (ImGui.CollapsingHeader(venue.DisplayLabel, ImGuiTreeNodeFlags.DefaultOpen))
             {
-                DrawVenueIdentityFields(venue);
+                DrawPublicVenueDetails(venue);
+                ImGui.Spacing();
+                DrawLocalVenueFields(venue);
                 ImGui.Spacing();
 
                 if (venue.IsRegistered)
@@ -136,25 +188,28 @@ public sealed class ConfigWindow : Window, IDisposable
                 DrawRecovery(venue);
                 ImGui.Spacing();
 
-                var snapshot = plugin.Authentication.GetSnapshot(venue);
-                DrawStatusText(snapshot.Message, snapshot.Status);
-                if (snapshot.AccessTokenExpiresAt is { } expiresAt)
-                {
-                    ImGui.TextDisabled($"Access token expires: {expiresAt.ToLocalTime():g}");
-                }
-
-                if (venue.IsRegistered && ImGui.Button("Save and authenticate"))
-                {
-                    SaveAndSelect(venue);
-                    plugin.ConnectVenue(venue);
-                }
-
                 if (venue.IsRegistered)
                 {
+                    var snapshot = plugin.Authentication.GetSnapshot(venue);
+                    DrawStatusText(snapshot.Message, snapshot.Status);
+                    if (snapshot.AccessTokenExpiresAt is { } expiresAt)
+                    {
+                        ImGui.TextDisabled($"Access token expires: {expiresAt.ToLocalTime():g}");
+                    }
+
+                    if (ImGui.Button("Save and authenticate"))
+                    {
+                        SaveAndSelect(venue);
+                        plugin.ConnectVenue(venue);
+                    }
                     ImGui.SameLine();
                 }
+                else
+                {
+                    DrawStatusText("Visitor mode — public venue information only.", AuthenticationStatus.Disconnected);
+                }
 
-                if (ImGui.Button("Remove profile"))
+                if (ImGui.Button("Remove venue"))
                 {
                     removeIndex = index;
                 }
@@ -175,31 +230,22 @@ public sealed class ConfigWindow : Window, IDisposable
             configuration.Save();
             dirty = false;
         }
-
-        if (ImGui.Button("Add venue connection"))
-        {
-            var venue = new VenueConnectionConfiguration();
-            configuration.VenueConnections.Add(venue);
-            configuration.SelectedVenueProfileId = venue.ProfileId;
-            dirty = true;
-        }
     }
 
-    private void DrawVenueIdentityFields(VenueConnectionConfiguration venue)
+    private static void DrawPublicVenueDetails(VenueConnectionConfiguration venue)
+    {
+        ImGui.TextUnformatted(venue.VenueName.Length > 0 ? venue.VenueName : "Unknown venue");
+        ImGui.TextDisabled(venue.VenueCode.Length > 0 ? venue.VenueCode : "Public code not loaded");
+        ImGui.TextWrapped(venue.AddressDisplay);
+    }
+
+    private void DrawLocalVenueFields(VenueConnectionConfiguration venue)
     {
         var displayName = venue.DisplayName;
         ImGui.SetNextItemWidth(260 * ImGuiHelpers.GlobalScale);
-        if (ImGui.InputText("Display name", ref displayName, 80))
+        if (ImGui.InputText("Local alias", ref displayName, 80))
         {
             venue.DisplayName = displayName;
-            dirty = true;
-        }
-
-        var venueId = venue.VenueId;
-        ImGui.SetNextItemWidth(160 * ImGuiHelpers.GlobalScale);
-        if (ImGui.InputInt("Venue ID", ref venueId))
-        {
-            venue.VenueId = Math.Max(0, venueId);
             dirty = true;
         }
 
@@ -212,10 +258,9 @@ public sealed class ConfigWindow : Window, IDisposable
         }
     }
 
-    private void DrawRegisteredDevice(VenueConnectionConfiguration venue)
+    private static void DrawRegisteredDevice(VenueConnectionConfiguration venue)
     {
-        ImGui.TextUnformatted($"Registered device ID: {venue.DeviceId}");
-        ImGui.TextDisabled($"Stored refresh token length: {venue.RefreshToken.Length}");
+        ImGui.TextUnformatted($"Registered staff device ID: {venue.DeviceId}");
         if (venue.RefreshTokenUpdatedAt is { } updatedAt)
         {
             ImGui.TextDisabled($"Refresh token last updated: {updatedAt.ToLocalTime():g}");
@@ -224,8 +269,8 @@ public sealed class ConfigWindow : Window, IDisposable
 
     private void DrawInviteRegistration(VenueConnectionConfiguration venue)
     {
-        ImGui.TextUnformatted("First-time registration");
-        ImGui.TextWrapped("Enter the one-time invite code supplied by the venue owner or server administrator.");
+        ImGui.TextUnformatted("Staff registration (optional)");
+        ImGui.TextWrapped("Enter a one-time invite code to upgrade this saved visitor venue into an authenticated staff venue on this device.");
 
         var code = inviteCodes.GetValueOrDefault(venue.ProfileId, string.Empty);
         ImGui.SetNextItemWidth(-1);
@@ -234,7 +279,7 @@ public sealed class ConfigWindow : Window, IDisposable
             inviteCodes[venue.ProfileId] = code;
         }
 
-        if (ImGui.Button("Register device with invite"))
+        if (ImGui.Button("Register staff device with invite"))
         {
             SaveAndSelect(venue);
             plugin.RedeemInvite(venue, code);

@@ -48,18 +48,32 @@ public sealed class MainWindow : Window, IDisposable
         if (selectedVenue is null)
         {
             ImGui.Spacing();
-            ImGui.TextWrapped("No venue connection is configured. Open Settings to add a venue ID, device ID, and refresh token.");
+            ImGui.TextWrapped("No venue is saved. Open Settings or use /pulse addvenue PULSE-XXXXXX.");
             return;
         }
 
-        ImGui.SameLine();
-        if (ImGui.Button("Authenticate"))
+        if (selectedVenue.IsRegistered)
         {
-            plugin.ConnectVenue(selectedVenue);
+            ImGui.SameLine();
+            if (ImGui.Button("Authenticate"))
+            {
+                plugin.ConnectVenue(selectedVenue);
+            }
         }
 
-        var snapshot = plugin.Authentication.GetSnapshot(selectedVenue);
-        DrawConnectionStatus(snapshot);
+        ImGui.Spacing();
+        ImGui.TextUnformatted(selectedVenue.VenueName.Length > 0 ? selectedVenue.VenueName : selectedVenue.DisplayLabel);
+        ImGui.TextWrapped(selectedVenue.AddressDisplay);
+        ImGui.TextDisabled(selectedVenue.VenueCode);
+
+        if (selectedVenue.IsRegistered)
+        {
+            DrawConnectionStatus(plugin.Authentication.GetSnapshot(selectedVenue));
+        }
+        else
+        {
+            ImGui.TextDisabled("Visitor mode — public venue information only.");
+        }
     }
 
     private VenueConnectionConfiguration? DrawVenueSelector()
@@ -93,7 +107,7 @@ public sealed class MainWindow : Window, IDisposable
         return selected;
     }
 
-    private void DrawConnectionStatus(AuthenticationSnapshot snapshot)
+    private static void DrawConnectionStatus(AuthenticationSnapshot snapshot)
     {
         ImGui.Spacing();
 
@@ -151,9 +165,10 @@ public sealed class MainWindow : Window, IDisposable
             ImGui.TextDisabled(reason);
         }
 
-        ImGui.TextUnformatted($"API: {plugin.Configuration.ApiBaseUrl}");
-        ImGui.TextUnformatted($"Venue: {selectedVenue?.DisplayLabel ?? "Not configured"}");
-        ImGui.TextWrapped("The plugin foundation supports invite registration, account recovery, refresh-token rotation confirmation, and authenticated requests. Future feature modules should obtain a valid access token through AuthenticationManager before calling their API endpoints.");
+        ImGui.TextUnformatted($"Venue: {selectedVenue?.VenueName ?? "Not configured"}");
+        ImGui.TextUnformatted($"Address: {selectedVenue?.AddressDisplay ?? "Not configured"}");
+        ImGui.TextUnformatted($"Access: {(selectedVenue?.IsRegistered == true ? "Authenticated staff" : "Visitor")}");
+        ImGui.TextWrapped("Public venue data is available to visitors. Staff features use the same saved venue after an invite or recovery code registers this device.");
 
         ImGui.EndTabItem();
     }

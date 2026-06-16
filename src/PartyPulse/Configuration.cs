@@ -9,7 +9,7 @@ namespace PartyPulse;
 [Serializable]
 public sealed class Configuration : IPluginConfiguration
 {
-    public int Version { get; set; } = 1;
+    public int Version { get; set; } = 2;
 
     public bool IsConfigWindowMovable { get; set; } = true;
 
@@ -35,6 +35,17 @@ public sealed class Configuration : IPluginConfiguration
                 changed = true;
             }
 
+            venue.VenueCode ??= string.Empty;
+            var normalizedVenueCode = VenueConnectionConfiguration.NormalizeVenueCode(venue.VenueCode);
+            if (!string.Equals(venue.VenueCode, normalizedVenueCode, StringComparison.Ordinal))
+            {
+                venue.VenueCode = normalizedVenueCode;
+                changed = true;
+            }
+
+            venue.VenueName ??= string.Empty;
+            venue.AddressWorldName ??= string.Empty;
+            venue.AddressCityName ??= string.Empty;
             venue.DisplayName ??= string.Empty;
             venue.DeviceName ??= string.Empty;
             venue.RefreshToken ??= string.Empty;
@@ -51,9 +62,9 @@ public sealed class Configuration : IPluginConfiguration
             }
         }
 
-        if (Version < 1)
+        if (Version < 2)
         {
-            Version = 1;
+            Version = 2;
             changed = true;
         }
 

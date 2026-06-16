@@ -2,7 +2,7 @@ using System;
 namespace PartyPulse.Api;
 
 public sealed record RefreshTokenRequest(
-    int VenueId,
+    string VenueCode,
     string CharacterName,
     string WorldName,
     int DeviceId,

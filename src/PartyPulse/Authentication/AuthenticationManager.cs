@@ -139,7 +139,7 @@ public sealed class AuthenticationManager : IDisposable
         {
             var attemptAt = BeginConnecting(venue, $"Authenticating {identity.DisplayName}...");
             var request = new RefreshTokenRequest(
-                venue.VenueId,
+                VenueConnectionConfiguration.NormalizeVenueCode(venue.VenueCode),
                 identity.CharacterName,
                 identity.WorldName,
                 venue.DeviceId,
@@ -315,7 +315,7 @@ public sealed class AuthenticationManager : IDisposable
                 result = await apiClient.RedeemInviteAsync(
                     baseUri!,
                     new RedeemInviteRequest(
-                        venue.VenueId,
+                        VenueConnectionConfiguration.NormalizeVenueCode(venue.VenueCode),
                         identity.CharacterName,
                         identity.WorldName,
                         venue.DeviceName.Trim(),
@@ -327,7 +327,7 @@ public sealed class AuthenticationManager : IDisposable
                 result = await apiClient.RecoverAsync(
                     baseUri!,
                     new RecoverAccountRequest(
-                        venue.VenueId,
+                        VenueConnectionConfiguration.NormalizeVenueCode(venue.VenueCode),
                         identity.CharacterName,
                         identity.WorldName,
                         venue.DeviceName.Trim(),
@@ -358,9 +358,10 @@ public sealed class AuthenticationManager : IDisposable
                 cancellationToken);
 
             log.Information(
-                "{Operation} completed for venue profile {ProfileId}, venue {VenueId}, device {DeviceId}, character {CharacterName} @ {WorldName}.",
+                "{Operation} completed for venue profile {ProfileId}, venue {VenueCode} ({VenueId}), device {DeviceId}, character {CharacterName} @ {WorldName}.",
                 isInvite ? "Invite redemption" : "Account recovery",
                 venue.ProfileId,
+                venue.VenueCode,
                 venue.VenueId,
                 venue.DeviceId,
                 identity.CharacterName,
