@@ -126,6 +126,30 @@ public sealed class PartyPulseApiClient : IDisposable
             ValidateDeviceAuthenticationResponse,
             cancellationToken);
 
+    public Task<ApiResult<DeviceAuthenticationResponse>> RedeemDevicePairingCodeAsync(
+        Uri baseUri,
+        RedeemDevicePairingCodeRequest request,
+        CancellationToken cancellationToken) =>
+        SendJsonAsync<DeviceAuthenticationResponse>(
+            new HttpRequestMessage(HttpMethod.Post, new Uri(baseUri, "api/v1/auth/device/redeem"))
+            {
+                Content = JsonContent.Create(request, options: JsonOptions),
+            },
+            ValidateDeviceAuthenticationResponse,
+            cancellationToken);
+
+    public Task<ApiResult<LinkCurrentCharacterResponse>> LinkCurrentCharacterAsync(
+        Uri baseUri,
+        LinkCurrentCharacterRequest request,
+        CancellationToken cancellationToken) =>
+        SendJsonAsync<LinkCurrentCharacterResponse>(
+            new HttpRequestMessage(HttpMethod.Post, new Uri(baseUri, "api/v1/auth/character/link"))
+            {
+                Content = JsonContent.Create(request, options: JsonOptions),
+            },
+            static payload => payload.CharacterId > 0,
+            cancellationToken);
+
     public Task<ApiResult<AuthenticationConfirmationResponse>> ConfirmAuthenticationAsync(
         Uri baseUri,
         string accessToken,
@@ -216,6 +240,59 @@ public sealed class PartyPulseApiClient : IDisposable
             ValidateSetVenueUserPermissionsResponse,
             cancellationToken);
 
+    public Task<ApiResult<SelfServiceViewResponse>> GetSelfServiceAsync(
+        Uri baseUri,
+        string accessToken,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<SelfServiceViewResponse>(
+            baseUri,
+            HttpMethod.Get,
+            "api/v1/self",
+            accessToken,
+            null,
+            ValidateSelfServiceViewResponse,
+            cancellationToken);
+
+    public Task<ApiResult<SelfServiceOperationResponse>> UnlinkSelfCharacterAsync(
+        Uri baseUri,
+        string accessToken,
+        int characterId,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<SelfServiceOperationResponse>(
+            baseUri,
+            HttpMethod.Delete,
+            $"api/v1/self/characters/{characterId}",
+            accessToken,
+            null,
+            static payload => payload.Success,
+            cancellationToken);
+
+    public Task<ApiResult<DevicePairingCodeResponse>> CreateDevicePairingCodeAsync(
+        Uri baseUri,
+        string accessToken,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<DevicePairingCodeResponse>(
+            baseUri,
+            HttpMethod.Post,
+            "api/v1/self/device-pairing-code",
+            accessToken,
+            null,
+            static payload => !string.IsNullOrWhiteSpace(payload.PairingCode) && payload.ExpiresAt > DateTimeOffset.UtcNow,
+            cancellationToken);
+
+    public Task<ApiResult<SelfServiceOperationResponse>> LeaveVenueAsync(
+        Uri baseUri,
+        string accessToken,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<SelfServiceOperationResponse>(
+            baseUri,
+            HttpMethod.Delete,
+            "api/v1/self/membership",
+            accessToken,
+            null,
+            static payload => payload.Success,
+            cancellationToken);
+
     public Task<ApiResult<CreateRecoveryCodeResponse>> CreateVenueUserRecoveryCodeAsync(
         Uri baseUri,
         string accessToken,
@@ -229,6 +306,14 @@ public sealed class PartyPulseApiClient : IDisposable
             null,
             ValidateCreateRecoveryCodeResponse,
             cancellationToken);
+
+    private static bool ValidateSelfServiceViewResponse(SelfServiceViewResponse payload) =>
+        payload.Characters is not null &&
+        payload.Characters.All(static character =>
+            character is not null &&
+            character.CharacterId > 0 &&
+            !string.IsNullOrWhiteSpace(character.CharacterName) &&
+            !string.IsNullOrWhiteSpace(character.WorldName));
 
     private static bool ValidateVenueUserManagementViewResponse(VenueUserManagementViewResponse payload) =>
         payload.Capabilities is not null &&

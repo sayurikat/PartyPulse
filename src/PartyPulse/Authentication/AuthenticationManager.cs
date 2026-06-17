@@ -185,7 +185,7 @@ public sealed class AuthenticationManager : IDisposable
         string inviteCode,
         string apiBaseUrl,
         CancellationToken cancellationToken) =>
-        BootstrapAsync(venue, identity, inviteCode, apiBaseUrl, true, cancellationToken);
+        BootstrapAsync(venue, identity, inviteCode, apiBaseUrl, BootstrapKind.Invite, cancellationToken);
 
     public Task<ApiResult<DeviceAuthenticationResponse>> RecoverAsync(
         VenueConnectionConfiguration venue,
@@ -193,7 +193,68 @@ public sealed class AuthenticationManager : IDisposable
         string recoveryCode,
         string apiBaseUrl,
         CancellationToken cancellationToken) =>
-        BootstrapAsync(venue, identity, recoveryCode, apiBaseUrl, false, cancellationToken);
+        BootstrapAsync(venue, identity, recoveryCode, apiBaseUrl, BootstrapKind.Recovery, cancellationToken);
+
+    public Task<ApiResult<DeviceAuthenticationResponse>> RedeemPairingCodeAsync(
+        VenueConnectionConfiguration venue,
+        PlayerIdentity identity,
+        string pairingCode,
+        string apiBaseUrl,
+        CancellationToken cancellationToken) =>
+        BootstrapAsync(venue, identity, pairingCode, apiBaseUrl, BootstrapKind.Pairing, cancellationToken);
+
+    public async Task<ApiResult<LinkCurrentCharacterResponse>> LinkCurrentCharacterAsync(
+        VenueConnectionConfiguration venue,
+        PlayerIdentity identity,
+        string apiBaseUrl,
+        CancellationToken cancellationToken)
+    {
+        if (!venue.TryValidateForRefresh(out var validationError))
+        {
+            var failure = ValidationFailure(validationError);
+            SetFailure(venue.ProfileId, failure);
+            return ApiResult<LinkCurrentCharacterResponse>.Failed(failure);
+        }
+
+        if (!TryGetBaseUri(apiBaseUrl, venue.ProfileId, out var baseUri, out var baseUriFailure))
+        {
+            return ApiResult<LinkCurrentCharacterResponse>.Failed(baseUriFailure!);
+        }
+
+        ApiResult<LinkCurrentCharacterResponse> linkResult;
+        var gate = GetAuthenticationLock(venue);
+        await gate.WaitAsync(cancellationToken);
+        try
+        {
+            linkResult = await apiClient.LinkCurrentCharacterAsync(
+                baseUri!,
+                new LinkCurrentCharacterRequest(
+                    VenueConnectionConfiguration.NormalizeVenueCode(venue.VenueCode),
+                    identity.CharacterName,
+                    identity.WorldName,
+                    venue.DeviceId,
+                    venue.RefreshToken.Trim()),
+                cancellationToken);
+
+            if (!linkResult.Success)
+            {
+                SetFailure(venue.ProfileId, linkResult.Failure!);
+                return linkResult;
+            }
+        }
+        finally
+        {
+            gate.Release();
+        }
+
+        var refreshResult = await RefreshAsync(venue, identity, apiBaseUrl, cancellationToken);
+        if (!refreshResult.Success)
+        {
+            return ApiResult<LinkCurrentCharacterResponse>.Failed(refreshResult.Failure!);
+        }
+
+        return linkResult;
+    }
 
     public async Task<AccessTokenResult> EnsureAccessTokenAsync(
         VenueConnectionConfiguration venue,
@@ -279,7 +340,7 @@ public sealed class AuthenticationManager : IDisposable
         PlayerIdentity identity,
         string code,
         string apiBaseUrl,
-        bool isInvite,
+        BootstrapKind kind,
         CancellationToken cancellationToken)
     {
         if (!venue.TryValidateForEnrollment(out var validationError))
@@ -291,7 +352,13 @@ public sealed class AuthenticationManager : IDisposable
 
         if (string.IsNullOrWhiteSpace(code))
         {
-            var failure = ValidationFailure(isInvite ? "An invite code is required." : "A recovery code is required.");
+            var failure = ValidationFailure(kind switch
+            {
+                BootstrapKind.Invite => "An invite code is required.",
+                BootstrapKind.Recovery => "A recovery code is required.",
+                BootstrapKind.Pairing => "A device pairing code is required.",
+                _ => "A one-time code is required."
+            });
             SetFailure(venue.ProfileId, failure);
             return ApiResult<DeviceAuthenticationResponse>.Failed(failure);
         }
@@ -306,13 +373,18 @@ public sealed class AuthenticationManager : IDisposable
 
         try
         {
-            var operation = isInvite ? "Registering device" : "Recovering account";
+            var operation = kind switch
+            {
+                BootstrapKind.Invite => "Registering device",
+                BootstrapKind.Recovery => "Recovering account",
+                BootstrapKind.Pairing => "Pairing device",
+                _ => "Registering device"
+            };
             var attemptAt = BeginConnecting(venue, $"{operation} for {identity.DisplayName}...");
 
-            ApiResult<DeviceAuthenticationResponse> result;
-            if (isInvite)
+            ApiResult<DeviceAuthenticationResponse> result = kind switch
             {
-                result = await apiClient.RedeemInviteAsync(
+                BootstrapKind.Invite => await apiClient.RedeemInviteAsync(
                     baseUri!,
                     new RedeemInviteRequest(
                         VenueConnectionConfiguration.NormalizeVenueCode(venue.VenueCode),
@@ -320,11 +392,8 @@ public sealed class AuthenticationManager : IDisposable
                         identity.WorldName,
                         venue.DeviceName.Trim(),
                         code.Trim()),
-                    cancellationToken);
-            }
-            else
-            {
-                result = await apiClient.RecoverAsync(
+                    cancellationToken),
+                BootstrapKind.Recovery => await apiClient.RecoverAsync(
                     baseUri!,
                     new RecoverAccountRequest(
                         VenueConnectionConfiguration.NormalizeVenueCode(venue.VenueCode),
@@ -332,8 +401,18 @@ public sealed class AuthenticationManager : IDisposable
                         identity.WorldName,
                         venue.DeviceName.Trim(),
                         code.Trim()),
-                    cancellationToken);
-            }
+                    cancellationToken),
+                BootstrapKind.Pairing => await apiClient.RedeemDevicePairingCodeAsync(
+                    baseUri!,
+                    new RedeemDevicePairingCodeRequest(
+                        VenueConnectionConfiguration.NormalizeVenueCode(venue.VenueCode),
+                        identity.CharacterName,
+                        identity.WorldName,
+                        venue.DeviceName.Trim(),
+                        code.Trim()),
+                    cancellationToken),
+                _ => throw new ArgumentOutOfRangeException(nameof(kind))
+            };
 
             if (!result.Success || result.Value is null)
             {
@@ -359,7 +438,13 @@ public sealed class AuthenticationManager : IDisposable
 
             log.Information(
                 "{Operation} completed for venue profile {ProfileId}, venue {VenueCode} ({VenueId}), device {DeviceId}, character {CharacterName} @ {WorldName}.",
-                isInvite ? "Invite redemption" : "Account recovery",
+                kind switch
+                {
+                    BootstrapKind.Invite => "Invite redemption",
+                    BootstrapKind.Recovery => "Account recovery",
+                    BootstrapKind.Pairing => "Device pairing",
+                    _ => "Device registration"
+                },
                 venue.ProfileId,
                 venue.VenueCode,
                 venue.VenueId,
@@ -566,12 +651,16 @@ public sealed class AuthenticationManager : IDisposable
             ? $"{failure.Message} (trace {failure.TraceId})"
             : failure.Message;
 
+        var status = string.Equals(failure.Code, "CHARACTER_NOT_LINKED", StringComparison.Ordinal)
+            ? AuthenticationStatus.CharacterNotLinked
+            : AuthenticationStatus.Failed;
+
         sessions.AddOrUpdate(
             profileId,
-            _ => SessionState.Failed(message),
+            _ => new SessionState(status, message, null, null, false, DateTimeOffset.UtcNow, null),
             (_, previous) => previous with
             {
-                Status = AuthenticationStatus.Failed,
+                Status = status,
                 Message = message,
                 AccessToken = null,
                 AccessTokenExpiresAt = null,
@@ -585,6 +674,13 @@ public sealed class AuthenticationManager : IDisposable
             failure.Code,
             failure.StatusCode,
             failure.TraceId);
+    }
+
+    private enum BootstrapKind
+    {
+        Invite,
+        Recovery,
+        Pairing
     }
 
     private sealed record SessionState(

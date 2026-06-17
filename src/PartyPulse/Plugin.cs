@@ -10,6 +10,7 @@ using Dalamud.Plugin.Services;
 using PartyPulse.Api;
 using PartyPulse.Authentication;
 using PartyPulse.Models;
+using PartyPulse.SelfService;
 using PartyPulse.Services;
 using PartyPulse.VenueUsers;
 using PartyPulse.Windows;
@@ -61,6 +62,12 @@ public sealed class Plugin : IDalamudPlugin
             apiClient,
             IdentityProvider,
             Log);
+        SelfService = new SelfServiceManager(
+            Configuration,
+            Authentication,
+            apiClient,
+            IdentityProvider,
+            Log);
 
         configWindow = new ConfigWindow(this);
         mainWindow = new MainWindow(this);
@@ -96,6 +103,8 @@ public sealed class Plugin : IDalamudPlugin
 
     public VenueUserManagementManager UserManagement { get; }
 
+    public SelfServiceManager SelfService { get; }
+
     public WindowSystem WindowSystem { get; } = new("PartyPulse");
 
     public CancellationToken LifetimeToken => lifetimeCancellation.Token;
@@ -120,6 +129,7 @@ public sealed class Plugin : IDalamudPlugin
         configWindow.Dispose();
         mainWindow.Dispose();
         venueUserEditWindow.Dispose();
+        SelfService.Dispose();
         UserManagement.Dispose();
         Authentication.Dispose();
         VenueDirectory.Dispose();
@@ -131,12 +141,10 @@ public sealed class Plugin : IDalamudPlugin
 
     public void ToggleMainUi() => mainWindow.Toggle();
 
-    public void AddVenueByCode(string venueCode)
-    {
+    public void AddVenueByCode(string venueCode) =>
         Observe(
             AddVenueByCodeAndReportAsync(venueCode),
             $"add venue code {VenueConnectionConfiguration.NormalizeVenueCode(venueCode)}");
-    }
 
     public void AddVenueAtCurrentLocation()
     {
@@ -153,9 +161,8 @@ public sealed class Plugin : IDalamudPlugin
 
     public void ConnectVenue(VenueConnectionConfiguration venue)
     {
-        if (!IdentityProvider.TryGetCurrent(out var identity, out var reason))
+        if (!TryGetCurrentIdentity(venue, out var identity))
         {
-            Authentication.SetClientError(venue, reason);
             return;
         }
 
@@ -184,9 +191,8 @@ public sealed class Plugin : IDalamudPlugin
 
     public void RedeemInvite(VenueConnectionConfiguration venue, string inviteCode)
     {
-        if (!IdentityProvider.TryGetCurrent(out var identity, out var reason))
+        if (!TryGetCurrentIdentity(venue, out var identity))
         {
-            Authentication.SetClientError(venue, reason);
             return;
         }
 
@@ -202,9 +208,8 @@ public sealed class Plugin : IDalamudPlugin
 
     public void RecoverVenue(VenueConnectionConfiguration venue, string recoveryCode)
     {
-        if (!IdentityProvider.TryGetCurrent(out var identity, out var reason))
+        if (!TryGetCurrentIdentity(venue, out var identity))
         {
-            Authentication.SetClientError(venue, reason);
             return;
         }
 
@@ -218,6 +223,72 @@ public sealed class Plugin : IDalamudPlugin
             $"recover venue {venue.VenueCode}");
     }
 
+    public void RedeemDevicePairingCode(VenueConnectionConfiguration venue, string pairingCode)
+    {
+        if (!TryGetCurrentIdentity(venue, out var identity))
+        {
+            return;
+        }
+
+        Observe(
+            RedeemDevicePairingCodeAndReportAsync(venue, identity!, pairingCode),
+            $"pair device for venue {venue.VenueCode}");
+    }
+
+    public void LinkCurrentCharacter(VenueConnectionConfiguration venue)
+    {
+        if (!TryGetCurrentIdentity(venue, out var identity))
+        {
+            return;
+        }
+
+        Observe(
+            LinkCurrentCharacterAndReportAsync(venue, identity!),
+            $"link current character for venue {venue.VenueCode}");
+    }
+
+    public void EnsureSelfServiceLoaded(VenueConnectionConfiguration venue)
+    {
+        if (!SelfService.ShouldLoad(venue))
+        {
+            return;
+        }
+
+        Observe(
+            SelfService.LoadAsync(venue, false, LifetimeToken),
+            $"load self-service data for {venue.VenueCode}");
+    }
+
+    public void RefreshSelfService(VenueConnectionConfiguration venue) =>
+        Observe(
+            SelfService.LoadAsync(venue, true, LifetimeToken),
+            $"refresh self-service data for {venue.VenueCode}");
+
+    public void UnlinkCharacter(VenueConnectionConfiguration venue, int characterId) =>
+        Observe(
+            UnlinkCharacterAndReportAsync(venue, characterId),
+            $"unlink character {characterId} from {venue.VenueCode}");
+
+    public void CreateDevicePairingCode(VenueConnectionConfiguration venue) =>
+        Observe(
+            CreateDevicePairingCodeAndReportAsync(venue),
+            $"create device pairing code for {venue.VenueCode}");
+
+    public void LeaveVenue(VenueConnectionConfiguration venue) =>
+        Observe(
+            LeaveVenueAndReportAsync(venue),
+            $"leave venue {venue.VenueCode}");
+
+    public void RemoveVenueLocally(VenueConnectionConfiguration venue)
+    {
+        Authentication.RemoveProfile(venue.ProfileId);
+        UserManagement.RemoveProfile(venue.ProfileId);
+        SelfService.RemoveProfile(venue.ProfileId);
+        Configuration.VenueConnections.RemoveAll(x => x.ProfileId == venue.ProfileId);
+        Configuration.Normalize();
+        Configuration.Save();
+        ChatGui.Print($"Removed {venue.DisplayLabel} from this plugin. Server-side membership was not changed.", "PartyPulse");
+    }
 
     public void EnsureVenueUsersLoaded(VenueConnectionConfiguration venue)
     {
@@ -271,6 +342,19 @@ public sealed class Plugin : IDalamudPlugin
     public void OpenVenueUserEditor(VenueConnectionConfiguration venue, VenueUserSummary user) =>
         venueUserEditWindow.Open(venue.ProfileId, user.UserId);
 
+    private bool TryGetCurrentIdentity(
+        VenueConnectionConfiguration venue,
+        out PlayerIdentity? identity)
+    {
+        if (IdentityProvider.TryGetCurrent(out identity, out var reason))
+        {
+            return true;
+        }
+
+        Authentication.SetClientError(venue, reason);
+        return false;
+    }
+
     private void OnCommand(string command, string arguments)
     {
         var trimmed = arguments.Trim();
@@ -310,6 +394,7 @@ public sealed class Plugin : IDalamudPlugin
                 autoConnectStarted = false;
                 Authentication.ClearAccessTokens("Character logged out or changed.");
                 UserManagement.Clear("Character logged out or changed.");
+                SelfService.Clear("Character logged out or changed.");
             }
 
             return;
@@ -321,6 +406,7 @@ public sealed class Plugin : IDalamudPlugin
             autoConnectStarted = false;
             Authentication.ClearAccessTokens("Character changed; authentication must be renewed.");
             UserManagement.Clear("Character changed; venue-user data was cleared.");
+            SelfService.Clear("Character changed; self-service data was cleared.");
         }
 
         if (!Configuration.AutoConnect)
@@ -354,6 +440,96 @@ public sealed class Plugin : IDalamudPlugin
             Configuration.ApiBaseUrl,
             LifetimeToken);
         ReportVenueLookup(result);
+    }
+
+    private async Task RedeemDevicePairingCodeAndReportAsync(
+        VenueConnectionConfiguration venue,
+        PlayerIdentity identity,
+        string pairingCode)
+    {
+        var result = await Authentication.RedeemPairingCodeAsync(
+            venue,
+            identity,
+            pairingCode,
+            Configuration.ApiBaseUrl,
+            LifetimeToken);
+
+        if (result.Success)
+        {
+            ChatGui.Print($"Registered this device for {venue.DisplayLabel}.", "PartyPulse");
+            SelfService.RemoveProfile(venue.ProfileId);
+            return;
+        }
+
+        ChatGui.PrintError(result.Failure?.Message ?? "The device pairing code could not be redeemed.", "PartyPulse");
+    }
+
+    private async Task LinkCurrentCharacterAndReportAsync(
+        VenueConnectionConfiguration venue,
+        PlayerIdentity identity)
+    {
+        var result = await Authentication.LinkCurrentCharacterAsync(
+            venue,
+            identity,
+            Configuration.ApiBaseUrl,
+            LifetimeToken);
+
+        if (result.Success)
+        {
+            ChatGui.Print($"Linked {identity.DisplayName} to {venue.DisplayLabel}.", "PartyPulse");
+            SelfService.RemoveProfile(venue.ProfileId);
+            EnsureSelfServiceLoaded(venue);
+            return;
+        }
+
+        ChatGui.PrintError(result.Failure?.Message ?? "The current character could not be linked.", "PartyPulse");
+    }
+
+    private async Task UnlinkCharacterAndReportAsync(
+        VenueConnectionConfiguration venue,
+        int characterId)
+    {
+        var result = await SelfService.UnlinkCharacterAsync(venue, characterId, LifetimeToken);
+        if (result.Success)
+        {
+            ChatGui.Print("Character unlinked from the venue account.", "PartyPulse");
+            return;
+        }
+
+        ChatGui.PrintError(result.Failure?.Message ?? "The character could not be unlinked.", "PartyPulse");
+    }
+
+    private async Task CreateDevicePairingCodeAndReportAsync(VenueConnectionConfiguration venue)
+    {
+        var result = await SelfService.CreatePairingCodeAsync(venue, LifetimeToken);
+        if (result.Success && result.Value is not null)
+        {
+            ChatGui.Print(
+                $"Device pairing code for {venue.DisplayLabel}: {result.Value.PairingCode} (expires {result.Value.ExpiresAt.ToLocalTime():g}).",
+                "PartyPulse");
+            return;
+        }
+
+        ChatGui.PrintError(result.Failure?.Message ?? "The device pairing code could not be created.", "PartyPulse");
+    }
+
+    private async Task LeaveVenueAndReportAsync(VenueConnectionConfiguration venue)
+    {
+        var result = await SelfService.LeaveVenueAsync(venue, LifetimeToken);
+        if (!result.Success)
+        {
+            ChatGui.PrintError(result.Failure?.Message ?? "The venue membership could not be removed.", "PartyPulse");
+            return;
+        }
+
+        venue.DeviceId = 0;
+        venue.RefreshToken = string.Empty;
+        venue.RefreshTokenUpdatedAt = null;
+        Configuration.Save();
+        Authentication.RemoveProfile(venue.ProfileId);
+        UserManagement.RemoveProfile(venue.ProfileId);
+        SelfService.RemoveProfile(venue.ProfileId);
+        ChatGui.Print($"Left {venue.DisplayLabel}. The venue remains saved in visitor mode.", "PartyPulse");
     }
 
     private async Task CreateVenueUserAndReportAsync(
@@ -440,10 +616,8 @@ public sealed class Plugin : IDalamudPlugin
         ReportUserManagementFailure(result.Failure, "The recovery code could not be created.");
     }
 
-    private static void ReportUserManagementFailure(ApiFailure? failure, string fallback)
-    {
+    private static void ReportUserManagementFailure(ApiFailure? failure, string fallback) =>
         ChatGui.PrintError(failure?.Message ?? fallback, "PartyPulse");
-    }
 
     private static void ReportVenueLookup(ApiResult<VenueConnectionConfiguration> result)
     {
@@ -458,10 +632,7 @@ public sealed class Plugin : IDalamudPlugin
         ChatGui.PrintError(result.Failure?.Message ?? "The venue could not be added.", "PartyPulse");
     }
 
-    private void Observe(Task task, string operation)
-    {
-        _ = ObserveAsync(task, operation);
-    }
+    private void Observe(Task task, string operation) => _ = ObserveAsync(task, operation);
 
     private async Task ObserveAsync(Task task, string operation)
     {
@@ -476,6 +647,7 @@ public sealed class Plugin : IDalamudPlugin
         catch (Exception exception)
         {
             Log.Error(exception, "Unhandled plugin task failure while attempting to {Operation}.", operation);
+            ChatGui.PrintError("PartyPulse encountered an unexpected error. See the Dalamud log for details.", "PartyPulse");
         }
     }
 }

@@ -7,6 +7,7 @@ public enum AuthenticationStatus
     WaitingForPlayer,
     Connecting,
     Connected,
+    CharacterNotLinked,
     Expired,
     Failed,
 }

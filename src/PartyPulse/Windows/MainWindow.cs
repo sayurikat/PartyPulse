@@ -7,6 +7,7 @@ using Dalamud.Interface.Windowing;
 using PartyPulse.Api;
 using PartyPulse.Authentication;
 using PartyPulse.Models;
+using PartyPulse.SelfService;
 using PartyPulse.VenueUsers;
 
 namespace PartyPulse.Windows;
@@ -17,6 +18,10 @@ public sealed class MainWindow : Window, IDisposable
     private Guid addUserProfileId;
     private string addUserDisplayName = string.Empty;
     private string addUserDiscordHandle = string.Empty;
+    private VenueConnectionConfiguration? pendingLinkVenue;
+    private VenueConnectionConfiguration? pendingLeaveVenue;
+    private VenueConnectionConfiguration? pendingUnlinkVenue;
+    private SelfCharacterSummary? pendingUnlinkCharacter;
 
     public MainWindow(Plugin plugin)
         : base("Party Pulse###PartyPulseMain")
@@ -39,6 +44,7 @@ public sealed class MainWindow : Window, IDisposable
         var selectedVenue = DrawHeader();
         ImGui.Separator();
         DrawFeatureTabs(selectedVenue);
+        DrawConfirmationPopups();
     }
 
     private VenueConnectionConfiguration? DrawHeader()
@@ -74,8 +80,23 @@ public sealed class MainWindow : Window, IDisposable
 
         if (selectedVenue.IsRegistered)
         {
-            DrawConnectionStatus(plugin.Authentication.GetSnapshot(selectedVenue));
-            plugin.EnsureVenueUsersLoaded(selectedVenue);
+            var auth = plugin.Authentication.GetSnapshot(selectedVenue);
+            DrawConnectionStatus(auth);
+            if (auth.Status == AuthenticationStatus.Connected)
+            {
+                plugin.EnsureVenueUsersLoaded(selectedVenue);
+                plugin.EnsureSelfServiceLoaded(selectedVenue);
+            }
+            else if (auth.Status == AuthenticationStatus.CharacterNotLinked &&
+                     plugin.IdentityProvider.TryGetCurrent(out var identity, out _))
+            {
+                ImGui.TextWrapped($"{identity!.DisplayName} is not linked to this venue user.");
+                if (ImGui.Button("Link current character"))
+                {
+                    pendingLinkVenue = selectedVenue;
+                    ImGui.OpenPopup("Link current character###PartyPulseLinkCurrentCharacter");
+                }
+            }
         }
         else
         {
@@ -125,6 +146,7 @@ public sealed class MainWindow : Window, IDisposable
             AuthenticationStatus.Connected => new Vector4(0.35f, 0.85f, 0.45f, 1f),
             AuthenticationStatus.Connecting => new Vector4(0.35f, 0.7f, 1f, 1f),
             AuthenticationStatus.WaitingForPlayer => new Vector4(1f, 0.8f, 0.35f, 1f),
+            AuthenticationStatus.CharacterNotLinked => new Vector4(1f, 0.8f, 0.35f, 1f),
             AuthenticationStatus.Failed => new Vector4(1f, 0.4f, 0.4f, 1f),
             AuthenticationStatus.Expired => new Vector4(1f, 0.65f, 0.3f, 1f),
             _ => new Vector4(0.65f, 0.65f, 0.65f, 1f),
@@ -148,8 +170,11 @@ public sealed class MainWindow : Window, IDisposable
 
         DrawOverviewTab(selectedVenue);
 
-        if (selectedVenue?.IsRegistered == true)
+        if (selectedVenue?.IsRegistered == true &&
+            plugin.Authentication.GetSnapshot(selectedVenue).Status == AuthenticationStatus.Connected)
         {
+            DrawMyAccountTab(selectedVenue);
+
             var userSnapshot = plugin.UserManagement.GetSnapshot(selectedVenue);
             if (userSnapshot.Status == VenueUserManagementStatus.Ready &&
                 userSnapshot.View?.Capabilities.CanView == true)
@@ -186,8 +211,137 @@ public sealed class MainWindow : Window, IDisposable
 
         ImGui.TextUnformatted($"Venue: {selectedVenue?.VenueName ?? "Not configured"}");
         ImGui.TextUnformatted($"Address: {selectedVenue?.AddressDisplay ?? "Not configured"}");
-        ImGui.TextUnformatted($"Access: {(selectedVenue?.IsRegistered == true ? "Authenticated staff" : "Visitor")}");
-        ImGui.TextWrapped("Public venue data is available to visitors. Staff features use the same saved venue after an invite or recovery code registers this device.");
+        ImGui.TextUnformatted($"Access: {(selectedVenue?.IsRegistered == true ? "Registered venue account" : "Visitor")}");
+        ImGui.TextWrapped("Public venue data is available to visitors. Registered venue accounts use self-service for characters, devices, and membership.");
+
+        ImGui.EndTabItem();
+    }
+
+    private void DrawMyAccountTab(VenueConnectionConfiguration venue)
+    {
+        if (!ImGui.BeginTabItem("My Account"))
+        {
+            return;
+        }
+
+        var snapshot = plugin.SelfService.GetSnapshot(venue);
+        if (snapshot.Status is SelfServiceStatus.NotLoaded or SelfServiceStatus.Loading)
+        {
+            ImGui.TextDisabled(snapshot.Message);
+            ImGui.EndTabItem();
+            return;
+        }
+
+        if (snapshot.Status == SelfServiceStatus.Failed || snapshot.View is null)
+        {
+            ImGui.TextColored(new Vector4(1f, 0.4f, 0.4f, 1f), snapshot.Message);
+            if (ImGui.Button("Retry"))
+            {
+                plugin.RefreshSelfService(venue);
+            }
+
+            ImGui.EndTabItem();
+            return;
+        }
+
+        var view = snapshot.View;
+        ImGui.TextUnformatted(view.IsOwner ? "Venue owner account" : "Venue staff account");
+        ImGui.SameLine();
+        if (ImGui.SmallButton("Refresh"))
+        {
+            plugin.RefreshSelfService(venue);
+        }
+
+        ImGui.Spacing();
+        ImGui.TextUnformatted("Registered characters");
+        var tableFlags = ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp;
+        if (ImGui.BeginTable("SelfCharacters", 3, tableFlags))
+        {
+            ImGui.TableSetupColumn("Character");
+            ImGui.TableSetupColumn("Status");
+            ImGui.TableSetupColumn("##Actions", ImGuiTableColumnFlags.WidthFixed, 90 * ImGuiHelpers.GlobalScale);
+            ImGui.TableHeadersRow();
+
+            foreach (var character in view.Characters)
+            {
+                ImGui.PushID(character.CharacterId);
+                ImGui.TableNextRow();
+                ImGui.TableSetColumnIndex(0);
+                ImGui.TextUnformatted(character.DisplayName);
+
+                ImGui.TableSetColumnIndex(1);
+                if (character.IsCurrent)
+                {
+                    ImGui.TextColored(new Vector4(0.35f, 0.85f, 0.45f, 1f), "Current");
+                }
+                else if (character.IsMain)
+                {
+                    ImGui.TextUnformatted("Main");
+                }
+                else
+                {
+                    ImGui.TextDisabled("Linked");
+                }
+
+                ImGui.TableSetColumnIndex(2);
+                ImGui.BeginDisabled(character.IsCurrent);
+                if (ImGui.SmallButton("Unlink"))
+                {
+                    pendingUnlinkVenue = venue;
+                    pendingUnlinkCharacter = character;
+                    ImGui.OpenPopup("Unlink character###PartyPulseUnlinkCharacter");
+                }
+                ImGui.EndDisabled();
+                if (character.IsCurrent && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+                {
+                    ImGui.SetTooltip("The currently logged-in character cannot be unlinked.");
+                }
+
+                ImGui.PopID();
+            }
+
+            ImGui.EndTable();
+        }
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+        ImGui.TextUnformatted("Register another device");
+        ImGui.TextWrapped("Create a short-lived code, then add this same venue on the second computer and choose 'Register with device code'.");
+        if (ImGui.Button("Create device pairing code"))
+        {
+            plugin.CreateDevicePairingCode(venue);
+        }
+
+        if (snapshot.LatestPairingCode is { } pairing)
+        {
+            ImGui.TextWrapped($"Pairing code: {pairing.PairingCode}");
+            ImGui.TextDisabled($"Expires: {pairing.ExpiresAt.ToLocalTime():g}");
+            if (ImGui.Button("Copy pairing code"))
+            {
+                ImGui.SetClipboardText(pairing.PairingCode);
+            }
+        }
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+        ImGui.TextUnformatted("Venue membership");
+        if (view.IsLastOwner)
+        {
+            ImGui.TextColored(
+                new Vector4(1f, 0.65f, 0.3f, 1f),
+                "You are the venue's last active owner and cannot leave until another owner exists.");
+        }
+
+        ImGui.BeginDisabled(view.IsLastOwner);
+        if (ImGui.Button("Leave venue"))
+        {
+            pendingLeaveVenue = venue;
+            ImGui.OpenPopup("Leave venue###PartyPulseLeaveVenue");
+        }
+        ImGui.EndDisabled();
+        ImGui.TextDisabled("Leaving disables your venue account and revokes all of its registered devices. The venue stays saved locally in visitor mode.");
 
         ImGui.EndTabItem();
     }
@@ -334,6 +488,95 @@ public sealed class MainWindow : Window, IDisposable
         }
 
         ImGui.EndTabItem();
+    }
+
+    private void DrawConfirmationPopups()
+    {
+        if (ImGui.BeginPopupModal(
+                "Link current character###PartyPulseLinkCurrentCharacter",
+                ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            if (pendingLinkVenue is not null &&
+                plugin.IdentityProvider.TryGetCurrent(out var identity, out var reason))
+            {
+                ImGui.TextWrapped("Link the currently logged-in character to this venue account?");
+                ImGui.Spacing();
+                ImGui.TextUnformatted($"Venue: {pendingLinkVenue.DisplayLabel}");
+                ImGui.TextUnformatted($"Character: {identity!.CharacterName}");
+                ImGui.TextUnformatted($"Home world: {identity.WorldName}");
+                ImGui.Spacing();
+                if (ImGui.Button("Link character"))
+                {
+                    plugin.LinkCurrentCharacter(pendingLinkVenue);
+                    pendingLinkVenue = null;
+                    ImGui.CloseCurrentPopup();
+                }
+            }
+            else
+            {
+                ImGui.TextDisabled("The current character is not available.");
+            }
+
+            ImGui.SameLine();
+            if (ImGui.Button("Cancel"))
+            {
+                pendingLinkVenue = null;
+                ImGui.CloseCurrentPopup();
+            }
+
+            ImGui.EndPopup();
+        }
+
+        if (ImGui.BeginPopupModal(
+                "Unlink character###PartyPulseUnlinkCharacter",
+                ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            ImGui.TextWrapped(
+                pendingUnlinkCharacter is null
+                    ? "Unlink this character?"
+                    : $"Unlink {pendingUnlinkCharacter.DisplayName} from this venue account?");
+            ImGui.TextDisabled("The character can be linked again later while logged into it on a registered device.");
+            if (ImGui.Button("Unlink") && pendingUnlinkVenue is not null && pendingUnlinkCharacter is not null)
+            {
+                plugin.UnlinkCharacter(pendingUnlinkVenue, pendingUnlinkCharacter.CharacterId);
+                pendingUnlinkVenue = null;
+                pendingUnlinkCharacter = null;
+                ImGui.CloseCurrentPopup();
+            }
+
+            ImGui.SameLine();
+            if (ImGui.Button("Cancel"))
+            {
+                pendingUnlinkVenue = null;
+                pendingUnlinkCharacter = null;
+                ImGui.CloseCurrentPopup();
+            }
+
+            ImGui.EndPopup();
+        }
+
+        if (ImGui.BeginPopupModal(
+                "Leave venue###PartyPulseLeaveVenue",
+                ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            ImGui.TextWrapped($"Leave {pendingLeaveVenue?.DisplayLabel ?? "this venue"}?");
+            ImGui.TextWrapped("Your venue user will be disabled and all of its devices will be revoked. The public venue remains in your local list as a visitor venue.");
+            if (ImGui.Button("Leave venue") && pendingLeaveVenue is not null)
+            {
+                plugin.LeaveVenue(pendingLeaveVenue);
+                pendingLeaveVenue = null;
+                ImGui.CloseCurrentPopup();
+            }
+
+            ImGui.SameLine();
+            if (ImGui.Button("Cancel"))
+            {
+                pendingLeaveVenue = null;
+                ImGui.CloseCurrentPopup();
+            }
+
+            ImGui.EndPopup();
+        }
     }
 
     private static void DrawPlaceholderTab(string title, string description)

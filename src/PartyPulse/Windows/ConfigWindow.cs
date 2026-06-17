@@ -17,7 +17,9 @@ public sealed class ConfigWindow : Window, IDisposable
     private readonly Configuration configuration;
     private readonly Dictionary<Guid, string> inviteCodes = [];
     private readonly Dictionary<Guid, string> recoveryCodes = [];
+    private readonly Dictionary<Guid, string> pairingCodes = [];
     private string venueCodeInput = string.Empty;
+    private VenueConnectionConfiguration? pendingLocalRemoval;
     private bool dirty;
 
     public ConfigWindow(Plugin plugin)
@@ -37,6 +39,7 @@ public sealed class ConfigWindow : Window, IDisposable
     {
         inviteCodes.Clear();
         recoveryCodes.Clear();
+        pairingCodes.Clear();
     }
 
     public override void PreDraw()
@@ -68,6 +71,7 @@ public sealed class ConfigWindow : Window, IDisposable
         DrawVenueConnections();
         ImGui.Spacing();
         DrawFooter();
+        DrawRemoveVenueConfirmation();
     }
 
     private void DrawApiSettings()
@@ -162,7 +166,6 @@ public sealed class ConfigWindow : Window, IDisposable
             return;
         }
 
-        var removeIndex = -1;
         for (var index = 0; index < configuration.VenueConnections.Count; index++)
         {
             var venue = configuration.VenueConnections[index];
@@ -182,6 +185,8 @@ public sealed class ConfigWindow : Window, IDisposable
                 else
                 {
                     DrawInviteRegistration(venue);
+                    ImGui.Spacing();
+                    DrawPairingRegistration(venue);
                 }
 
                 ImGui.Spacing();
@@ -209,9 +214,10 @@ public sealed class ConfigWindow : Window, IDisposable
                     DrawStatusText("Visitor mode — public venue information only.", AuthenticationStatus.Disconnected);
                 }
 
-                if (ImGui.Button("Remove venue"))
+                if (ImGui.Button("Remove venue from this plugin"))
                 {
-                    removeIndex = index;
+                    pendingLocalRemoval = venue;
+                    ImGui.OpenPopup("Remove saved venue###PartyPulseRemoveSavedVenue");
                 }
             }
 
@@ -219,18 +225,49 @@ public sealed class ConfigWindow : Window, IDisposable
             ImGui.Spacing();
         }
 
-        if (removeIndex >= 0)
+    }
+
+    private void DrawRemoveVenueConfirmation()
+    {
+        if (!ImGui.BeginPopupModal(
+                "Remove saved venue###PartyPulseRemoveSavedVenue",
+                ImGuiWindowFlags.AlwaysAutoResize))
         {
-            var removed = configuration.VenueConnections[removeIndex];
-            plugin.Authentication.RemoveProfile(removed.ProfileId);
-            plugin.UserManagement.RemoveProfile(removed.ProfileId);
+            return;
+        }
+
+        ImGui.TextWrapped($"Remove {pendingLocalRemoval?.DisplayLabel ?? "this venue"} from this plugin?");
+        if (pendingLocalRemoval?.IsRegistered == true)
+        {
+            ImGui.TextColored(
+                new Vector4(1f, 0.65f, 0.3f, 1f),
+                "This deletes the locally stored device credential but does not leave the venue or revoke the server-side device.");
+        }
+        else
+        {
+            ImGui.TextDisabled("This only removes the saved public venue from your local list.");
+        }
+
+        if (ImGui.Button("Remove") && pendingLocalRemoval is not null)
+        {
+            var removed = pendingLocalRemoval;
             inviteCodes.Remove(removed.ProfileId);
             recoveryCodes.Remove(removed.ProfileId);
-            configuration.VenueConnections.RemoveAt(removeIndex);
-            configuration.Normalize();
-            configuration.Save();
+            pairingCodes.Remove(removed.ProfileId);
+            plugin.RemoveVenueLocally(removed);
+            pendingLocalRemoval = null;
             dirty = false;
+            ImGui.CloseCurrentPopup();
         }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Cancel"))
+        {
+            pendingLocalRemoval = null;
+            ImGui.CloseCurrentPopup();
+        }
+
+        ImGui.EndPopup();
     }
 
     private static void DrawPublicVenueDetails(VenueConnectionConfiguration venue)
@@ -284,6 +321,25 @@ public sealed class ConfigWindow : Window, IDisposable
         {
             SaveAndSelect(venue);
             plugin.RedeemInvite(venue, code);
+        }
+    }
+
+    private void DrawPairingRegistration(VenueConnectionConfiguration venue)
+    {
+        ImGui.TextUnformatted("Register an additional device");
+        ImGui.TextWrapped("On an already registered device, create a pairing code under My Account. Enter that code here on the new computer.");
+
+        var code = pairingCodes.GetValueOrDefault(venue.ProfileId, string.Empty);
+        ImGui.SetNextItemWidth(-1);
+        if (ImGui.InputText("Device pairing code", ref code, 80, ImGuiInputTextFlags.Password))
+        {
+            pairingCodes[venue.ProfileId] = code;
+        }
+
+        if (ImGui.Button("Register with device code"))
+        {
+            SaveAndSelect(venue);
+            plugin.RedeemDevicePairingCode(venue, code);
         }
     }
 
@@ -347,6 +403,7 @@ public sealed class ConfigWindow : Window, IDisposable
             AuthenticationStatus.Connected => new Vector4(0.35f, 0.85f, 0.45f, 1f),
             AuthenticationStatus.Connecting => new Vector4(0.35f, 0.7f, 1f, 1f),
             AuthenticationStatus.WaitingForPlayer => new Vector4(1f, 0.8f, 0.35f, 1f),
+            AuthenticationStatus.CharacterNotLinked => new Vector4(1f, 0.8f, 0.35f, 1f),
             AuthenticationStatus.Failed => new Vector4(1f, 0.4f, 0.4f, 1f),
             AuthenticationStatus.Expired => new Vector4(1f, 0.65f, 0.3f, 1f),
             _ => new Vector4(0.65f, 0.65f, 0.65f, 1f),
