@@ -143,7 +143,7 @@ public sealed class VipTabRenderer(Plugin plugin)
         VipCharacterSummary targetCharacter,
         bool isBusy)
     {
-        ImGui.TextUnformatted($"Discord: {player.DiscordDisplay} (@{player.DiscordUsername})");
+        ImGui.TextUnformatted($"Discord: {player.DiscordDisplay}");
         ImGui.TextUnformatted($"List name: {player.CharacterDisplay}");
 
         var linkedCharacters = view.Characters
@@ -211,11 +211,11 @@ public sealed class VipTabRenderer(Plugin plugin)
             {
                 var selected = selectedExistingVipPlayerId == player.VipPlayerId;
                 if (ImGui.Selectable(
-                        $"{player.CharacterDisplay} — @{player.DiscordUsername}##VipPlayer{player.VipPlayerId}",
+                        $"{player.CharacterDisplay} — {player.DiscordDisplay}##VipPlayer{player.VipPlayerId}",
                         selected))
                 {
                     selectedExistingVipPlayerId = player.VipPlayerId;
-                    saleDiscordUsername = player.DiscordUsername;
+                    saleDiscordUsername = player.DiscordUsername ?? string.Empty;
                 }
             }
 

@@ -101,7 +101,9 @@ public sealed class VipPlayerEditWindow : Window, IDisposable
             plugin.UpdateVipPlayer(
                 venue,
                 player.VipPlayerId,
-                new UpdateVipPlayerRequest(discordUsername.Trim()));
+                new UpdateVipPlayerRequest(string.IsNullOrWhiteSpace(discordUsername)
+                    ? null
+                    : discordUsername.Trim()));
         }
         ImGui.EndDisabled();
 

@@ -421,8 +421,7 @@ public sealed class PartyPulseApiClient : IDisposable
             $"api/v1/vip/players/{vipPlayerId}",
             accessToken,
             request,
-            static payload => payload.VipPlayerId > 0 &&
-                              !string.IsNullOrWhiteSpace(payload.DiscordUsername),
+            static payload => payload.VipPlayerId > 0,
             cancellationToken);
 
     public Task<ApiResult<VipCharacterOperationResponse>> UnlinkVipCharacterAsync(
@@ -571,7 +570,6 @@ public sealed class PartyPulseApiClient : IDisposable
             package.PriceGil >= 0) &&
         payload.Players.All(static player =>
             player.VipPlayerId > 0 &&
-            !string.IsNullOrWhiteSpace(player.DiscordUsername) &&
             !string.IsNullOrWhiteSpace(player.DisplayCharacterName) &&
             !string.IsNullOrWhiteSpace(player.DisplayWorldName)) &&
         payload.Characters.All(static character =>

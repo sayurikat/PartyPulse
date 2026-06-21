@@ -58,7 +58,7 @@ public sealed record VipPackageSummary(
 
 public sealed record VipPlayerSummary(
     int VipPlayerId,
-    string DiscordUsername,
+    string? DiscordUsername,
     long? DiscordId,
     string? DiscordNickname,
     int? PreferredCharacterId,
@@ -71,9 +71,22 @@ public sealed record VipPlayerSummary(
 {
     public string CharacterDisplay => $"{DisplayCharacterName} @ {DisplayWorldName}";
 
-    public string DiscordDisplay => !string.IsNullOrWhiteSpace(DiscordNickname)
-        ? DiscordNickname!
-        : $"@{DiscordUsername}";
+    public string DiscordDisplay
+    {
+        get
+        {
+            if (!string.IsNullOrWhiteSpace(DiscordNickname))
+            {
+                return !string.IsNullOrWhiteSpace(DiscordUsername)
+                    ? $"{DiscordNickname} (@{DiscordUsername})"
+                    : DiscordNickname!;
+            }
+
+            return !string.IsNullOrWhiteSpace(DiscordUsername)
+                ? $"@{DiscordUsername}"
+                : "Not recorded";
+        }
+    }
 }
 
 public sealed record VipCharacterSummary(
@@ -100,7 +113,7 @@ public sealed record VipSubscriptionSummary(
     DateTimeOffset PurchasedAt,
     DateTimeOffset StartsAt,
     DateTimeOffset? EndsAt,
-    int SoldByUserId,
+    int? SoldByUserId,
     string SellerDisplayName,
     DateTimeOffset? PaidToVenueAt,
     int? PaidToVenueByUserId,
@@ -157,7 +170,7 @@ public sealed record SellVipSubscriptionRequest(
     bool CustomerPaymentConfirmed);
 
 public sealed record LinkVipCharacterRequest(string CharacterName, string WorldName);
-public sealed record UpdateVipPlayerRequest(string DiscordUsername);
+public sealed record UpdateVipPlayerRequest(string? DiscordUsername);
 public sealed record CancelVipSubscriptionRequest(string? Reason);
 public sealed record SetVipSubscriptionPaymentStatusRequest(bool Settled);
 
@@ -174,7 +187,7 @@ public sealed record VipPreferredCharacterResponse(
 
 public sealed record VipPlayerOperationResponse(
     int VipPlayerId,
-    string DiscordUsername);
+    string? DiscordUsername);
 
 public sealed record VipSubscriptionCancellationResponse(
     long SubscriptionId,
