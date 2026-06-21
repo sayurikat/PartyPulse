@@ -10,6 +10,10 @@ namespace PartyPulse.Windows;
 
 public sealed class VipPlayerEditWindow : Window, IDisposable
 {
+    private const string UnlinkCharacterPopupName = "Unlink VIP character###PartyPulseVipUnlinkCharacter";
+    private const string CancelSubscriptionPopupName = "Cancel VIP subscription###PartyPulseVipCancelSubscription";
+    private const string PaymentStatusPopupName = "Change club payment###PartyPulseVipPaymentStatus";
+
     private readonly Plugin plugin;
     private Guid profileId;
     private int vipPlayerId;
@@ -20,6 +24,9 @@ public sealed class VipPlayerEditWindow : Window, IDisposable
     private string cancellationReason = string.Empty;
     private long pendingPaymentSubscriptionId;
     private bool pendingPaymentSettled;
+    private bool openUnlinkCharacterPopup;
+    private bool openCancelSubscriptionPopup;
+    private bool openPaymentStatusPopup;
 
     public VipPlayerEditWindow(Plugin plugin)
         : base("Edit VIP Player###PartyPulseVipPlayerEdit")
@@ -41,6 +48,9 @@ public sealed class VipPlayerEditWindow : Window, IDisposable
         pendingCancelSubscriptionId = 0;
         pendingPaymentSubscriptionId = 0;
         cancellationReason = string.Empty;
+        openUnlinkCharacterPopup = false;
+        openCancelSubscriptionPopup = false;
+        openPaymentStatusPopup = false;
 
         var venue = plugin.Configuration.VenueConnections.FirstOrDefault(value => value.ProfileId == profileId);
         var player = venue is null
@@ -114,6 +124,7 @@ public sealed class VipPlayerEditWindow : Window, IDisposable
         ImGui.Separator();
         DrawSubscriptions(venue, view, player, busy);
 
+        OpenQueuedConfirmationPopups();
         DrawUnlinkConfirmation(venue);
         DrawCancellationConfirmation(venue);
         DrawPaymentConfirmation(venue);
@@ -171,7 +182,7 @@ public sealed class VipPlayerEditWindow : Window, IDisposable
             {
                 pendingUnlinkCharacterId = character.CharacterId;
                 pendingUnlinkCharacterName = character.DisplayName;
-                ImGui.OpenPopup("Unlink VIP character###PartyPulseVipUnlinkCharacter");
+                openUnlinkCharacterPopup = true;
             }
             ImGui.EndDisabled();
             if (characters.Length <= 1 && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
@@ -260,7 +271,7 @@ public sealed class VipPlayerEditWindow : Window, IDisposable
             {
                 pendingCancelSubscriptionId = subscription.SubscriptionId;
                 cancellationReason = string.Empty;
-                ImGui.OpenPopup("Cancel VIP subscription###PartyPulseVipCancelSubscription");
+                openCancelSubscriptionPopup = true;
             }
             ImGui.EndDisabled();
 
@@ -274,7 +285,7 @@ public sealed class VipPlayerEditWindow : Window, IDisposable
             {
                 pendingPaymentSubscriptionId = subscription.SubscriptionId;
                 pendingPaymentSettled = !subscription.IsSettled;
-                ImGui.OpenPopup("Change club payment###PartyPulseVipPaymentStatus");
+                openPaymentStatusPopup = true;
             }
             ImGui.EndDisabled();
             if (subscription.IsInPendingSettlement && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
@@ -288,10 +299,36 @@ public sealed class VipPlayerEditWindow : Window, IDisposable
         ImGui.EndTable();
     }
 
+    private void OpenQueuedConfirmationPopups()
+    {
+        // The action buttons are rendered inside per-row PushID scopes. Dear ImGui
+        // includes the current ID stack when resolving popup IDs, so opening a
+        // modal from inside a row and beginning it later at the window root uses
+        // two different IDs. Queue the request and open each modal here, where
+        // the matching BeginPopupModal calls are also rendered.
+        if (openUnlinkCharacterPopup)
+        {
+            ImGui.OpenPopup(UnlinkCharacterPopupName);
+            openUnlinkCharacterPopup = false;
+        }
+
+        if (openCancelSubscriptionPopup)
+        {
+            ImGui.OpenPopup(CancelSubscriptionPopupName);
+            openCancelSubscriptionPopup = false;
+        }
+
+        if (openPaymentStatusPopup)
+        {
+            ImGui.OpenPopup(PaymentStatusPopupName);
+            openPaymentStatusPopup = false;
+        }
+    }
+
     private void DrawUnlinkConfirmation(PartyPulse.Models.VenueConnectionConfiguration venue)
     {
         if (!ImGui.BeginPopupModal(
-                "Unlink VIP character###PartyPulseVipUnlinkCharacter",
+                UnlinkCharacterPopupName,
                 ImGuiWindowFlags.AlwaysAutoResize))
         {
             return;
@@ -317,7 +354,7 @@ public sealed class VipPlayerEditWindow : Window, IDisposable
     private void DrawCancellationConfirmation(PartyPulse.Models.VenueConnectionConfiguration venue)
     {
         if (!ImGui.BeginPopupModal(
-                "Cancel VIP subscription###PartyPulseVipCancelSubscription",
+                CancelSubscriptionPopupName,
                 ImGuiWindowFlags.AlwaysAutoResize))
         {
             return;
@@ -348,7 +385,7 @@ public sealed class VipPlayerEditWindow : Window, IDisposable
     private void DrawPaymentConfirmation(PartyPulse.Models.VenueConnectionConfiguration venue)
     {
         if (!ImGui.BeginPopupModal(
-                "Change club payment###PartyPulseVipPaymentStatus",
+                PaymentStatusPopupName,
                 ImGuiWindowFlags.AlwaysAutoResize))
         {
             return;
