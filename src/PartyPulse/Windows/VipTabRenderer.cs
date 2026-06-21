@@ -28,6 +28,8 @@ public sealed class VipTabRenderer(Plugin plugin)
     private bool packageLifetime;
     private string packageDiscordRoleId = string.Empty;
     private bool packageArchived;
+    private string settlementTargetName = string.Empty;
+    private string settlementTargetWorld = string.Empty;
 
     public void Draw(VenueConnectionConfiguration venue)
     {
@@ -65,15 +67,21 @@ public sealed class VipTabRenderer(Plugin plugin)
         {
             ImGui.SameLine();
             ImGui.TextUnformatted($"My unpaid VIP sales: {view.PersonalUnpaidGil:N0} gil");
+            if (view.PersonalPendingSettlementGil > 0)
+            {
+                ImGui.SameLine();
+                ImGui.TextDisabled($"Pending: {view.PersonalPendingSettlementGil:N0} gil");
+            }
         }
 
         ImGui.Spacing();
         DrawTargetSection(venue, view, isBusy);
+        DrawSettlementControls(venue, view, isBusy);
 
         ImGui.Spacing();
         ImGui.Separator();
         ImGui.Spacing();
-        DrawVipPlayerList(view);
+        DrawVipPlayerList(venue, view, isBusy);
 
         if (view.Capabilities.CanManagePackages)
         {
@@ -363,7 +371,10 @@ public sealed class VipTabRenderer(Plugin plugin)
         ImGui.EndTable();
     }
 
-    private static void DrawVipPlayerList(VipManagementViewResponse view)
+    private void DrawVipPlayerList(
+        VenueConnectionConfiguration venue,
+        VipManagementViewResponse view,
+        bool isBusy)
     {
         ImGui.TextUnformatted("VIP player list");
 
@@ -376,7 +387,7 @@ public sealed class VipTabRenderer(Plugin plugin)
 
         if (!ImGui.BeginTable(
                 "VipPlayers",
-                4,
+                view.Capabilities.CanManagePlayers || view.Capabilities.CanManagePayments ? 5 : 4,
                 flags,
                 new Vector2(0, 230 * ImGuiHelpers.GlobalScale)))
         {
@@ -387,6 +398,10 @@ public sealed class VipTabRenderer(Plugin plugin)
         ImGui.TableSetupColumn("Discord");
         ImGui.TableSetupColumn("Last subscription");
         ImGui.TableSetupColumn("Characters");
+        if (view.Capabilities.CanManagePlayers || view.Capabilities.CanManagePayments)
+        {
+            ImGui.TableSetupColumn("##Edit", ImGuiTableColumnFlags.WidthFixed, 60 * ImGuiHelpers.GlobalScale);
+        }
         ImGui.TableHeadersRow();
 
         foreach (var player in view.Players.OrderBy(player => player.DisplayCharacterName))
@@ -407,9 +422,81 @@ public sealed class VipTabRenderer(Plugin plugin)
                 : player.LastSubscriptionEndsAt?.ToLocalTime().ToString("g") ?? "None");
             ImGui.TableSetColumnIndex(3);
             ImGui.TextUnformatted(characterCount.ToString(CultureInfo.InvariantCulture));
+            if (view.Capabilities.CanManagePlayers || view.Capabilities.CanManagePayments)
+            {
+                ImGui.TableSetColumnIndex(4);
+                ImGui.PushID(player.VipPlayerId);
+                ImGui.BeginDisabled(isBusy);
+                if (ImGui.SmallButton("Edit"))
+                {
+                    plugin.OpenVipPlayerEditor(venue, player.VipPlayerId);
+                }
+                ImGui.EndDisabled();
+                ImGui.PopID();
+            }
         }
 
         ImGui.EndTable();
+    }
+
+    private void DrawSettlementControls(
+        VenueConnectionConfiguration venue,
+        VipManagementViewResponse view,
+        bool isBusy)
+    {
+        if (!view.Capabilities.CanSell || view.PersonalAvailableSettlementGil <= 0)
+        {
+            return;
+        }
+
+        ImGui.Spacing();
+        ImGui.TextUnformatted(
+            $"Available to settle: {view.PersonalAvailableSettlementGil:N0} gil");
+
+        var hasTarget = plugin.TargetProvider.TryGetCurrentTarget(out var target, out var targetReason);
+        ImGui.BeginDisabled(isBusy || !hasTarget);
+        if (ImGui.Button("Settle payment"))
+        {
+            settlementTargetName = target!.CharacterName;
+            settlementTargetWorld = target.WorldName;
+            ImGui.OpenPopup("Initiate VIP settlement###PartyPulseVipSettlement");
+        }
+        ImGui.EndDisabled();
+        if (!hasTarget)
+        {
+            ImGui.SameLine();
+            ImGui.TextDisabled(targetReason);
+        }
+
+        if (!ImGui.BeginPopupModal(
+                "Initiate VIP settlement###PartyPulseVipSettlement",
+                ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            return;
+        }
+
+        ImGui.TextWrapped(
+            $"Initiate a trade with {settlementTargetName} @ {settlementTargetWorld} for " +
+            $"{view.PersonalAvailableSettlementGil:N0} gil?");
+        ImGui.TextWrapped(
+            "The targeted character must belong to an active venue user with finance.settlements.manage or venue.owner.");
+        ImGui.TextColored(
+            new Vector4(1f, 0.65f, 0.25f, 1f),
+            "Confirming creates a pending server transaction before the trade is opened. The trade integration is intentionally empty for now, so complete the in-game trade manually.");
+
+        if (ImGui.Button("Create pending settlement"))
+        {
+            plugin.CreateVipSettlement(
+                venue,
+                new CreateVipSettlementRequest(settlementTargetName, settlementTargetWorld));
+            ImGui.CloseCurrentPopup();
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Cancel"))
+        {
+            ImGui.CloseCurrentPopup();
+        }
+        ImGui.EndPopup();
     }
 
     private void DrawPackageManagement(
@@ -541,6 +628,11 @@ public sealed class VipTabRenderer(Plugin plugin)
 
     private static string GetSubscriptionStatus(VipSubscriptionSummary subscription)
     {
+        if (subscription.IsCancelled)
+        {
+            return "Cancelled";
+        }
+
         var now = DateTimeOffset.UtcNow;
         if (subscription.StartsAt > now)
         {

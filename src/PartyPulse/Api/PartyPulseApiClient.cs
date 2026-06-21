@@ -409,9 +409,157 @@ public sealed class PartyPulseApiClient : IDisposable
             static payload => payload.VipPlayerId > 0 && payload.PreferredCharacterId > 0,
             cancellationToken);
 
+    public Task<ApiResult<VipPlayerOperationResponse>> UpdateVipPlayerAsync(
+        Uri baseUri,
+        string accessToken,
+        int vipPlayerId,
+        UpdateVipPlayerRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<VipPlayerOperationResponse>(
+            baseUri,
+            HttpMethod.Put,
+            $"api/v1/vip/players/{vipPlayerId}",
+            accessToken,
+            request,
+            static payload => payload.VipPlayerId > 0 &&
+                              !string.IsNullOrWhiteSpace(payload.DiscordUsername),
+            cancellationToken);
+
+    public Task<ApiResult<VipCharacterOperationResponse>> UnlinkVipCharacterAsync(
+        Uri baseUri,
+        string accessToken,
+        int vipPlayerId,
+        int characterId,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<VipCharacterOperationResponse>(
+            baseUri,
+            HttpMethod.Delete,
+            $"api/v1/vip/players/{vipPlayerId}/characters/{characterId}",
+            accessToken,
+            null,
+            static payload => payload.VipPlayerId > 0 &&
+                              payload.CharacterId > 0 &&
+                              payload.PreferredCharacterId > 0,
+            cancellationToken);
+
+    public Task<ApiResult<VipSubscriptionCancellationResponse>> CancelVipSubscriptionAsync(
+        Uri baseUri,
+        string accessToken,
+        long subscriptionId,
+        CancelVipSubscriptionRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<VipSubscriptionCancellationResponse>(
+            baseUri,
+            HttpMethod.Post,
+            $"api/v1/vip/subscriptions/{subscriptionId}/cancel",
+            accessToken,
+            request,
+            static payload => payload.SubscriptionId > 0 &&
+                              payload.VipPlayerId > 0 &&
+                              payload.CancelledAt != default,
+            cancellationToken);
+
+    public Task<ApiResult<VipSubscriptionPaymentStatusResponse>> SetVipSubscriptionPaymentStatusAsync(
+        Uri baseUri,
+        string accessToken,
+        long subscriptionId,
+        SetVipSubscriptionPaymentStatusRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<VipSubscriptionPaymentStatusResponse>(
+            baseUri,
+            HttpMethod.Put,
+            $"api/v1/vip/subscriptions/{subscriptionId}/payment-status",
+            accessToken,
+            request,
+            static payload => payload.SubscriptionId > 0 &&
+                              (!payload.Settled || payload.PaidToVenueAt is not null),
+            cancellationToken);
+
+    public Task<ApiResult<FinanceViewResponse>> GetFinanceAsync(
+        Uri baseUri,
+        string accessToken,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<FinanceViewResponse>(
+            baseUri,
+            HttpMethod.Get,
+            "api/v1/finance",
+            accessToken,
+            null,
+            ValidateFinanceViewResponse,
+            cancellationToken);
+
+    public Task<ApiResult<CreateVipSettlementResponse>> CreateVipSettlementAsync(
+        Uri baseUri,
+        string accessToken,
+        CreateVipSettlementRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<CreateVipSettlementResponse>(
+            baseUri,
+            HttpMethod.Post,
+            "api/v1/finance/settlements/vip",
+            accessToken,
+            request,
+            static payload => payload.SettlementId > 0 &&
+                              payload.AmountGil > 0 &&
+                              payload.TargetUserId > 0 &&
+                              payload.TargetCharacterId > 0 &&
+                              !string.IsNullOrWhiteSpace(payload.TargetCharacterName) &&
+                              !string.IsNullOrWhiteSpace(payload.TargetWorldName) &&
+                              !string.IsNullOrWhiteSpace(payload.TargetUserDisplayName) &&
+                              payload.CreatedAt != default,
+            cancellationToken);
+
+    public Task<ApiResult<RespondSettlementResponse>> RespondSettlementAsync(
+        Uri baseUri,
+        string accessToken,
+        long settlementId,
+        RespondSettlementRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<RespondSettlementResponse>(
+            baseUri,
+            HttpMethod.Post,
+            $"api/v1/finance/settlements/{settlementId}/response",
+            accessToken,
+            request,
+            static payload => payload.SettlementId > 0 &&
+                              !string.IsNullOrWhiteSpace(payload.Status) &&
+                              payload.AmountGil > 0 &&
+                              payload.RespondedAt != default,
+            cancellationToken);
+
+    public Task<ApiResult<NotificationPollResponse>> PollNotificationsAsync(
+        Uri baseUri,
+        string accessToken,
+        int maxResults,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<NotificationPollResponse>(
+            baseUri,
+            HttpMethod.Get,
+            $"api/v1/notifications?maxResults={maxResults}",
+            accessToken,
+            null,
+            ValidateNotificationPollResponse,
+            cancellationToken);
+
+    public Task<ApiResult<MarkNotificationSeenResponse>> MarkNotificationSeenAsync(
+        Uri baseUri,
+        string accessToken,
+        long notificationId,
+        bool dismissed,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<MarkNotificationSeenResponse>(
+            baseUri,
+            HttpMethod.Post,
+            $"api/v1/notifications/{notificationId}/seen",
+            accessToken,
+            new MarkNotificationSeenRequest(dismissed),
+            static payload => payload.NotificationId > 0 && payload.SeenAt != default,
+            cancellationToken);
+
     private static bool ValidateVipManagementViewResponse(VipManagementViewResponse payload) =>
         payload.Capabilities is not null &&
         payload.PersonalUnpaidGil >= 0 &&
+        payload.PersonalPendingSettlementGil >= 0 &&
         payload.Packages is not null &&
         payload.Players is not null &&
         payload.Characters is not null &&
@@ -438,6 +586,39 @@ public sealed class PartyPulseApiClient : IDisposable
             subscription.PurchasePriceGil >= 0 &&
             !string.IsNullOrWhiteSpace(subscription.PackageName) &&
             !string.IsNullOrWhiteSpace(subscription.SellerDisplayName));
+
+    private static bool ValidateFinanceViewResponse(FinanceViewResponse payload) =>
+        payload.Capabilities is not null &&
+        payload.PersonalUnpaidVipGil >= 0 &&
+        payload.PersonalPendingVipGil >= 0 &&
+        payload.PersonalAvailableVipGil >= 0 &&
+        payload.VenuePendingCount >= 0 &&
+        payload.Settlements is not null &&
+        payload.Items is not null &&
+        payload.Settlements.All(static settlement =>
+            settlement.SettlementId > 0 &&
+            settlement.AmountGil > 0 &&
+            !string.IsNullOrWhiteSpace(settlement.SettlementType) &&
+            !string.IsNullOrWhiteSpace(settlement.Status) &&
+            !string.IsNullOrWhiteSpace(settlement.InitiatedByDisplayName) &&
+            !string.IsNullOrWhiteSpace(settlement.TargetUserDisplayName)) &&
+        payload.Items.All(static item =>
+            item.SettlementItemId > 0 &&
+            item.SettlementId > 0 &&
+            item.SourceId > 0 &&
+            item.AmountGil > 0 &&
+            !string.IsNullOrWhiteSpace(item.SourceType));
+
+    private static bool ValidateNotificationPollResponse(NotificationPollResponse payload) =>
+        payload.UnseenNotificationCount >= 0 &&
+        payload.PendingSettlementCount >= 0 &&
+        payload.Notifications is not null &&
+        payload.Notifications.All(static notification =>
+            notification.NotificationId > 0 &&
+            !string.IsNullOrWhiteSpace(notification.NotificationType) &&
+            !string.IsNullOrWhiteSpace(notification.Title) &&
+            !string.IsNullOrWhiteSpace(notification.Message) &&
+            notification.CreatedAt != default);
 
     private static bool ValidateVipSaleResponse(SellVipSubscriptionResponse payload) =>
         payload.SubscriptionId > 0 &&

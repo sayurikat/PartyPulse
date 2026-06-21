@@ -6,7 +6,9 @@ namespace PartyPulse.Api;
 public sealed record VipManagementCapabilities(
     bool CanView,
     bool CanSell,
-    bool CanManagePackages);
+    bool CanManagePackages,
+    bool CanManagePlayers,
+    bool CanManagePayments);
 
 public sealed record VipPackageSummary(
     int PackageId,
@@ -100,15 +102,32 @@ public sealed record VipSubscriptionSummary(
     DateTimeOffset? EndsAt,
     int SoldByUserId,
     string SellerDisplayName,
-    DateTimeOffset? PaidToVenueAt);
+    DateTimeOffset? PaidToVenueAt,
+    int? PaidToVenueByUserId,
+    string? PaidToVenueByDisplayName,
+    DateTimeOffset? CancelledAt,
+    int? CancelledByUserId,
+    string? CancelledByDisplayName,
+    string? CancellationReason,
+    long? PendingSettlementId)
+{
+    public bool IsCancelled => CancelledAt is not null;
+    public bool IsSettled => PaidToVenueAt is not null;
+    public bool IsInPendingSettlement => PendingSettlementId is not null;
+}
 
 public sealed record VipManagementViewResponse(
     VipManagementCapabilities Capabilities,
     long PersonalUnpaidGil,
+    long PersonalPendingSettlementGil,
     IReadOnlyList<VipPackageSummary> Packages,
     IReadOnlyList<VipPlayerSummary> Players,
     IReadOnlyList<VipCharacterSummary> Characters,
-    IReadOnlyList<VipSubscriptionSummary> Subscriptions);
+    IReadOnlyList<VipSubscriptionSummary> Subscriptions)
+{
+    public long PersonalAvailableSettlementGil =>
+        Math.Max(0, PersonalUnpaidGil - PersonalPendingSettlementGil);
+}
 
 public sealed record CreateVipPackageRequest(
     string Name,
@@ -137,9 +156,10 @@ public sealed record SellVipSubscriptionRequest(
     int? VipPlayerId,
     bool CustomerPaymentConfirmed);
 
-public sealed record LinkVipCharacterRequest(
-    string CharacterName,
-    string WorldName);
+public sealed record LinkVipCharacterRequest(string CharacterName, string WorldName);
+public sealed record UpdateVipPlayerRequest(string DiscordUsername);
+public sealed record CancelVipSubscriptionRequest(string? Reason);
+public sealed record SetVipSubscriptionPaymentStatusRequest(bool Settled);
 
 public sealed record VipPackageOperationResponse(int PackageId);
 
@@ -151,6 +171,20 @@ public sealed record VipCharacterOperationResponse(
 public sealed record VipPreferredCharacterResponse(
     int VipPlayerId,
     int PreferredCharacterId);
+
+public sealed record VipPlayerOperationResponse(
+    int VipPlayerId,
+    string DiscordUsername);
+
+public sealed record VipSubscriptionCancellationResponse(
+    long SubscriptionId,
+    int VipPlayerId,
+    DateTimeOffset CancelledAt);
+
+public sealed record VipSubscriptionPaymentStatusResponse(
+    long SubscriptionId,
+    bool Settled,
+    DateTimeOffset? PaidToVenueAt);
 
 public sealed record SellVipSubscriptionResponse(
     long SubscriptionId,

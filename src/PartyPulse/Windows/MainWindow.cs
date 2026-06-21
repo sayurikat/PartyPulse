@@ -16,6 +16,9 @@ public sealed class MainWindow : Window, IDisposable
 {
     private readonly Plugin plugin;
     private readonly VipTabRenderer vipTab;
+    private readonly FinanceTabRenderer financeTab;
+    private bool requestSelectFinanceTab;
+    private long? requestedFinanceSettlementId;
     private Guid addUserProfileId;
     private string addUserDisplayName = string.Empty;
     private string addUserDiscordHandle = string.Empty;
@@ -33,12 +36,29 @@ public sealed class MainWindow : Window, IDisposable
     {
         this.plugin = plugin;
         vipTab = new VipTabRenderer(plugin);
+        financeTab = new FinanceTabRenderer(plugin);
 
         SizeConstraints = new WindowSizeConstraints
         {
             MinimumSize = new Vector2(720, 500),
             MaximumSize = new Vector2(float.MaxValue, float.MaxValue),
         };
+    }
+
+    public void OpenFinance(Guid venueProfileId, long? settlementId)
+    {
+        var venue = plugin.Configuration.VenueConnections.FirstOrDefault(
+            value => value.ProfileId == venueProfileId);
+        if (venue is null)
+        {
+            return;
+        }
+
+        plugin.Configuration.SelectedVenueProfileId = venue.ProfileId;
+        plugin.Configuration.Save();
+        requestedFinanceSettlementId = settlementId;
+        requestSelectFinanceTab = true;
+        IsOpen = true;
     }
 
     public void Dispose()
@@ -189,10 +209,17 @@ public sealed class MainWindow : Window, IDisposable
             }
 
             vipTab.Draw(selectedVenue);
+            if (financeTab.Draw(
+                    selectedVenue,
+                    requestSelectFinanceTab,
+                    requestedFinanceSettlementId))
+            {
+                requestSelectFinanceTab = false;
+                requestedFinanceSettlementId = null;
+            }
         }
 
         DrawPlaceholderTab("Staff", "Clock-in state, staff tools, macros, timers, and Party Finder controls will live here.");
-        DrawPlaceholderTab("Payout", "Manager payout calculations, adjustments, finalization, and payment actions will live here.");
         DrawPlaceholderTab("Bar", "Bar sales, gambashots, jackpots, and buyout tracking will live here.");
         DrawPlaceholderTab("Games", "Venue-wide game state, rolls, host controls, and timers will live here.");
         DrawPlaceholderTab("Greeter", "Target-aware greeting actions and VIP-specific greeting selection will live here.");

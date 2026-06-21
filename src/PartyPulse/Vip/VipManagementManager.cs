@@ -241,6 +241,126 @@ public sealed class VipManagementManager : IDisposable
             },
             cancellationToken);
 
+    public Task<ApiResult<VipPlayerOperationResponse>> UpdatePlayerAsync(
+        VenueConnectionConfiguration venue,
+        int vipPlayerId,
+        UpdateVipPlayerRequest request,
+        CancellationToken cancellationToken) =>
+        WithGateAsync(
+            venue,
+            async () =>
+            {
+                var context = await GetAuthorizedContextAsync(venue, cancellationToken);
+                if (!context.Success)
+                {
+                    return ApiResult<VipPlayerOperationResponse>.Failed(context.Failure!);
+                }
+
+                var result = await apiClient.UpdateVipPlayerAsync(
+                    context.BaseUri!,
+                    context.AccessToken!,
+                    vipPlayerId,
+                    request,
+                    cancellationToken);
+                if (result.Success)
+                {
+                    await RefreshAfterMutationAsync(venue, context, cancellationToken);
+                }
+
+                return result;
+            },
+            cancellationToken);
+
+    public Task<ApiResult<VipCharacterOperationResponse>> UnlinkCharacterAsync(
+        VenueConnectionConfiguration venue,
+        int vipPlayerId,
+        int characterId,
+        CancellationToken cancellationToken) =>
+        WithGateAsync(
+            venue,
+            async () =>
+            {
+                var context = await GetAuthorizedContextAsync(venue, cancellationToken);
+                if (!context.Success)
+                {
+                    return ApiResult<VipCharacterOperationResponse>.Failed(context.Failure!);
+                }
+
+                var result = await apiClient.UnlinkVipCharacterAsync(
+                    context.BaseUri!,
+                    context.AccessToken!,
+                    vipPlayerId,
+                    characterId,
+                    cancellationToken);
+                if (result.Success)
+                {
+                    await RefreshAfterMutationAsync(venue, context, cancellationToken);
+                }
+
+                return result;
+            },
+            cancellationToken);
+
+    public Task<ApiResult<VipSubscriptionCancellationResponse>> CancelSubscriptionAsync(
+        VenueConnectionConfiguration venue,
+        long subscriptionId,
+        CancelVipSubscriptionRequest request,
+        CancellationToken cancellationToken) =>
+        WithGateAsync(
+            venue,
+            async () =>
+            {
+                var context = await GetAuthorizedContextAsync(venue, cancellationToken);
+                if (!context.Success)
+                {
+                    return ApiResult<VipSubscriptionCancellationResponse>.Failed(context.Failure!);
+                }
+
+                var result = await apiClient.CancelVipSubscriptionAsync(
+                    context.BaseUri!,
+                    context.AccessToken!,
+                    subscriptionId,
+                    request,
+                    cancellationToken);
+                if (result.Success)
+                {
+                    await RefreshAfterMutationAsync(venue, context, cancellationToken);
+                }
+
+                return result;
+            },
+            cancellationToken);
+
+    public Task<ApiResult<VipSubscriptionPaymentStatusResponse>> SetSubscriptionPaymentStatusAsync(
+        VenueConnectionConfiguration venue,
+        long subscriptionId,
+        SetVipSubscriptionPaymentStatusRequest request,
+        CancellationToken cancellationToken) =>
+        WithGateAsync(
+            venue,
+            async () =>
+            {
+                var context = await GetAuthorizedContextAsync(venue, cancellationToken);
+                if (!context.Success)
+                {
+                    return ApiResult<VipSubscriptionPaymentStatusResponse>.Failed(context.Failure!);
+                }
+
+                var result = await apiClient.SetVipSubscriptionPaymentStatusAsync(
+                    context.BaseUri!,
+                    context.AccessToken!,
+                    subscriptionId,
+                    request,
+                    cancellationToken);
+                if (result.Success)
+                {
+                    await RefreshAfterMutationAsync(venue, context, cancellationToken);
+                }
+
+                return result;
+            },
+            cancellationToken);
+
     public void Clear(string message)
     {
         foreach (var pair in snapshots)

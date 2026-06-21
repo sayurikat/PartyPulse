@@ -9,6 +9,8 @@ using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 using PartyPulse.Api;
 using PartyPulse.Authentication;
+using PartyPulse.Finance;
+using PartyPulse.Notifications;
 using PartyPulse.Models;
 using PartyPulse.SelfService;
 using PartyPulse.Services;
@@ -38,6 +40,9 @@ public sealed class Plugin : IDalamudPlugin
     private readonly ConfigWindow configWindow;
     private readonly MainWindow mainWindow;
     private readonly VenueUserEditWindow venueUserEditWindow;
+    private readonly VipPlayerEditWindow vipPlayerEditWindow;
+    private readonly NotificationToastWindow notificationToastWindow;
+    private readonly SettlementTradeService settlementTradeService;
 
     private PlayerIdentity? observedIdentity;
     private bool autoConnectStarted;
@@ -75,13 +80,28 @@ public sealed class Plugin : IDalamudPlugin
             apiClient,
             IdentityProvider,
             Log);
+        Finance = new FinanceManagementManager(
+            Configuration,
+            Authentication,
+            apiClient,
+            IdentityProvider);
+        Notifications = new NotificationPollingManager(
+            Configuration,
+            Authentication,
+            apiClient,
+            IdentityProvider);
+        settlementTradeService = new SettlementTradeService();
 
         configWindow = new ConfigWindow(this);
         mainWindow = new MainWindow(this);
         venueUserEditWindow = new VenueUserEditWindow(this);
+        vipPlayerEditWindow = new VipPlayerEditWindow(this);
+        notificationToastWindow = new NotificationToastWindow(this);
         WindowSystem.AddWindow(configWindow);
         WindowSystem.AddWindow(mainWindow);
         WindowSystem.AddWindow(venueUserEditWindow);
+        WindowSystem.AddWindow(vipPlayerEditWindow);
+        WindowSystem.AddWindow(notificationToastWindow);
 
         CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
         {
@@ -114,6 +134,10 @@ public sealed class Plugin : IDalamudPlugin
 
     public VipManagementManager Vip { get; }
 
+    public FinanceManagementManager Finance { get; }
+
+    public NotificationPollingManager Notifications { get; }
+
     public WindowSystem WindowSystem { get; } = new("PartyPulse");
 
     public CancellationToken LifetimeToken => lifetimeCancellation.Token;
@@ -138,6 +162,10 @@ public sealed class Plugin : IDalamudPlugin
         configWindow.Dispose();
         mainWindow.Dispose();
         venueUserEditWindow.Dispose();
+        vipPlayerEditWindow.Dispose();
+        notificationToastWindow.Dispose();
+        Notifications.Dispose();
+        Finance.Dispose();
         Vip.Dispose();
         SelfService.Dispose();
         UserManagement.Dispose();
@@ -295,6 +323,8 @@ public sealed class Plugin : IDalamudPlugin
         UserManagement.RemoveProfile(venue.ProfileId);
         SelfService.RemoveProfile(venue.ProfileId);
         Vip.RemoveProfile(venue.ProfileId);
+        Finance.RemoveProfile(venue.ProfileId);
+        Notifications.RemoveProfile(venue.ProfileId);
         Configuration.VenueConnections.RemoveAll(x => x.ProfileId == venue.ProfileId);
         Configuration.Normalize();
         Configuration.Save();
@@ -412,6 +442,89 @@ public sealed class Plugin : IDalamudPlugin
             SetVipPreferredCharacterAndReportAsync(venue, vipPlayerId, characterId),
             $"set preferred VIP character for {venue.VenueCode}");
 
+    public void UpdateVipPlayer(
+        VenueConnectionConfiguration venue,
+        int vipPlayerId,
+        UpdateVipPlayerRequest request) =>
+        Observe(
+            UpdateVipPlayerAndReportAsync(venue, vipPlayerId, request),
+            $"update VIP player {vipPlayerId} for {venue.VenueCode}");
+
+    public void UnlinkVipCharacter(
+        VenueConnectionConfiguration venue,
+        int vipPlayerId,
+        int characterId) =>
+        Observe(
+            UnlinkVipCharacterAndReportAsync(venue, vipPlayerId, characterId),
+            $"unlink VIP character {characterId} for {venue.VenueCode}");
+
+    public void CancelVipSubscription(
+        VenueConnectionConfiguration venue,
+        long subscriptionId,
+        CancelVipSubscriptionRequest request) =>
+        Observe(
+            CancelVipSubscriptionAndReportAsync(venue, subscriptionId, request),
+            $"cancel VIP subscription {subscriptionId} for {venue.VenueCode}");
+
+    public void SetVipSubscriptionPaymentStatus(
+        VenueConnectionConfiguration venue,
+        long subscriptionId,
+        SetVipSubscriptionPaymentStatusRequest request) =>
+        Observe(
+            SetVipSubscriptionPaymentStatusAndReportAsync(venue, subscriptionId, request),
+            $"set VIP payment status {subscriptionId} for {venue.VenueCode}");
+
+    public void EnsureFinanceLoaded(VenueConnectionConfiguration venue)
+    {
+        if (!Finance.ShouldLoad(venue))
+        {
+            return;
+        }
+
+        Observe(
+            Finance.LoadAsync(venue, false, LifetimeToken),
+            $"load finance data for {venue.VenueCode}");
+    }
+
+    public void RefreshFinance(VenueConnectionConfiguration venue) =>
+        Observe(
+            Finance.LoadAsync(venue, true, LifetimeToken),
+            $"refresh finance data for {venue.VenueCode}");
+
+    public void CreateVipSettlement(
+        VenueConnectionConfiguration venue,
+        CreateVipSettlementRequest request) =>
+        Observe(
+            CreateVipSettlementAndReportAsync(venue, request),
+            $"create VIP settlement for {venue.VenueCode}");
+
+    public void RespondSettlement(
+        VenueConnectionConfiguration venue,
+        long settlementId,
+        RespondSettlementRequest request) =>
+        Observe(
+            RespondSettlementAndReportAsync(venue, settlementId, request),
+            $"respond to settlement {settlementId} for {venue.VenueCode}");
+
+    public void OpenVipPlayerEditor(VenueConnectionConfiguration venue, int vipPlayerId) =>
+        vipPlayerEditWindow.Open(venue.ProfileId, vipPlayerId);
+
+    public void OpenNotificationAction(QueuedPartyPulseNotification queued)
+    {
+        var settlementId = string.Equals(
+                queued.Notification.ActionKey,
+                "finance.settlement",
+                StringComparison.OrdinalIgnoreCase)
+            ? queued.Notification.ActionEntityId
+            : null;
+        mainWindow.OpenFinance(queued.VenueProfileId, settlementId);
+    }
+
+    public void MarkNotificationSeen(QueuedPartyPulseNotification queued, bool dismissed) =>
+        Observe(
+            MarkNotificationSeenAsync(queued, dismissed),
+            $"mark notification {queued.Notification.NotificationId} seen");
+
     public void OpenVenueUserEditor(VenueConnectionConfiguration venue, VenueUserSummary user) =>
         venueUserEditWindow.Open(venue.ProfileId, user.UserId);
 
@@ -459,6 +572,8 @@ public sealed class Plugin : IDalamudPlugin
 
     private void OnFrameworkUpdate(IFramework framework)
     {
+        notificationToastWindow.Tick();
+
         if (!IdentityProvider.TryGetCurrent(out var identity, out _))
         {
             if (observedIdentity is not null)
@@ -469,6 +584,8 @@ public sealed class Plugin : IDalamudPlugin
                 UserManagement.Clear("Character logged out or changed.");
                 SelfService.Clear("Character logged out or changed.");
                 Vip.Clear("Character logged out or changed.");
+                Finance.Clear("Character logged out or changed.");
+                Notifications.Clear();
             }
 
             return;
@@ -482,6 +599,21 @@ public sealed class Plugin : IDalamudPlugin
             UserManagement.Clear("Character changed; venue-user data was cleared.");
             SelfService.Clear("Character changed; self-service data was cleared.");
             Vip.Clear("Character changed; VIP data was cleared.");
+            Finance.Clear("Character changed; finance data was cleared.");
+            Notifications.Clear();
+        }
+
+        var notificationVenues = Configuration.VenueConnections
+            .Where(venue =>
+                venue.IsRegistered &&
+                Authentication.GetSnapshot(venue).Status is
+                    AuthenticationStatus.Connected or AuthenticationStatus.Expired)
+            .ToArray();
+        if (Notifications.IsPollDue && notificationVenues.Length > 0)
+        {
+            Observe(
+                Notifications.PollDueAsync(notificationVenues, LifetimeToken),
+                "poll PartyPulse notifications");
         }
 
         if (!Configuration.AutoConnect)
@@ -605,6 +737,8 @@ public sealed class Plugin : IDalamudPlugin
         UserManagement.RemoveProfile(venue.ProfileId);
         SelfService.RemoveProfile(venue.ProfileId);
         Vip.RemoveProfile(venue.ProfileId);
+        Finance.RemoveProfile(venue.ProfileId);
+        Notifications.RemoveProfile(venue.ProfileId);
         ChatGui.Print($"Unauthorized from {venue.DisplayLabel}. The venue remains saved in visitor mode.", "PartyPulse");
     }
 
@@ -798,6 +932,153 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         ReportVipFailure(result.Failure, "The preferred VIP character could not be updated.");
+    }
+
+    private async Task UpdateVipPlayerAndReportAsync(
+        VenueConnectionConfiguration venue,
+        int vipPlayerId,
+        UpdateVipPlayerRequest request)
+    {
+        var result = await Vip.UpdatePlayerAsync(venue, vipPlayerId, request, LifetimeToken);
+        if (result.Success)
+        {
+            ChatGui.Print("Updated the VIP player's Discord username.", "PartyPulse");
+            return;
+        }
+
+        ReportVipFailure(result.Failure, "The VIP player could not be updated.");
+    }
+
+    private async Task UnlinkVipCharacterAndReportAsync(
+        VenueConnectionConfiguration venue,
+        int vipPlayerId,
+        int characterId)
+    {
+        var result = await Vip.UnlinkCharacterAsync(
+            venue,
+            vipPlayerId,
+            characterId,
+            LifetimeToken);
+        if (result.Success)
+        {
+            ChatGui.Print("Unlinked the character from the VIP player.", "PartyPulse");
+            return;
+        }
+
+        ReportVipFailure(result.Failure, "The VIP character could not be unlinked.");
+    }
+
+    private async Task CancelVipSubscriptionAndReportAsync(
+        VenueConnectionConfiguration venue,
+        long subscriptionId,
+        CancelVipSubscriptionRequest request)
+    {
+        var result = await Vip.CancelSubscriptionAsync(
+            venue,
+            subscriptionId,
+            request,
+            LifetimeToken);
+        if (result.Success)
+        {
+            ChatGui.Print(
+                $"Cancelled VIP subscription #{subscriptionId}. Refunds must be handled separately.",
+                "PartyPulse");
+            return;
+        }
+
+        ReportVipFailure(result.Failure, "The VIP subscription could not be cancelled.");
+    }
+
+    private async Task SetVipSubscriptionPaymentStatusAndReportAsync(
+        VenueConnectionConfiguration venue,
+        long subscriptionId,
+        SetVipSubscriptionPaymentStatusRequest request)
+    {
+        var result = await Vip.SetSubscriptionPaymentStatusAsync(
+            venue,
+            subscriptionId,
+            request,
+            LifetimeToken);
+        if (result.Success)
+        {
+            ChatGui.Print(
+                request.Settled
+                    ? $"Marked VIP subscription #{subscriptionId} as settled."
+                    : $"Marked VIP subscription #{subscriptionId} as unpaid.",
+                "PartyPulse");
+            await Finance.LoadAsync(venue, true, LifetimeToken);
+            return;
+        }
+
+        ReportVipFailure(result.Failure, "The VIP payment status could not be updated.");
+    }
+
+    private async Task CreateVipSettlementAndReportAsync(
+        VenueConnectionConfiguration venue,
+        CreateVipSettlementRequest request)
+    {
+        var result = await Finance.CreateVipSettlementAsync(venue, request, LifetimeToken);
+        if (!result.Success || result.Value is null)
+        {
+            ReportVipFailure(result.Failure, "The settlement transaction could not be created.");
+            return;
+        }
+
+        await settlementTradeService.InitiateTradeAsync(result.Value, LifetimeToken);
+        await Vip.LoadAsync(venue, true, LifetimeToken);
+        Notifications.PollSoon();
+        ChatGui.Print(
+            $"Created pending settlement #{result.Value.SettlementId} for {result.Value.AmountGil:N0} gil with {result.Value.TargetUserDisplayName}. Complete the in-game trade manually.",
+            "PartyPulse");
+    }
+
+    private async Task RespondSettlementAndReportAsync(
+        VenueConnectionConfiguration venue,
+        long settlementId,
+        RespondSettlementRequest request)
+    {
+        var result = await Finance.RespondSettlementAsync(
+            venue,
+            settlementId,
+            request,
+            LifetimeToken);
+        if (!result.Success || result.Value is null)
+        {
+            ReportVipFailure(result.Failure, "The settlement transaction could not be resolved.");
+            return;
+        }
+
+        await Vip.LoadAsync(venue, true, LifetimeToken);
+        Notifications.PollSoon();
+        ChatGui.Print(
+            $"Settlement #{settlementId} was {result.Value.Status}.",
+            "PartyPulse");
+    }
+
+    private async Task MarkNotificationSeenAsync(
+        QueuedPartyPulseNotification queued,
+        bool dismissed)
+    {
+        var venue = Configuration.VenueConnections.FirstOrDefault(
+            value => value.ProfileId == queued.VenueProfileId);
+        if (venue is null)
+        {
+            return;
+        }
+
+        var result = await Notifications.MarkSeenAsync(
+            venue,
+            queued.Notification.NotificationId,
+            dismissed,
+            LifetimeToken);
+        if (!result.Success)
+        {
+            Log.Warning(
+                "Could not mark notification {NotificationId} seen: {Code} {Message}",
+                queued.Notification.NotificationId,
+                result.Failure?.Code,
+                result.Failure?.Message);
+        }
     }
 
     private static void ReportVipFailure(ApiFailure? failure, string fallback) =>
