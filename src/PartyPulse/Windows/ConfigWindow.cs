@@ -19,6 +19,8 @@ public sealed class ConfigWindow : Window, IDisposable
     private readonly Dictionary<Guid, string> recoveryCodes = [];
     private readonly Dictionary<Guid, string> pairingCodes = [];
     private string venueCodeInput = string.Empty;
+    private VenueConnectionConfiguration? pendingUnauthorize;
+    private bool requestOpenUnauthorizePopup;
     private VenueConnectionConfiguration? pendingLocalRemoval;
     private bool requestOpenLocalRemovalPopup;
     private bool dirty;
@@ -72,6 +74,7 @@ public sealed class ConfigWindow : Window, IDisposable
         DrawVenueConnections();
         ImGui.Spacing();
         DrawFooter();
+        DrawUnauthorizeVenueConfirmation();
         DrawRemoveVenueConfirmation();
     }
 
@@ -229,6 +232,32 @@ public sealed class ConfigWindow : Window, IDisposable
                     DrawStatusText("Visitor mode — public venue information only.", AuthenticationStatus.Disconnected);
                 }
 
+                if (venue.IsRegistered)
+                {
+                    var selfService = plugin.SelfService.GetSnapshot(venue);
+                    var isLastOwner = selfService.View?.IsLastOwner == true;
+
+                    ImGui.BeginDisabled(isLastOwner);
+                    if (ImGui.Button("Unauthorize from venue"))
+                    {
+                        pendingUnauthorize = venue;
+                        requestOpenUnauthorizePopup = true;
+                    }
+                    ImGui.EndDisabled();
+
+                    if (isLastOwner)
+                    {
+                        ImGui.TextColored(
+                            new Vector4(1f, 0.65f, 0.3f, 1f),
+                            "You are the venue's last active owner and cannot unauthorize until another owner exists.");
+                    }
+                    else
+                    {
+                        ImGui.TextDisabled(
+                            "Disables your venue user and revokes all of its registered devices. The venue stays saved here in visitor mode.");
+                    }
+                }
+
                 if (ImGui.Button("Remove venue from this device"))
                 {
                     pendingLocalRemoval = venue;
@@ -240,6 +269,48 @@ public sealed class ConfigWindow : Window, IDisposable
             ImGui.Spacing();
         }
 
+    }
+
+    private void DrawUnauthorizeVenueConfirmation()
+    {
+        // Like the local-removal popup, this is opened outside the per-venue
+        // ImGui ID scope so OpenPopup and BeginPopupModal use the same ID.
+        if (requestOpenUnauthorizePopup)
+        {
+            ImGui.OpenPopup("Unauthorize from venue###PartyPulseConfigUnauthorizeVenue");
+            requestOpenUnauthorizePopup = false;
+        }
+
+        if (!ImGui.BeginPopupModal(
+                "Unauthorize from venue###PartyPulseConfigUnauthorizeVenue",
+                ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            return;
+        }
+
+        ImGui.TextWrapped(
+            $"Unauthorize your venue user from {pendingUnauthorize?.DisplayLabel ?? "this venue"}?");
+        ImGui.TextWrapped(
+            "This disables the server-side venue user, removes its permissions, revokes all registered devices, and unlinks its characters.");
+        ImGui.TextDisabled(
+            "The public venue remains saved on this computer in visitor mode.");
+
+        if (ImGui.Button("Unauthorize") && pendingUnauthorize is not null)
+        {
+            var venue = pendingUnauthorize;
+            pendingUnauthorize = null;
+            plugin.UnauthorizeFromVenue(venue);
+            ImGui.CloseCurrentPopup();
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Cancel"))
+        {
+            pendingUnauthorize = null;
+            ImGui.CloseCurrentPopup();
+        }
+
+        ImGui.EndPopup();
     }
 
     private void DrawRemoveVenueConfirmation()
