@@ -482,9 +482,9 @@ public sealed class VipTabRenderer(Plugin plugin)
             "The targeted character must belong to an active venue user with finance.settlements.manage or venue.owner.");
         ImGui.TextColored(
             new Vector4(1f, 0.65f, 0.25f, 1f),
-            "Confirming creates a pending server transaction before the trade is opened. The trade integration is intentionally empty for now, so complete the in-game trade manually.");
+            "Confirming checks Dropbox, creates a pending server transaction, focuses the target, opens Dropbox, and starts the trade queue. The collector must still confirm that payment was received.");
 
-        if (ImGui.Button("Create pending settlement"))
+        if (ImGui.Button("Create settlement and start trade"))
         {
             plugin.CreateVipSettlement(
                 venue,

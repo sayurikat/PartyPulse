@@ -10,6 +10,8 @@ using Dalamud.Plugin.Services;
 using PartyPulse.Api;
 using PartyPulse.Authentication;
 using PartyPulse.Finance;
+using PartyPulse.Integrations;
+using PartyPulse.Integrations.Dropbox;
 using PartyPulse.Notifications;
 using PartyPulse.Models;
 using PartyPulse.SelfService;
@@ -90,7 +92,13 @@ public sealed class Plugin : IDalamudPlugin
             Authentication,
             apiClient,
             IdentityProvider);
-        settlementTradeService = new SettlementTradeService();
+        var dropboxApi = new DropboxApi(PluginInterface, Log);
+        settlementTradeService = new SettlementTradeService(
+            dropboxApi,
+            Framework,
+            CommandManager,
+            TargetManager,
+            Log);
 
         configWindow = new ConfigWindow(this);
         mainWindow = new MainWindow(this);
@@ -1017,6 +1025,23 @@ public sealed class Plugin : IDalamudPlugin
         VenueConnectionConfiguration venue,
         CreateVipSettlementRequest request)
     {
+        var readiness = await settlementTradeService.CheckReadyAsync(
+            request,
+            LifetimeToken);
+        if (!readiness.Success)
+        {
+            if (readiness.Failure?.Kind == PluginIntegrationFailureKind.Cancelled &&
+                LifetimeToken.IsCancellationRequested)
+            {
+                return;
+            }
+
+            ReportPluginIntegrationFailure(
+                readiness.Failure,
+                "The settlement was not created because Dropbox is unavailable.");
+            return;
+        }
+
         var result = await Finance.CreateVipSettlementAsync(venue, request, LifetimeToken);
         if (!result.Success || result.Value is null)
         {
@@ -1024,11 +1049,31 @@ public sealed class Plugin : IDalamudPlugin
             return;
         }
 
-        await settlementTradeService.InitiateTradeAsync(result.Value, LifetimeToken);
+        var tradeResult = await settlementTradeService.InitiateTradeAsync(
+            result.Value,
+            LifetimeToken);
         await Vip.LoadAsync(venue, true, LifetimeToken);
         Notifications.PollSoon();
+
+        if (!tradeResult.Success)
+        {
+            if (tradeResult.Failure?.Kind == PluginIntegrationFailureKind.Cancelled &&
+                LifetimeToken.IsCancellationRequested)
+            {
+                return;
+            }
+
+            ChatGui.PrintError(
+                $"Pending settlement #{result.Value.SettlementId} was created, but Dropbox did not start the trade: " +
+                $"{FormatPluginIntegrationFailure(tradeResult.Failure, "Unknown Dropbox error")} " +
+                "Complete the trade manually or have the collector reject the pending settlement.",
+                "PartyPulse");
+            return;
+        }
+
         ChatGui.Print(
-            $"Created pending settlement #{result.Value.SettlementId} for {result.Value.AmountGil:N0} gil with {result.Value.TargetUserDisplayName}. Complete the in-game trade manually.",
+            $"Created pending settlement #{result.Value.SettlementId} for {result.Value.AmountGil:N0} gil with " +
+            $"{result.Value.TargetUserDisplayName}. Dropbox was instructed to begin the trade; the collector must still confirm the payment.",
             "PartyPulse");
     }
 
@@ -1083,6 +1128,18 @@ public sealed class Plugin : IDalamudPlugin
 
     private static void ReportVipFailure(ApiFailure? failure, string fallback) =>
         ChatGui.PrintError(failure?.Message ?? fallback, "PartyPulse");
+
+    private static void ReportPluginIntegrationFailure(
+        PluginIntegrationFailure? failure,
+        string fallback) =>
+        ChatGui.PrintError(FormatPluginIntegrationFailure(failure, fallback), "PartyPulse");
+
+    private static string FormatPluginIntegrationFailure(
+        PluginIntegrationFailure? failure,
+        string fallback) =>
+        failure is null
+            ? fallback
+            : $"{failure.Message} [{failure.Code}]";
 
     private static void ReportUserManagementFailure(ApiFailure? failure, string fallback) =>
         ChatGui.PrintError(failure?.Message ?? fallback, "PartyPulse");
