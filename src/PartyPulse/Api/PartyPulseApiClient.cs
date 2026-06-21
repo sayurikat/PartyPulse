@@ -307,6 +307,20 @@ public sealed class PartyPulseApiClient : IDisposable
             ValidateCreateRecoveryCodeResponse,
             cancellationToken);
 
+    public Task<ApiResult<RestoreVenueUserResponse>> RestoreVenueUserAsync(
+        Uri baseUri,
+        string accessToken,
+        int userId,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<RestoreVenueUserResponse>(
+            baseUri,
+            HttpMethod.Post,
+            $"api/v1/venue-users/{userId}/restore",
+            accessToken,
+            null,
+            ValidateRestoreVenueUserResponse,
+            cancellationToken);
+
     private static bool ValidateSelfServiceViewResponse(SelfServiceViewResponse payload) =>
         payload.Characters is not null &&
         payload.Characters.All(static character =>
@@ -342,6 +356,11 @@ public sealed class PartyPulseApiClient : IDisposable
         payload.UserId > 0 &&
         !string.IsNullOrWhiteSpace(payload.RecoveryCode) &&
         payload.RecoveryCodeExpiresAt > DateTimeOffset.UtcNow;
+
+    private static bool ValidateRestoreVenueUserResponse(RestoreVenueUserResponse payload) =>
+        payload.UserId > 0 &&
+        !string.IsNullOrWhiteSpace(payload.InviteCode) &&
+        payload.InviteExpiresAt > DateTimeOffset.UtcNow;
 
     public void Dispose() => httpClient.Dispose();
 

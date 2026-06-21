@@ -48,6 +48,18 @@ public sealed class VenueUserManagementManager : IDisposable
     public IssuedOneTimeCode? GetLastRecoveryCode(Guid profileId, int userId) =>
         recoveryCodes.TryGetValue(GetRecoveryKey(profileId, userId), out var code) ? code : null;
 
+    public IssuedOneTimeCode? GetLastInviteCode(Guid profileId, int userId)
+    {
+        if (!snapshots.TryGetValue(profileId, out var snapshot) ||
+            snapshot.LastInviteCode is not { } code ||
+            code.UserId != userId)
+        {
+            return null;
+        }
+
+        return code;
+    }
+
     public bool IsBusy(Guid profileId) =>
         gates.TryGetValue(profileId, out var gate) && gate.CurrentCount == 0;
 
@@ -237,6 +249,46 @@ public sealed class VenueUserManagementManager : IDisposable
                         user.DisplayName,
                         result.Value.RecoveryCode,
                         result.Value.RecoveryCodeExpiresAt);
+                }
+
+                return result;
+            },
+            cancellationToken);
+
+    public Task<ApiResult<RestoreVenueUserResponse>> RestoreAsync(
+        VenueConnectionConfiguration venue,
+        VenueUserSummary user,
+        CancellationToken cancellationToken) =>
+        WithGateAsync(
+            venue,
+            async () =>
+            {
+                var context = await GetAuthorizedContextAsync(venue, cancellationToken);
+                if (!context.Success)
+                {
+                    return ApiResult<RestoreVenueUserResponse>.Failed(context.Failure!);
+                }
+
+                var result = await apiClient.RestoreVenueUserAsync(
+                    context.BaseUri!,
+                    context.AccessToken!,
+                    user.UserId,
+                    cancellationToken);
+
+                if (result.Success && result.Value is not null)
+                {
+                    var code = new IssuedOneTimeCode(
+                        result.Value.UserId,
+                        user.DisplayName,
+                        result.Value.InviteCode,
+                        result.Value.InviteExpiresAt);
+
+                    snapshots.AddOrUpdate(
+                        venue.ProfileId,
+                        _ => VenueUserManagementSnapshot.NotLoaded with { LastInviteCode = code },
+                        (_, previous) => previous with { LastInviteCode = code });
+
+                    await RefreshAfterMutationAsync(venue, context, cancellationToken);
                 }
 
                 return result;

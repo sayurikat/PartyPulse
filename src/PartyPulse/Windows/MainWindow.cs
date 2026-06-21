@@ -20,6 +20,7 @@ public sealed class MainWindow : Window, IDisposable
     private string addUserDiscordHandle = string.Empty;
     private VenueConnectionConfiguration? pendingLinkVenue;
     private VenueConnectionConfiguration? pendingUnauthorizeVenue;
+    private bool requestOpenUnauthorizePopup;
     private VenueConnectionConfiguration? pendingLocalRemovalVenue;
     private VenueConnectionConfiguration? pendingUnlinkVenue;
     private SelfCharacterSummary? pendingUnlinkCharacter;
@@ -339,7 +340,7 @@ public sealed class MainWindow : Window, IDisposable
         if (ImGui.Button("Unauthorize from venue"))
         {
             pendingUnauthorizeVenue = venue;
-            ImGui.OpenPopup("Unauthorize from venue###PartyPulseUnauthorizeVenue");
+            requestOpenUnauthorizePopup = true;
         }
         ImGui.EndDisabled();
         ImGui.TextDisabled("This disables your venue user and revokes every registered device for that user. The public venue remains saved locally in visitor mode.");
@@ -485,6 +486,7 @@ public sealed class MainWindow : Window, IDisposable
                 var canOpenEditor =
                     view.Capabilities.CanEdit ||
                     view.Capabilities.CanRecover ||
+                    view.Capabilities.CanRestore ||
                     view.Capabilities.CanManagePermissions;
                 ImGui.BeginDisabled(!canOpenEditor);
                 if (ImGui.SmallButton("Edit"))
@@ -504,6 +506,12 @@ public sealed class MainWindow : Window, IDisposable
 
     private void DrawConfirmationPopups()
     {
+        if (requestOpenUnauthorizePopup)
+        {
+            ImGui.OpenPopup("Unauthorize from venue###PartyPulseUnauthorizeVenue");
+            requestOpenUnauthorizePopup = false;
+        }
+
         if (ImGui.BeginPopupModal(
                 "Link current character###PartyPulseLinkCurrentCharacter",
                 ImGuiWindowFlags.AlwaysAutoResize))

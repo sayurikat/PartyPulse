@@ -8,6 +8,7 @@ public sealed record VenueUserManagementCapabilities(
     bool CanCreate,
     bool CanEdit,
     bool CanRecover,
+    bool CanRestore,
     bool CanManagePermissions);
 
 public sealed record VenuePermissionDefinition(
@@ -71,3 +72,8 @@ public sealed record CreateRecoveryCodeResponse(
     int UserId,
     string RecoveryCode,
     DateTimeOffset RecoveryCodeExpiresAt);
+
+public sealed record RestoreVenueUserResponse(
+    int UserId,
+    string InviteCode,
+    DateTimeOffset InviteExpiresAt);

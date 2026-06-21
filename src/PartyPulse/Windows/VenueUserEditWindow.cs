@@ -132,7 +132,10 @@ public sealed class VenueUserEditWindow : Window, IDisposable
             ImGui.TextWrapped("This user has venue.owner. That permission is controlled outside the normal permission checklist and satisfies every venue permission check.");
         }
 
-        ImGui.BeginDisabled(isBusy || !view.Capabilities.CanManagePermissions);
+        ImGui.BeginDisabled(
+            isBusy ||
+            !view.Capabilities.CanManagePermissions ||
+            user.DisabledAt is not null);
         foreach (var permission in view.AvailablePermissions)
         {
             var selected = selectedPermissions.Contains(permission.PermissionKey);
@@ -167,28 +170,67 @@ public sealed class VenueUserEditWindow : Window, IDisposable
         {
             ImGui.TextDisabled("You do not have permission to change permission assignments.");
         }
+        else if (user.DisabledAt is not null)
+        {
+            ImGui.TextDisabled("Restore the user before assigning permissions.");
+        }
 
         ImGui.Spacing();
-        ImGui.TextUnformatted("Account recovery");
-        ImGui.Separator();
-        ImGui.TextWrapped("Creating a new recovery code invalidates older unused recovery codes. Devices are revoked only when the user redeems the new code.");
 
-        ImGui.BeginDisabled(isBusy || !view.Capabilities.CanRecover || user.DisabledAt is not null);
-        if (ImGui.Button("Create recovery code"))
+        if (user.DisabledAt is not null)
         {
-            plugin.CreateVenueUserRecoveryCode(venue, user);
-        }
-        ImGui.EndDisabled();
+            ImGui.TextUnformatted("Account restoration");
+            ImGui.Separator();
+            ImGui.TextWrapped(
+                "Restoring this venue user keeps the existing account identity and history, but does not restore old devices or permissions. A fresh one-time invite code will be created.");
 
-        var recoveryCode = plugin.UserManagement.GetLastRecoveryCode(profileId, user.UserId);
-        if (recoveryCode is not null)
+            ImGui.BeginDisabled(isBusy || !view.Capabilities.CanRestore);
+            if (ImGui.Button("Restore user and create invite"))
+            {
+                plugin.RestoreVenueUser(venue, user);
+            }
+            ImGui.EndDisabled();
+
+            if (!view.Capabilities.CanRestore)
+            {
+                ImGui.TextDisabled("You do not have permission to restore disabled venue users.");
+            }
+        }
+        else
+        {
+            ImGui.TextUnformatted("Account recovery");
+            ImGui.Separator();
+            ImGui.TextWrapped("Creating a new recovery code invalidates older unused recovery codes. Devices are revoked only when the user redeems the new code.");
+
+            ImGui.BeginDisabled(isBusy || !view.Capabilities.CanRecover);
+            if (ImGui.Button("Create recovery code"))
+            {
+                plugin.CreateVenueUserRecoveryCode(venue, user);
+            }
+            ImGui.EndDisabled();
+
+            var recoveryCode = plugin.UserManagement.GetLastRecoveryCode(profileId, user.UserId);
+            if (recoveryCode is not null)
+            {
+                ImGui.Spacing();
+                ImGui.TextWrapped($"Recovery code: {recoveryCode.Code}");
+                ImGui.TextDisabled($"Expires: {recoveryCode.ExpiresAt.ToLocalTime():g}");
+                if (ImGui.Button("Copy recovery code"))
+                {
+                    ImGui.SetClipboardText(recoveryCode.Code);
+                }
+            }
+        }
+
+        var latestInviteCode = plugin.UserManagement.GetLastInviteCode(profileId, user.UserId);
+        if (latestInviteCode is not null)
         {
             ImGui.Spacing();
-            ImGui.TextWrapped($"Recovery code: {recoveryCode.Code}");
-            ImGui.TextDisabled($"Expires: {recoveryCode.ExpiresAt.ToLocalTime():g}");
-            if (ImGui.Button("Copy recovery code"))
+            ImGui.TextWrapped($"Invite code: {latestInviteCode.Code}");
+            ImGui.TextDisabled($"Expires: {latestInviteCode.ExpiresAt.ToLocalTime():g}");
+            if (ImGui.Button("Copy invite code"))
             {
-                ImGui.SetClipboardText(recoveryCode.Code);
+                ImGui.SetClipboardText(latestInviteCode.Code);
             }
         }
 

@@ -339,6 +339,13 @@ public sealed class Plugin : IDalamudPlugin
             CreateVenueUserRecoveryCodeAndReportAsync(venue, user),
             $"create recovery code for venue user {user.UserId} at {venue.VenueCode}");
 
+    public void RestoreVenueUser(
+        VenueConnectionConfiguration venue,
+        VenueUserSummary user) =>
+        Observe(
+            RestoreVenueUserAndReportAsync(venue, user),
+            $"restore venue user {user.UserId} at {venue.VenueCode}");
+
     public void OpenVenueUserEditor(VenueConnectionConfiguration venue, VenueUserSummary user) =>
         venueUserEditWindow.Open(venue.ProfileId, user.UserId);
 
@@ -614,6 +621,26 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         ReportUserManagementFailure(result.Failure, "The recovery code could not be created.");
+    }
+
+    private async Task RestoreVenueUserAndReportAsync(
+        VenueConnectionConfiguration venue,
+        VenueUserSummary user)
+    {
+        var result = await UserManagement.RestoreAsync(
+            venue,
+            user,
+            LifetimeToken);
+
+        if (result.Success && result.Value is not null)
+        {
+            ChatGui.Print(
+                $"Restored venue user '{user.DisplayName}'. Invite code: {result.Value.InviteCode} (expires {result.Value.InviteExpiresAt.ToLocalTime():g}). Permissions remain cleared until reassigned.",
+                "PartyPulse");
+            return;
+        }
+
+        ReportUserManagementFailure(result.Failure, "The venue user could not be restored.");
     }
 
     private static void ReportUserManagementFailure(ApiFailure? failure, string fallback) =>
