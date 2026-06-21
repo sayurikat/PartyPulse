@@ -9,13 +9,17 @@ namespace PartyPulse;
 [Serializable]
 public sealed class Configuration : IPluginConfiguration
 {
-    public int Version { get; set; } = 2;
+    public const string DefaultApiBaseUrl = "https://partypulse.fyi";
+
+    private const string LegacyAzureApiBaseUrl = "https://partypulse.azurewebsites.net";
+
+    public int Version { get; set; } = 3;
 
     public bool IsConfigWindowMovable { get; set; } = true;
 
     public bool AutoConnect { get; set; } = true;
 
-    public string ApiBaseUrl { get; set; } = "https://partypulse.azurewebsites.net";
+    public string ApiBaseUrl { get; set; } = DefaultApiBaseUrl;
 
     public Guid SelectedVenueProfileId { get; set; } = Guid.Empty;
 
@@ -25,7 +29,20 @@ public sealed class Configuration : IPluginConfiguration
     {
         var changed = false;
 
-        ApiBaseUrl = ApiBaseUrl?.Trim() ?? string.Empty;
+        if (string.Equals(ApiBaseUrl, LegacyAzureApiBaseUrl, StringComparison.Ordinal))
+        {
+            ApiBaseUrl = DefaultApiBaseUrl;
+            changed = true;
+        }
+        else
+        {
+            var normalizedApiBaseUrl = ApiBaseUrl?.Trim() ?? string.Empty;
+            if (!string.Equals(ApiBaseUrl, normalizedApiBaseUrl, StringComparison.Ordinal))
+            {
+                ApiBaseUrl = normalizedApiBaseUrl;
+                changed = true;
+            }
+        }
 
         foreach (var venue in VenueConnections)
         {
@@ -62,9 +79,9 @@ public sealed class Configuration : IPluginConfiguration
             }
         }
 
-        if (Version < 2)
+        if (Version < 3)
         {
-            Version = 2;
+            Version = 3;
             changed = true;
         }
 

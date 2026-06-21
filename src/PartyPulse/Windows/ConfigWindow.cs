@@ -79,12 +79,24 @@ public sealed class ConfigWindow : Window, IDisposable
         ImGui.TextUnformatted("API");
 
         var apiBaseUrl = configuration.ApiBaseUrl;
-        ImGui.SetNextItemWidth(-1);
+        ImGui.SetNextItemWidth(-135 * ImGuiHelpers.GlobalScale);
         if (ImGui.InputText("##ApiBaseUrl", ref apiBaseUrl, 512))
         {
             configuration.ApiBaseUrl = apiBaseUrl;
             dirty = true;
         }
+
+        ImGui.SameLine();
+        ImGui.BeginDisabled(string.Equals(
+            configuration.ApiBaseUrl,
+            Configuration.DefaultApiBaseUrl,
+            StringComparison.Ordinal));
+        if (ImGui.Button("Reset to default"))
+        {
+            configuration.ApiBaseUrl = Configuration.DefaultApiBaseUrl;
+            dirty = true;
+        }
+        ImGui.EndDisabled();
 
         if (!PartyPulseApiClient.TryCreateBaseUri(configuration.ApiBaseUrl, out _, out var error))
         {
