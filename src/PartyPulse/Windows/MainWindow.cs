@@ -15,6 +15,7 @@ namespace PartyPulse.Windows;
 public sealed class MainWindow : Window, IDisposable
 {
     private readonly Plugin plugin;
+    private readonly VipTabRenderer vipTab;
     private Guid addUserProfileId;
     private string addUserDisplayName = string.Empty;
     private string addUserDiscordHandle = string.Empty;
@@ -31,6 +32,7 @@ public sealed class MainWindow : Window, IDisposable
         : base("Party Pulse###PartyPulseMain")
     {
         this.plugin = plugin;
+        vipTab = new VipTabRenderer(plugin);
 
         SizeConstraints = new WindowSizeConstraints
         {
@@ -185,9 +187,10 @@ public sealed class MainWindow : Window, IDisposable
             {
                 DrawUsersTab(selectedVenue, userSnapshot);
             }
+
+            vipTab.Draw(selectedVenue);
         }
 
-        DrawPlaceholderTab("VIP", "VIP purchases, Discord identity, role automation, and payout totals will live here.");
         DrawPlaceholderTab("Staff", "Clock-in state, staff tools, macros, timers, and Party Finder controls will live here.");
         DrawPlaceholderTab("Payout", "Manager payout calculations, adjustments, finalization, and payment actions will live here.");
         DrawPlaceholderTab("Bar", "Bar sales, gambashots, jackpots, and buyout tracking will live here.");

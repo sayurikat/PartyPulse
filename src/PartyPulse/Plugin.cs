@@ -13,6 +13,7 @@ using PartyPulse.Models;
 using PartyPulse.SelfService;
 using PartyPulse.Services;
 using PartyPulse.VenueUsers;
+using PartyPulse.Vip;
 using PartyPulse.Windows;
 
 namespace PartyPulse;
@@ -68,6 +69,12 @@ public sealed class Plugin : IDalamudPlugin
             apiClient,
             IdentityProvider,
             Log);
+        Vip = new VipManagementManager(
+            Configuration,
+            Authentication,
+            apiClient,
+            IdentityProvider,
+            Log);
 
         configWindow = new ConfigWindow(this);
         mainWindow = new MainWindow(this);
@@ -105,6 +112,8 @@ public sealed class Plugin : IDalamudPlugin
 
     public SelfServiceManager SelfService { get; }
 
+    public VipManagementManager Vip { get; }
+
     public WindowSystem WindowSystem { get; } = new("PartyPulse");
 
     public CancellationToken LifetimeToken => lifetimeCancellation.Token;
@@ -129,6 +138,7 @@ public sealed class Plugin : IDalamudPlugin
         configWindow.Dispose();
         mainWindow.Dispose();
         venueUserEditWindow.Dispose();
+        Vip.Dispose();
         SelfService.Dispose();
         UserManagement.Dispose();
         Authentication.Dispose();
@@ -284,6 +294,7 @@ public sealed class Plugin : IDalamudPlugin
         Authentication.RemoveProfile(venue.ProfileId);
         UserManagement.RemoveProfile(venue.ProfileId);
         SelfService.RemoveProfile(venue.ProfileId);
+        Vip.RemoveProfile(venue.ProfileId);
         Configuration.VenueConnections.RemoveAll(x => x.ProfileId == venue.ProfileId);
         Configuration.Normalize();
         Configuration.Save();
@@ -346,6 +357,61 @@ public sealed class Plugin : IDalamudPlugin
             RestoreVenueUserAndReportAsync(venue, user),
             $"restore venue user {user.UserId} at {venue.VenueCode}");
 
+    public void EnsureVipLoaded(VenueConnectionConfiguration venue)
+    {
+        if (!Vip.ShouldLoad(venue))
+        {
+            return;
+        }
+
+        Observe(
+            Vip.LoadAsync(venue, false, LifetimeToken),
+            $"load VIP data for {venue.VenueCode}");
+    }
+
+    public void RefreshVip(VenueConnectionConfiguration venue) =>
+        Observe(
+            Vip.LoadAsync(venue, true, LifetimeToken),
+            $"refresh VIP data for {venue.VenueCode}");
+
+    public void CreateVipPackage(
+        VenueConnectionConfiguration venue,
+        CreateVipPackageRequest request) =>
+        Observe(
+            CreateVipPackageAndReportAsync(venue, request),
+            $"create VIP package for {venue.VenueCode}");
+
+    public void UpdateVipPackage(
+        VenueConnectionConfiguration venue,
+        int packageId,
+        UpdateVipPackageRequest request) =>
+        Observe(
+            UpdateVipPackageAndReportAsync(venue, packageId, request),
+            $"update VIP package {packageId} for {venue.VenueCode}");
+
+    public void SellVipSubscription(
+        VenueConnectionConfiguration venue,
+        SellVipSubscriptionRequest request) =>
+        Observe(
+            SellVipSubscriptionAndReportAsync(venue, request),
+            $"sell VIP subscription for {venue.VenueCode}");
+
+    public void LinkVipCharacter(
+        VenueConnectionConfiguration venue,
+        int vipPlayerId,
+        LinkVipCharacterRequest request) =>
+        Observe(
+            LinkVipCharacterAndReportAsync(venue, vipPlayerId, request),
+            $"link VIP character for {venue.VenueCode}");
+
+    public void SetVipPreferredCharacter(
+        VenueConnectionConfiguration venue,
+        int vipPlayerId,
+        int characterId) =>
+        Observe(
+            SetVipPreferredCharacterAndReportAsync(venue, vipPlayerId, characterId),
+            $"set preferred VIP character for {venue.VenueCode}");
+
     public void OpenVenueUserEditor(VenueConnectionConfiguration venue, VenueUserSummary user) =>
         venueUserEditWindow.Open(venue.ProfileId, user.UserId);
 
@@ -402,6 +468,7 @@ public sealed class Plugin : IDalamudPlugin
                 Authentication.ClearAccessTokens("Character logged out or changed.");
                 UserManagement.Clear("Character logged out or changed.");
                 SelfService.Clear("Character logged out or changed.");
+                Vip.Clear("Character logged out or changed.");
             }
 
             return;
@@ -414,6 +481,7 @@ public sealed class Plugin : IDalamudPlugin
             Authentication.ClearAccessTokens("Character changed; authentication must be renewed.");
             UserManagement.Clear("Character changed; venue-user data was cleared.");
             SelfService.Clear("Character changed; self-service data was cleared.");
+            Vip.Clear("Character changed; VIP data was cleared.");
         }
 
         if (!Configuration.AutoConnect)
@@ -536,6 +604,7 @@ public sealed class Plugin : IDalamudPlugin
         Authentication.RemoveProfile(venue.ProfileId);
         UserManagement.RemoveProfile(venue.ProfileId);
         SelfService.RemoveProfile(venue.ProfileId);
+        Vip.RemoveProfile(venue.ProfileId);
         ChatGui.Print($"Unauthorized from {venue.DisplayLabel}. The venue remains saved in visitor mode.", "PartyPulse");
     }
 
@@ -642,6 +711,97 @@ public sealed class Plugin : IDalamudPlugin
 
         ReportUserManagementFailure(result.Failure, "The venue user could not be restored.");
     }
+
+    private async Task CreateVipPackageAndReportAsync(
+        VenueConnectionConfiguration venue,
+        CreateVipPackageRequest request)
+    {
+        var result = await Vip.CreatePackageAsync(venue, request, LifetimeToken);
+        if (result.Success && result.Value is not null)
+        {
+            ChatGui.Print($"Created VIP package '{request.Name}'.", "PartyPulse");
+            return;
+        }
+
+        ReportVipFailure(result.Failure, "The VIP package could not be created.");
+    }
+
+    private async Task UpdateVipPackageAndReportAsync(
+        VenueConnectionConfiguration venue,
+        int packageId,
+        UpdateVipPackageRequest request)
+    {
+        var result = await Vip.UpdatePackageAsync(venue, packageId, request, LifetimeToken);
+        if (result.Success)
+        {
+            ChatGui.Print($"Updated VIP package '{request.Name}'.", "PartyPulse");
+            return;
+        }
+
+        ReportVipFailure(result.Failure, "The VIP package could not be updated.");
+    }
+
+    private async Task SellVipSubscriptionAndReportAsync(
+        VenueConnectionConfiguration venue,
+        SellVipSubscriptionRequest request)
+    {
+        var result = await Vip.SellSubscriptionAsync(venue, request, LifetimeToken);
+        if (result.Success && result.Value is not null)
+        {
+            var period = result.Value.Lifetime
+                ? "lifetime"
+                : $"until {result.Value.EndsAt!.Value.ToLocalTime():g}";
+            ChatGui.Print(
+                $"Sold VIP to {request.CharacterName} @ {request.WorldName} ({period}).",
+                "PartyPulse");
+            return;
+        }
+
+        ReportVipFailure(result.Failure, "The VIP subscription could not be sold.");
+    }
+
+    private async Task LinkVipCharacterAndReportAsync(
+        VenueConnectionConfiguration venue,
+        int vipPlayerId,
+        LinkVipCharacterRequest request)
+    {
+        var result = await Vip.LinkCharacterAsync(
+            venue,
+            vipPlayerId,
+            request,
+            LifetimeToken);
+        if (result.Success)
+        {
+            ChatGui.Print(
+                $"Linked {request.CharacterName} @ {request.WorldName} to the VIP player.",
+                "PartyPulse");
+            return;
+        }
+
+        ReportVipFailure(result.Failure, "The VIP character could not be linked.");
+    }
+
+    private async Task SetVipPreferredCharacterAndReportAsync(
+        VenueConnectionConfiguration venue,
+        int vipPlayerId,
+        int characterId)
+    {
+        var result = await Vip.SetPreferredCharacterAsync(
+            venue,
+            vipPlayerId,
+            characterId,
+            LifetimeToken);
+        if (result.Success)
+        {
+            ChatGui.Print("Updated the VIP player's preferred display character.", "PartyPulse");
+            return;
+        }
+
+        ReportVipFailure(result.Failure, "The preferred VIP character could not be updated.");
+    }
+
+    private static void ReportVipFailure(ApiFailure? failure, string fallback) =>
+        ChatGui.PrintError(failure?.Message ?? fallback, "PartyPulse");
 
     private static void ReportUserManagementFailure(ApiFailure? failure, string fallback) =>
         ChatGui.PrintError(failure?.Message ?? fallback, "PartyPulse");

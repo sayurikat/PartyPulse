@@ -321,6 +321,134 @@ public sealed class PartyPulseApiClient : IDisposable
             ValidateRestoreVenueUserResponse,
             cancellationToken);
 
+    public Task<ApiResult<VipManagementViewResponse>> GetVipAsync(
+        Uri baseUri,
+        string accessToken,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<VipManagementViewResponse>(
+            baseUri,
+            HttpMethod.Get,
+            "api/v1/vip",
+            accessToken,
+            null,
+            ValidateVipManagementViewResponse,
+            cancellationToken);
+
+    public Task<ApiResult<VipPackageOperationResponse>> CreateVipPackageAsync(
+        Uri baseUri,
+        string accessToken,
+        CreateVipPackageRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<VipPackageOperationResponse>(
+            baseUri,
+            HttpMethod.Post,
+            "api/v1/vip/packages",
+            accessToken,
+            request,
+            static payload => payload.PackageId > 0,
+            cancellationToken);
+
+    public Task<ApiResult<VipPackageOperationResponse>> UpdateVipPackageAsync(
+        Uri baseUri,
+        string accessToken,
+        int packageId,
+        UpdateVipPackageRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<VipPackageOperationResponse>(
+            baseUri,
+            HttpMethod.Put,
+            $"api/v1/vip/packages/{packageId}",
+            accessToken,
+            request,
+            static payload => payload.PackageId > 0,
+            cancellationToken);
+
+    public Task<ApiResult<SellVipSubscriptionResponse>> SellVipSubscriptionAsync(
+        Uri baseUri,
+        string accessToken,
+        SellVipSubscriptionRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<SellVipSubscriptionResponse>(
+            baseUri,
+            HttpMethod.Post,
+            "api/v1/vip/subscriptions",
+            accessToken,
+            request,
+            ValidateVipSaleResponse,
+            cancellationToken);
+
+    public Task<ApiResult<VipCharacterOperationResponse>> LinkVipCharacterAsync(
+        Uri baseUri,
+        string accessToken,
+        int vipPlayerId,
+        LinkVipCharacterRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<VipCharacterOperationResponse>(
+            baseUri,
+            HttpMethod.Post,
+            $"api/v1/vip/players/{vipPlayerId}/characters",
+            accessToken,
+            request,
+            static payload => payload.VipPlayerId > 0 &&
+                              payload.CharacterId > 0 &&
+                              payload.PreferredCharacterId > 0,
+            cancellationToken);
+
+    public Task<ApiResult<VipPreferredCharacterResponse>> SetVipPreferredCharacterAsync(
+        Uri baseUri,
+        string accessToken,
+        int vipPlayerId,
+        int characterId,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<VipPreferredCharacterResponse>(
+            baseUri,
+            HttpMethod.Put,
+            $"api/v1/vip/players/{vipPlayerId}/preferred-character/{characterId}",
+            accessToken,
+            null,
+            static payload => payload.VipPlayerId > 0 && payload.PreferredCharacterId > 0,
+            cancellationToken);
+
+    private static bool ValidateVipManagementViewResponse(VipManagementViewResponse payload) =>
+        payload.Capabilities is not null &&
+        payload.PersonalUnpaidGil >= 0 &&
+        payload.Packages is not null &&
+        payload.Players is not null &&
+        payload.Characters is not null &&
+        payload.Subscriptions is not null &&
+        payload.Packages.All(static package =>
+            package.PackageId > 0 &&
+            !string.IsNullOrWhiteSpace(package.Name) &&
+            package.Tier > 0 &&
+            package.PriceGil >= 0) &&
+        payload.Players.All(static player =>
+            player.VipPlayerId > 0 &&
+            !string.IsNullOrWhiteSpace(player.DiscordUsername) &&
+            !string.IsNullOrWhiteSpace(player.DisplayCharacterName) &&
+            !string.IsNullOrWhiteSpace(player.DisplayWorldName)) &&
+        payload.Characters.All(static character =>
+            character.CharacterId > 0 &&
+            character.VipPlayerId > 0 &&
+            !string.IsNullOrWhiteSpace(character.CharacterName) &&
+            !string.IsNullOrWhiteSpace(character.WorldName)) &&
+        payload.Subscriptions.All(static subscription =>
+            subscription.SubscriptionId > 0 &&
+            subscription.VipPlayerId > 0 &&
+            subscription.PackageId > 0 &&
+            subscription.PurchasePriceGil >= 0 &&
+            !string.IsNullOrWhiteSpace(subscription.PackageName) &&
+            !string.IsNullOrWhiteSpace(subscription.SellerDisplayName));
+
+    private static bool ValidateVipSaleResponse(SellVipSubscriptionResponse payload) =>
+        payload.SubscriptionId > 0 &&
+        payload.VipPlayerId > 0 &&
+        payload.CharacterId > 0 &&
+        payload.PackageId > 0 &&
+        payload.PurchasePriceGil >= 0 &&
+        payload.StartsAt != default &&
+        (payload.Lifetime ? payload.EndsAt is null : payload.EndsAt > payload.StartsAt) &&
+        payload.PersonalUnpaidGil >= 0;
+
     private static bool ValidateSelfServiceViewResponse(SelfServiceViewResponse payload) =>
         payload.Characters is not null &&
         payload.Characters.All(static character =>
