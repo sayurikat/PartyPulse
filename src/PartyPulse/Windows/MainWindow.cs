@@ -22,8 +22,10 @@ public sealed class MainWindow : Window, IDisposable
     private VenueConnectionConfiguration? pendingUnauthorizeVenue;
     private bool requestOpenUnauthorizePopup;
     private VenueConnectionConfiguration? pendingLocalRemovalVenue;
+    private bool requestOpenLocalRemovalPopup;
     private VenueConnectionConfiguration? pendingUnlinkVenue;
     private SelfCharacterSummary? pendingUnlinkCharacter;
+    private bool requestOpenUnlinkPopup;
 
     public MainWindow(Plugin plugin)
         : base("Party Pulse###PartyPulseMain")
@@ -291,7 +293,7 @@ public sealed class MainWindow : Window, IDisposable
                 {
                     pendingUnlinkVenue = venue;
                     pendingUnlinkCharacter = character;
-                    ImGui.OpenPopup("Unlink character###PartyPulseUnlinkCharacter");
+                    requestOpenUnlinkPopup = true;
                 }
                 ImGui.EndDisabled();
                 if (character.IsCurrent && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
@@ -352,7 +354,7 @@ public sealed class MainWindow : Window, IDisposable
         if (ImGui.Button("Remove venue from this device"))
         {
             pendingLocalRemovalVenue = venue;
-            ImGui.OpenPopup("Remove venue from device###PartyPulseRemoveVenueFromDevice");
+            requestOpenLocalRemovalPopup = true;
         }
         ImGui.TextDisabled("This only removes the venue and credential stored by this plugin on this computer. It does not change the server-side venue user.");
 
@@ -510,6 +512,18 @@ public sealed class MainWindow : Window, IDisposable
         {
             ImGui.OpenPopup("Unauthorize from venue###PartyPulseUnauthorizeVenue");
             requestOpenUnauthorizePopup = false;
+        }
+
+        if (requestOpenUnlinkPopup)
+        {
+            ImGui.OpenPopup("Unlink character###PartyPulseUnlinkCharacter");
+            requestOpenUnlinkPopup = false;
+        }
+
+        if (requestOpenLocalRemovalPopup)
+        {
+            ImGui.OpenPopup("Remove venue from device###PartyPulseRemoveVenueFromDevice");
+            requestOpenLocalRemovalPopup = false;
         }
 
         if (ImGui.BeginPopupModal(
