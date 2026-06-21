@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Numerics;
@@ -18,6 +19,8 @@ public sealed class VipTabRenderer(Plugin plugin)
     private int selectedExistingVipPlayerId;
     private string saleDiscordUsername = string.Empty;
     private bool customerPaymentConfirmed;
+    private string vipPlayerNameFilter = string.Empty;
+    private bool vipPlayerActiveOnly;
 
     private int editingPackageId;
     private string packageName = string.Empty;
@@ -378,6 +381,31 @@ public sealed class VipTabRenderer(Plugin plugin)
     {
         ImGui.TextUnformatted("VIP player list");
 
+        ImGui.SetNextItemWidth(320 * ImGuiHelpers.GlobalScale);
+        ImGui.InputText("Name filter", ref vipPlayerNameFilter, 100);
+        ImGui.SameLine();
+        ImGui.Checkbox("Active only", ref vipPlayerActiveOnly);
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip("Shows lifetime VIPs and VIPs whose expiry is later than the current UTC time.");
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var trimmedNameFilter = vipPlayerNameFilter.Trim();
+        var charactersByPlayer = view.Characters.ToLookup(character => character.VipPlayerId);
+        var filteredPlayers = view.Players
+            .Where(player => MatchesVipPlayerNameFilter(
+                player,
+                charactersByPlayer[player.VipPlayerId],
+                trimmedNameFilter))
+            .Where(player => !vipPlayerActiveOnly || IsVipPlayerActive(player, now))
+            .OrderBy(player => player.DisplayCharacterName)
+            .ThenBy(player => player.DisplayWorldName)
+            .ToArray();
+
+        ImGui.SameLine();
+        ImGui.TextDisabled($"Showing {filteredPlayers.Length:N0} of {view.Players.Count:N0}");
+
         var flags =
             ImGuiTableFlags.Borders |
             ImGuiTableFlags.RowBg |
@@ -396,7 +424,7 @@ public sealed class VipTabRenderer(Plugin plugin)
 
         ImGui.TableSetupColumn("Character");
         ImGui.TableSetupColumn("Discord");
-        ImGui.TableSetupColumn("Last subscription");
+        ImGui.TableSetupColumn("Expires at");
         ImGui.TableSetupColumn("Characters");
         if (view.Capabilities.CanManagePlayers || view.Capabilities.CanManagePayments)
         {
@@ -404,9 +432,9 @@ public sealed class VipTabRenderer(Plugin plugin)
         }
         ImGui.TableHeadersRow();
 
-        foreach (var player in view.Players.OrderBy(player => player.DisplayCharacterName))
+        foreach (var player in filteredPlayers)
         {
-            var characterCount = view.Characters.Count(character => character.VipPlayerId == player.VipPlayerId);
+            var characterCount = charactersByPlayer[player.VipPlayerId].Count();
             ImGui.TableNextRow();
             ImGui.TableSetColumnIndex(0);
             ImGui.TextUnformatted(player.CharacterDisplay);
@@ -438,6 +466,30 @@ public sealed class VipTabRenderer(Plugin plugin)
 
         ImGui.EndTable();
     }
+
+    private static bool MatchesVipPlayerNameFilter(
+        VipPlayerSummary player,
+        IEnumerable<VipCharacterSummary> characters,
+        string nameFilter)
+    {
+        if (string.IsNullOrWhiteSpace(nameFilter))
+        {
+            return true;
+        }
+
+        if (player.DisplayCharacterName.Contains(nameFilter, StringComparison.OrdinalIgnoreCase) ||
+            player.DisplayWorldName.Contains(nameFilter, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return characters.Any(character =>
+            character.CharacterName.Contains(nameFilter, StringComparison.OrdinalIgnoreCase) ||
+            character.WorldName.Contains(nameFilter, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool IsVipPlayerActive(VipPlayerSummary player, DateTimeOffset now) =>
+        player.HasLifetime || player.LastSubscriptionEndsAt > now;
 
     private void DrawSettlementControls(
         VenueConnectionConfiguration venue,
@@ -660,6 +712,8 @@ public sealed class VipTabRenderer(Plugin plugin)
         selectedExistingVipPlayerId = 0;
         saleDiscordUsername = string.Empty;
         customerPaymentConfirmed = false;
+        vipPlayerNameFilter = string.Empty;
+        vipPlayerActiveOnly = false;
         ResetPackageEditor();
     }
 
