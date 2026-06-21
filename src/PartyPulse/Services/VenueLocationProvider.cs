@@ -1,3 +1,4 @@
+using System;
 using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.Game;
 using Lumina.Excel.Sheets;
@@ -48,7 +49,8 @@ public sealed class VenueLocationProvider(
         }
 
         var territory = dataManager.GetExcelSheet<TerritoryType>().GetRow(territoryId);
-        var cityName = territory.PlaceName.Value.Name.ToString().Trim() ?? string.Empty;
+        var placeName = territory.PlaceName.Value.Name.ToString().Trim() ?? string.Empty;
+        var cityName = NormalizeHousingDistrictName(placeName);
         if (cityName.Length == 0)
         {
             reason = "The current housing district name could not be determined.";
@@ -69,5 +71,28 @@ public sealed class VenueLocationProvider(
             plotIndex + 1);
         reason = string.Empty;
         return true;
+    }
+
+    private static string NormalizeHousingDistrictName(string placeName)
+    {
+        var normalized = placeName.Trim();
+        if (normalized.Length == 0)
+        {
+            return string.Empty;
+        }
+
+        // Housing estate territories are named like "Private Mansion - Mist".
+        // The public venue API and dbo.cities store only the district name.
+        var separatorIndex = normalized.LastIndexOf(" - ", StringComparison.Ordinal);
+        if (separatorIndex >= 0)
+        {
+            var districtName = normalized[(separatorIndex + 3)..].Trim();
+            if (districtName.Length > 0)
+            {
+                return districtName;
+            }
+        }
+
+        return normalized;
     }
 }
