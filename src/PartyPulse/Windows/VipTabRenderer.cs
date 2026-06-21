@@ -500,15 +500,12 @@ public sealed class VipTabRenderer(Plugin plugin)
         ImGui.BeginDisabled(isBusy || !valid);
         if (ImGui.Button(editingPackageId == 0 ? "Create package" : "Save package"))
         {
-
-            //var discordRoleId = long.Parse(packageDiscordRoleId, CultureInfo.InvariantCulture);
-            long discordRoleId = 0L;
-            long.TryParse(packageDiscordRoleId, out discordRoleId);
-
-
-            //var discordRoleId = string.IsNullOrWhiteSpace(packageDiscordRoleId)
-            //    ? null
-            //    : long.Parse(packageDiscordRoleId, CultureInfo.InvariantCulture);
+            long? discordRoleId = string.IsNullOrWhiteSpace(packageDiscordRoleId)
+                ? null
+                : long.Parse(
+                    packageDiscordRoleId,
+                    NumberStyles.None,
+                    CultureInfo.InvariantCulture);
 
             if (editingPackageId == 0)
             {
