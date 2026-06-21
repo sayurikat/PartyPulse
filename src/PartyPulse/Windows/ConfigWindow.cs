@@ -20,6 +20,7 @@ public sealed class ConfigWindow : Window, IDisposable
     private readonly Dictionary<Guid, string> pairingCodes = [];
     private string venueCodeInput = string.Empty;
     private VenueConnectionConfiguration? pendingLocalRemoval;
+    private bool requestOpenLocalRemovalPopup;
     private bool dirty;
 
     public ConfigWindow(Plugin plugin)
@@ -193,16 +194,18 @@ public sealed class ConfigWindow : Window, IDisposable
                 if (venue.IsRegistered)
                 {
                     DrawRegisteredDevice(venue);
+                    ImGui.Spacing();
+                    DrawAuthorizedDeviceRegistration(venue);
                 }
                 else
                 {
                     DrawInviteRegistration(venue);
                     ImGui.Spacing();
                     DrawPairingRegistration(venue);
+                    ImGui.Spacing();
+                    DrawRecovery(venue);
                 }
 
-                ImGui.Spacing();
-                DrawRecovery(venue);
                 ImGui.Spacing();
 
                 if (venue.IsRegistered)
@@ -226,10 +229,10 @@ public sealed class ConfigWindow : Window, IDisposable
                     DrawStatusText("Visitor mode — public venue information only.", AuthenticationStatus.Disconnected);
                 }
 
-                if (ImGui.Button("Remove venue from this plugin"))
+                if (ImGui.Button("Remove venue from this device"))
                 {
                     pendingLocalRemoval = venue;
-                    ImGui.OpenPopup("Remove saved venue###PartyPulseRemoveSavedVenue");
+                    requestOpenLocalRemovalPopup = true;
                 }
             }
 
@@ -241,6 +244,15 @@ public sealed class ConfigWindow : Window, IDisposable
 
     private void DrawRemoveVenueConfirmation()
     {
+        // The remove button is drawn under a per-venue ImGui ID. Opening the
+        // popup here, outside that ID scope, keeps OpenPopup and BeginPopupModal
+        // on the same ID and makes the confirmation reliably appear.
+        if (requestOpenLocalRemovalPopup)
+        {
+            ImGui.OpenPopup("Remove saved venue###PartyPulseRemoveSavedVenue");
+            requestOpenLocalRemovalPopup = false;
+        }
+
         if (!ImGui.BeginPopupModal(
                 "Remove saved venue###PartyPulseRemoveSavedVenue",
                 ImGuiWindowFlags.AlwaysAutoResize))
@@ -248,19 +260,19 @@ public sealed class ConfigWindow : Window, IDisposable
             return;
         }
 
-        ImGui.TextWrapped($"Remove {pendingLocalRemoval?.DisplayLabel ?? "this venue"} from this plugin?");
+        ImGui.TextWrapped($"Remove {pendingLocalRemoval?.DisplayLabel ?? "this venue"} from this device?");
         if (pendingLocalRemoval?.IsRegistered == true)
         {
             ImGui.TextColored(
                 new Vector4(1f, 0.65f, 0.3f, 1f),
-                "This deletes the locally stored device credential but does not leave the venue or revoke the server-side device.");
+                "This deletes the locally stored venue and device credential. It does not unauthorize your venue account or revoke the server-side device.");
         }
         else
         {
-            ImGui.TextDisabled("This only removes the saved public venue from your local list.");
+            ImGui.TextDisabled("This only removes the saved public venue from this device.");
         }
 
-        if (ImGui.Button("Remove") && pendingLocalRemoval is not null)
+        if (ImGui.Button("Remove from this device") && pendingLocalRemoval is not null)
         {
             var removed = pendingLocalRemoval;
             inviteCodes.Remove(removed.ProfileId);
@@ -310,10 +322,35 @@ public sealed class ConfigWindow : Window, IDisposable
 
     private static void DrawRegisteredDevice(VenueConnectionConfiguration venue)
     {
-        ImGui.TextUnformatted($"Registered staff device ID: {venue.DeviceId}");
+        ImGui.TextUnformatted($"Authorized device ID: {venue.DeviceId}");
         if (venue.RefreshTokenUpdatedAt is { } updatedAt)
         {
             ImGui.TextDisabled($"Refresh token last updated: {updatedAt.ToLocalTime():g}");
+        }
+    }
+
+    private void DrawAuthorizedDeviceRegistration(VenueConnectionConfiguration venue)
+    {
+        ImGui.TextUnformatted("Authorize another device");
+        ImGui.TextWrapped("Create a short-lived code here, then enter it on the second computer after adding this venue there.");
+
+        if (ImGui.Button("Create new device code"))
+        {
+            SaveAndSelect(venue);
+            plugin.CreateDevicePairingCode(venue);
+        }
+
+        var snapshot = plugin.SelfService.GetSnapshot(venue);
+        if (snapshot.LatestPairingCode is not { } pairing)
+        {
+            return;
+        }
+
+        ImGui.TextWrapped($"Device code: {pairing.PairingCode}");
+        ImGui.TextDisabled($"Expires: {pairing.ExpiresAt.ToLocalTime():g}");
+        if (ImGui.Button("Copy device code"))
+        {
+            ImGui.SetClipboardText(pairing.PairingCode);
         }
     }
 
@@ -338,8 +375,8 @@ public sealed class ConfigWindow : Window, IDisposable
 
     private void DrawPairingRegistration(VenueConnectionConfiguration venue)
     {
-        ImGui.TextUnformatted("Register an additional device");
-        ImGui.TextWrapped("On an already registered device, create a pairing code under My Account. Enter that code here on the new computer.");
+        ImGui.TextUnformatted("Authorize this device with a device code");
+        ImGui.TextWrapped("Enter a code created on another already-authorized device. This field redeems a code; it does not create one.");
 
         var code = pairingCodes.GetValueOrDefault(venue.ProfileId, string.Empty);
         ImGui.SetNextItemWidth(-1);
@@ -348,7 +385,7 @@ public sealed class ConfigWindow : Window, IDisposable
             pairingCodes[venue.ProfileId] = code;
         }
 
-        if (ImGui.Button("Register with device code"))
+        if (ImGui.Button("Authorize this device"))
         {
             SaveAndSelect(venue);
             plugin.RedeemDevicePairingCode(venue, code);

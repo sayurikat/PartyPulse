@@ -280,14 +280,14 @@ public sealed class PartyPulseApiClient : IDisposable
             static payload => !string.IsNullOrWhiteSpace(payload.PairingCode) && payload.ExpiresAt > DateTimeOffset.UtcNow,
             cancellationToken);
 
-    public Task<ApiResult<SelfServiceOperationResponse>> LeaveVenueAsync(
+    public Task<ApiResult<SelfServiceOperationResponse>> UnauthorizeFromVenueAsync(
         Uri baseUri,
         string accessToken,
         CancellationToken cancellationToken) =>
         SendAuthorizedAsync<SelfServiceOperationResponse>(
             baseUri,
             HttpMethod.Delete,
-            "api/v1/self/membership",
+            "api/v1/self/authorization",
             accessToken,
             null,
             static payload => payload.Success,

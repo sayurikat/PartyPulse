@@ -143,14 +143,14 @@ public sealed class SelfServiceManager : IDisposable
             },
             cancellationToken);
 
-    public Task<ApiResult<SelfServiceOperationResponse>> LeaveVenueAsync(
+    public Task<ApiResult<SelfServiceOperationResponse>> UnauthorizeFromVenueAsync(
         VenueConnectionConfiguration venue,
         CancellationToken cancellationToken) =>
         ExecuteAsync(
             venue,
             async (baseUri, accessToken, token) =>
             {
-                var result = await apiClient.LeaveVenueAsync(baseUri, accessToken, token);
+                var result = await apiClient.UnauthorizeFromVenueAsync(baseUri, accessToken, token);
                 if (!result.Success)
                 {
                     SetFailure(venue.ProfileId, result.Failure);

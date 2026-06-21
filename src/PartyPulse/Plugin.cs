@@ -274,10 +274,10 @@ public sealed class Plugin : IDalamudPlugin
             CreateDevicePairingCodeAndReportAsync(venue),
             $"create device pairing code for {venue.VenueCode}");
 
-    public void LeaveVenue(VenueConnectionConfiguration venue) =>
+    public void UnauthorizeFromVenue(VenueConnectionConfiguration venue) =>
         Observe(
-            LeaveVenueAndReportAsync(venue),
-            $"leave venue {venue.VenueCode}");
+            UnauthorizeFromVenueAndReportAsync(venue),
+            $"unauthorize from venue {venue.VenueCode}");
 
     public void RemoveVenueLocally(VenueConnectionConfiguration venue)
     {
@@ -513,12 +513,12 @@ public sealed class Plugin : IDalamudPlugin
         ChatGui.PrintError(result.Failure?.Message ?? "The device pairing code could not be created.", "PartyPulse");
     }
 
-    private async Task LeaveVenueAndReportAsync(VenueConnectionConfiguration venue)
+    private async Task UnauthorizeFromVenueAndReportAsync(VenueConnectionConfiguration venue)
     {
-        var result = await SelfService.LeaveVenueAsync(venue, LifetimeToken);
+        var result = await SelfService.UnauthorizeFromVenueAsync(venue, LifetimeToken);
         if (!result.Success)
         {
-            ChatGui.PrintError(result.Failure?.Message ?? "The venue membership could not be removed.", "PartyPulse");
+            ChatGui.PrintError(result.Failure?.Message ?? "The venue user could not be unauthorized.", "PartyPulse");
             return;
         }
 
@@ -529,7 +529,7 @@ public sealed class Plugin : IDalamudPlugin
         Authentication.RemoveProfile(venue.ProfileId);
         UserManagement.RemoveProfile(venue.ProfileId);
         SelfService.RemoveProfile(venue.ProfileId);
-        ChatGui.Print($"Left {venue.DisplayLabel}. The venue remains saved in visitor mode.", "PartyPulse");
+        ChatGui.Print($"Unauthorized from {venue.DisplayLabel}. The venue remains saved in visitor mode.", "PartyPulse");
     }
 
     private async Task CreateVenueUserAndReportAsync(

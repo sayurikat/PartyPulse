@@ -19,7 +19,8 @@ public sealed class MainWindow : Window, IDisposable
     private string addUserDisplayName = string.Empty;
     private string addUserDiscordHandle = string.Empty;
     private VenueConnectionConfiguration? pendingLinkVenue;
-    private VenueConnectionConfiguration? pendingLeaveVenue;
+    private VenueConnectionConfiguration? pendingUnauthorizeVenue;
+    private VenueConnectionConfiguration? pendingLocalRemovalVenue;
     private VenueConnectionConfiguration? pendingUnlinkVenue;
     private SelfCharacterSummary? pendingUnlinkCharacter;
 
@@ -326,22 +327,33 @@ public sealed class MainWindow : Window, IDisposable
         ImGui.Spacing();
         ImGui.Separator();
         ImGui.Spacing();
-        ImGui.TextUnformatted("Venue membership");
+        ImGui.TextUnformatted("Venue authorization");
         if (view.IsLastOwner)
         {
             ImGui.TextColored(
                 new Vector4(1f, 0.65f, 0.3f, 1f),
-                "You are the venue's last active owner and cannot leave until another owner exists.");
+                "You are the venue's last active owner and cannot unauthorize until another owner exists.");
         }
 
         ImGui.BeginDisabled(view.IsLastOwner);
-        if (ImGui.Button("Leave venue"))
+        if (ImGui.Button("Unauthorize from venue"))
         {
-            pendingLeaveVenue = venue;
-            ImGui.OpenPopup("Leave venue###PartyPulseLeaveVenue");
+            pendingUnauthorizeVenue = venue;
+            ImGui.OpenPopup("Unauthorize from venue###PartyPulseUnauthorizeVenue");
         }
         ImGui.EndDisabled();
-        ImGui.TextDisabled("Leaving disables your venue account and revokes all of its registered devices. The venue stays saved locally in visitor mode.");
+        ImGui.TextDisabled("This disables your venue user and revokes every registered device for that user. The public venue remains saved locally in visitor mode.");
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+        ImGui.TextUnformatted("Local venue data");
+        if (ImGui.Button("Remove venue from this device"))
+        {
+            pendingLocalRemovalVenue = venue;
+            ImGui.OpenPopup("Remove venue from device###PartyPulseRemoveVenueFromDevice");
+        }
+        ImGui.TextDisabled("This only removes the venue and credential stored by this plugin on this computer. It does not change the server-side venue user.");
 
         ImGui.EndTabItem();
     }
@@ -556,22 +568,45 @@ public sealed class MainWindow : Window, IDisposable
         }
 
         if (ImGui.BeginPopupModal(
-                "Leave venue###PartyPulseLeaveVenue",
+                "Unauthorize from venue###PartyPulseUnauthorizeVenue",
                 ImGuiWindowFlags.AlwaysAutoResize))
         {
-            ImGui.TextWrapped($"Leave {pendingLeaveVenue?.DisplayLabel ?? "this venue"}?");
+            ImGui.TextWrapped($"Unauthorize your user from {pendingUnauthorizeVenue?.DisplayLabel ?? "this venue"}?");
             ImGui.TextWrapped("Your venue user will be disabled and all of its devices will be revoked. The public venue remains in your local list as a visitor venue.");
-            if (ImGui.Button("Leave venue") && pendingLeaveVenue is not null)
+            if (ImGui.Button("Unauthorize") && pendingUnauthorizeVenue is not null)
             {
-                plugin.LeaveVenue(pendingLeaveVenue);
-                pendingLeaveVenue = null;
+                plugin.UnauthorizeFromVenue(pendingUnauthorizeVenue);
+                pendingUnauthorizeVenue = null;
                 ImGui.CloseCurrentPopup();
             }
 
             ImGui.SameLine();
             if (ImGui.Button("Cancel"))
             {
-                pendingLeaveVenue = null;
+                pendingUnauthorizeVenue = null;
+                ImGui.CloseCurrentPopup();
+            }
+
+            ImGui.EndPopup();
+        }
+
+        if (ImGui.BeginPopupModal(
+                "Remove venue from device###PartyPulseRemoveVenueFromDevice",
+                ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            ImGui.TextWrapped($"Remove {pendingLocalRemovalVenue?.DisplayLabel ?? "this venue"} from this device?");
+            ImGui.TextWrapped("This removes the saved venue and local device credential only. Your server-side venue user and other devices are not changed.");
+            if (ImGui.Button("Remove from this device") && pendingLocalRemovalVenue is not null)
+            {
+                plugin.RemoveVenueLocally(pendingLocalRemovalVenue);
+                pendingLocalRemovalVenue = null;
+                ImGui.CloseCurrentPopup();
+            }
+
+            ImGui.SameLine();
+            if (ImGui.Button("Cancel"))
+            {
+                pendingLocalRemovalVenue = null;
                 ImGui.CloseCurrentPopup();
             }
 
