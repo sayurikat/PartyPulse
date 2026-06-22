@@ -33,6 +33,7 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService] internal static IPlayerState PlayerState { get; private set; } = null!;
     [PluginService] internal static IDataManager DataManager { get; private set; } = null!;
     [PluginService] internal static ITargetManager TargetManager { get; private set; } = null!;
+    [PluginService] internal static IObjectTable ObjectTable { get; private set; } = null!;
     [PluginService] internal static ITextureProvider TextureProvider { get; private set; } = null!;
     [PluginService] internal static IFramework Framework { get; private set; } = null!;
     [PluginService] internal static IPluginLog Log { get; private set; } = null!;
@@ -82,6 +83,7 @@ public sealed class Plugin : IDalamudPlugin
             apiClient,
             IdentityProvider,
             Log);
+        NearbyVipPlayers = new NearbyVipPlayerTracker(ObjectTable, TargetManager);
         Finance = new FinanceManagementManager(
             Configuration,
             Authentication,
@@ -141,6 +143,8 @@ public sealed class Plugin : IDalamudPlugin
     public SelfServiceManager SelfService { get; }
 
     public VipManagementManager Vip { get; }
+
+    public NearbyVipPlayerTracker NearbyVipPlayers { get; }
 
     public FinanceManagementManager Finance { get; }
 
@@ -331,6 +335,7 @@ public sealed class Plugin : IDalamudPlugin
         UserManagement.RemoveProfile(venue.ProfileId);
         SelfService.RemoveProfile(venue.ProfileId);
         Vip.RemoveProfile(venue.ProfileId);
+        NearbyVipPlayers.ClearProfile(venue.ProfileId);
         Finance.RemoveProfile(venue.ProfileId);
         Notifications.RemoveProfile(venue.ProfileId);
         Configuration.VenueConnections.RemoveAll(x => x.ProfileId == venue.ProfileId);
@@ -407,10 +412,13 @@ public sealed class Plugin : IDalamudPlugin
             $"load VIP data for {venue.VenueCode}");
     }
 
-    public void RefreshVip(VenueConnectionConfiguration venue) =>
+    public void RefreshVip(VenueConnectionConfiguration venue)
+    {
+        NearbyVipPlayers.ClearProfile(venue.ProfileId);
         Observe(
             Vip.LoadAsync(venue, true, LifetimeToken),
             $"refresh VIP data for {venue.VenueCode}");
+    }
 
     public void CreateVipPackage(
         VenueConnectionConfiguration venue,
@@ -592,6 +600,7 @@ public sealed class Plugin : IDalamudPlugin
                 UserManagement.Clear("Character logged out or changed.");
                 SelfService.Clear("Character logged out or changed.");
                 Vip.Clear("Character logged out or changed.");
+                NearbyVipPlayers.Clear();
                 Finance.Clear("Character logged out or changed.");
                 Notifications.Clear();
             }
@@ -607,6 +616,7 @@ public sealed class Plugin : IDalamudPlugin
             UserManagement.Clear("Character changed; venue-user data was cleared.");
             SelfService.Clear("Character changed; self-service data was cleared.");
             Vip.Clear("Character changed; VIP data was cleared.");
+            NearbyVipPlayers.Clear();
             Finance.Clear("Character changed; finance data was cleared.");
             Notifications.Clear();
         }
@@ -745,6 +755,7 @@ public sealed class Plugin : IDalamudPlugin
         UserManagement.RemoveProfile(venue.ProfileId);
         SelfService.RemoveProfile(venue.ProfileId);
         Vip.RemoveProfile(venue.ProfileId);
+        NearbyVipPlayers.ClearProfile(venue.ProfileId);
         Finance.RemoveProfile(venue.ProfileId);
         Notifications.RemoveProfile(venue.ProfileId);
         ChatGui.Print($"Unauthorized from {venue.DisplayLabel}. The venue remains saved in visitor mode.", "PartyPulse");

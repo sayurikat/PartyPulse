@@ -21,6 +21,8 @@ public sealed class VipTabRenderer(Plugin plugin)
     private bool customerPaymentConfirmed;
     private string vipPlayerNameFilter = string.Empty;
     private bool vipPlayerActiveOnly;
+    private bool vipPlayerExpiringSoonOnly;
+    private bool vipPlayerNearbyOnly;
 
     private int editingPackageId;
     private string packageName = string.Empty;
@@ -254,7 +256,9 @@ public sealed class VipTabRenderer(Plugin plugin)
     {
         var activePackages = view.Packages
             .Where(package => !package.IsArchived)
-            .OrderBy(package => package.Name)
+            .OrderBy(package => package.PriceGil)
+            .ThenBy(package => package.Name)
+            .ThenBy(package => package.PackageId)
             .ToArray();
 
         if (activePackages.Length == 0)
@@ -381,16 +385,34 @@ public sealed class VipTabRenderer(Plugin plugin)
     {
         ImGui.TextUnformatted("VIP player list");
 
+        plugin.NearbyVipPlayers.Prepare(venue.ProfileId, view);
+        plugin.NearbyVipPlayers.ScanIfDue();
+
         ImGui.SetNextItemWidth(320 * ImGuiHelpers.GlobalScale);
         ImGui.InputText("Name filter", ref vipPlayerNameFilter, 100);
-        ImGui.SameLine();
+
         ImGui.Checkbox("Active only", ref vipPlayerActiveOnly);
         if (ImGui.IsItemHovered())
         {
             ImGui.SetTooltip("Shows lifetime VIPs and VIPs whose expiry is later than the current UTC time.");
         }
 
+        ImGui.SameLine();
+        ImGui.Checkbox("Expires within 8 days", ref vipPlayerExpiringSoonOnly);
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip("Shows active, non-lifetime VIPs expiring in less than eight days.");
+        }
+
+        ImGui.SameLine();
+        ImGui.Checkbox("Nearby only", ref vipPlayerNearbyOnly);
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip("Shows VIP players with at least one linked character currently detected nearby.");
+        }
+
         var now = DateTimeOffset.UtcNow;
+        var expiringSoonCutoff = now.AddDays(8);
         var trimmedNameFilter = vipPlayerNameFilter.Trim();
         var charactersByPlayer = view.Characters.ToLookup(character => character.VipPlayerId);
         var filteredPlayers = view.Players
@@ -399,12 +421,19 @@ public sealed class VipTabRenderer(Plugin plugin)
                 charactersByPlayer[player.VipPlayerId],
                 trimmedNameFilter))
             .Where(player => !vipPlayerActiveOnly || IsVipPlayerActive(player, now))
+            .Where(player =>
+                !vipPlayerExpiringSoonOnly ||
+                IsVipPlayerExpiringSoon(player, now, expiringSoonCutoff))
+            .Where(player =>
+                !vipPlayerNearbyOnly ||
+                plugin.NearbyVipPlayers.IsNearby(player.VipPlayerId))
             .OrderBy(player => player.DisplayCharacterName)
             .ThenBy(player => player.DisplayWorldName)
             .ToArray();
 
-        ImGui.SameLine();
-        ImGui.TextDisabled($"Showing {filteredPlayers.Length:N0} of {view.Players.Count:N0}");
+        ImGui.TextDisabled(
+            $"Showing {filteredPlayers.Length:N0} of {view.Players.Count:N0} — " +
+            $"Nearby: {plugin.NearbyVipPlayers.NearbyVipPlayerCount:N0}");
 
         var flags =
             ImGuiTableFlags.Borders |
@@ -415,7 +444,7 @@ public sealed class VipTabRenderer(Plugin plugin)
 
         if (!ImGui.BeginTable(
                 "VipPlayers",
-                view.Capabilities.CanManagePlayers || view.Capabilities.CanManagePayments ? 5 : 4,
+                5,
                 flags,
                 new Vector2(0, 230 * ImGuiHelpers.GlobalScale)))
         {
@@ -426,16 +455,19 @@ public sealed class VipTabRenderer(Plugin plugin)
         ImGui.TableSetupColumn("Discord");
         ImGui.TableSetupColumn("Expires at");
         ImGui.TableSetupColumn("Characters");
-        if (view.Capabilities.CanManagePlayers || view.Capabilities.CanManagePayments)
-        {
-            ImGui.TableSetupColumn("##Edit", ImGuiTableColumnFlags.WidthFixed, 60 * ImGuiHelpers.GlobalScale);
-        }
+        ImGui.TableSetupColumn("Actions", ImGuiTableColumnFlags.WidthFixed, 125 * ImGuiHelpers.GlobalScale);
         ImGui.TableHeadersRow();
 
         foreach (var player in filteredPlayers)
         {
             var characterCount = charactersByPlayer[player.VipPlayerId].Count();
+            var expiryColor = GetVipPlayerExpiryColor(player, now, expiringSoonCutoff);
             ImGui.TableNextRow();
+            if (expiryColor is { } rowTextColor)
+            {
+                ImGui.PushStyleColor(ImGuiCol.Text, rowTextColor);
+            }
+
             ImGui.TableSetColumnIndex(0);
             ImGui.TextUnformatted(player.CharacterDisplay);
             ImGui.TableSetColumnIndex(1);
@@ -450,18 +482,49 @@ public sealed class VipTabRenderer(Plugin plugin)
                 : player.LastSubscriptionEndsAt?.ToLocalTime().ToString("g") ?? "None");
             ImGui.TableSetColumnIndex(3);
             ImGui.TextUnformatted(characterCount.ToString(CultureInfo.InvariantCulture));
+
+            if (expiryColor is not null)
+            {
+                ImGui.PopStyleColor();
+            }
+
+            ImGui.TableSetColumnIndex(4);
+            ImGui.PushID(player.VipPlayerId);
+            var hasNearbyCharacter = plugin.NearbyVipPlayers.TryGetNearbyCharacter(
+                player.VipPlayerId,
+                out var nearbyCharacter);
+            if (hasNearbyCharacter)
+            {
+                if (ImGui.SmallButton("Target"))
+                {
+                    if (!plugin.NearbyVipPlayers.TryTarget(player.VipPlayerId, out var targetError))
+                    {
+                        Plugin.ChatGui.PrintError(targetError, "PartyPulse");
+                    }
+                }
+
+                if (ImGui.IsItemHovered())
+                {
+                    ImGui.SetTooltip($"Target {nearbyCharacter!.DisplayName}");
+                }
+            }
+
             if (view.Capabilities.CanManagePlayers || view.Capabilities.CanManagePayments)
             {
-                ImGui.TableSetColumnIndex(4);
-                ImGui.PushID(player.VipPlayerId);
+                if (hasNearbyCharacter)
+                {
+                    ImGui.SameLine();
+                }
+
                 ImGui.BeginDisabled(isBusy);
                 if (ImGui.SmallButton("Edit"))
                 {
                     plugin.OpenVipPlayerEditor(venue, player.VipPlayerId);
                 }
                 ImGui.EndDisabled();
-                ImGui.PopID();
             }
+
+            ImGui.PopID();
         }
 
         ImGui.EndTable();
@@ -490,6 +553,35 @@ public sealed class VipTabRenderer(Plugin plugin)
 
     private static bool IsVipPlayerActive(VipPlayerSummary player, DateTimeOffset now) =>
         player.HasLifetime || player.LastSubscriptionEndsAt > now;
+
+    private static bool IsVipPlayerExpiringSoon(
+        VipPlayerSummary player,
+        DateTimeOffset now,
+        DateTimeOffset expiringSoonCutoff) =>
+        !player.HasLifetime &&
+        player.LastSubscriptionEndsAt is { } expiresAt &&
+        expiresAt > now &&
+        expiresAt < expiringSoonCutoff;
+
+    private static Vector4? GetVipPlayerExpiryColor(
+        VipPlayerSummary player,
+        DateTimeOffset now,
+        DateTimeOffset expiringSoonCutoff)
+    {
+        if (player.HasLifetime || player.LastSubscriptionEndsAt is not { } expiresAt)
+        {
+            return null;
+        }
+
+        if (expiresAt <= now)
+        {
+            return new Vector4(1f, 0.35f, 0.35f, 1f);
+        }
+
+        return expiresAt < expiringSoonCutoff
+            ? new Vector4(1f, 0.82f, 0.2f, 1f)
+            : null;
+    }
 
     private void DrawSettlementControls(
         VenueConnectionConfiguration venue,
@@ -581,7 +673,10 @@ public sealed class VipTabRenderer(Plugin plugin)
             ImGui.TableSetupColumn("##Edit", ImGuiTableColumnFlags.WidthFixed, 60 * ImGuiHelpers.GlobalScale);
             ImGui.TableHeadersRow();
 
-            foreach (var package in view.Packages)
+            foreach (var package in view.Packages
+                         .OrderBy(package => package.PriceGil)
+                         .ThenBy(package => package.Name)
+                         .ThenBy(package => package.PackageId))
             {
                 ImGui.PushID(package.PackageId);
                 ImGui.TableNextRow();
@@ -714,6 +809,9 @@ public sealed class VipTabRenderer(Plugin plugin)
         customerPaymentConfirmed = false;
         vipPlayerNameFilter = string.Empty;
         vipPlayerActiveOnly = false;
+        vipPlayerExpiringSoonOnly = false;
+        vipPlayerNearbyOnly = false;
+        plugin.NearbyVipPlayers.Clear();
         ResetPackageEditor();
     }
 
