@@ -208,4 +208,6 @@ public sealed record SellVipSubscriptionResponse(
     DateTimeOffset StartsAt,
     DateTimeOffset? EndsAt,
     bool Lifetime,
-    long PersonalUnpaidGil);
+    long PersonalUnpaidGil,
+    bool WasNewVip,
+    long? OpeningId);

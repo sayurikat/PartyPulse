@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -44,8 +45,10 @@ public sealed class Plugin : IDalamudPlugin
     private readonly MainWindow mainWindow;
     private readonly VenueUserEditWindow venueUserEditWindow;
     private readonly VipPlayerEditWindow vipPlayerEditWindow;
+    private readonly VipArrivalWindow vipArrivalWindow;
     private readonly NotificationToastWindow notificationToastWindow;
     private readonly SettlementTradeService settlementTradeService;
+    private readonly GameMacroExecutionService gameMacroExecutionService;
 
     private PlayerIdentity? observedIdentity;
     private bool autoConnectStarted;
@@ -83,7 +86,19 @@ public sealed class Plugin : IDalamudPlugin
             apiClient,
             IdentityProvider,
             Log);
+        VipArrivals = new VipArrivalManagementManager(
+            Configuration,
+            Authentication,
+            apiClient,
+            IdentityProvider,
+            Log);
         NearbyVipPlayers = new NearbyVipPlayerTracker(ObjectTable, TargetManager);
+        VipArrivalNearby = new VipArrivalNearbyTracker(ObjectTable);
+        gameMacroExecutionService = new GameMacroExecutionService(
+            Framework,
+            ObjectTable,
+            TargetManager,
+            Log);
         Finance = new FinanceManagementManager(
             Configuration,
             Authentication,
@@ -106,11 +121,13 @@ public sealed class Plugin : IDalamudPlugin
         mainWindow = new MainWindow(this);
         venueUserEditWindow = new VenueUserEditWindow(this);
         vipPlayerEditWindow = new VipPlayerEditWindow(this);
+        vipArrivalWindow = new VipArrivalWindow(this);
         notificationToastWindow = new NotificationToastWindow(this);
         WindowSystem.AddWindow(configWindow);
         WindowSystem.AddWindow(mainWindow);
         WindowSystem.AddWindow(venueUserEditWindow);
         WindowSystem.AddWindow(vipPlayerEditWindow);
+        WindowSystem.AddWindow(vipArrivalWindow);
         WindowSystem.AddWindow(notificationToastWindow);
 
         CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
@@ -144,7 +161,11 @@ public sealed class Plugin : IDalamudPlugin
 
     public VipManagementManager Vip { get; }
 
+    public VipArrivalManagementManager VipArrivals { get; }
+
     public NearbyVipPlayerTracker NearbyVipPlayers { get; }
+
+    public VipArrivalNearbyTracker VipArrivalNearby { get; }
 
     public FinanceManagementManager Finance { get; }
 
@@ -153,6 +174,8 @@ public sealed class Plugin : IDalamudPlugin
     public WindowSystem WindowSystem { get; } = new("PartyPulse");
 
     public CancellationToken LifetimeToken => lifetimeCancellation.Token;
+
+    public bool IsGameMacroBusy => gameMacroExecutionService.IsBusy;
 
     public void Dispose()
     {
@@ -175,10 +198,13 @@ public sealed class Plugin : IDalamudPlugin
         mainWindow.Dispose();
         venueUserEditWindow.Dispose();
         vipPlayerEditWindow.Dispose();
+        vipArrivalWindow.Dispose();
         notificationToastWindow.Dispose();
         Notifications.Dispose();
         Finance.Dispose();
+        VipArrivals.Dispose();
         Vip.Dispose();
+        gameMacroExecutionService.Dispose();
         SelfService.Dispose();
         UserManagement.Dispose();
         Authentication.Dispose();
@@ -335,7 +361,9 @@ public sealed class Plugin : IDalamudPlugin
         UserManagement.RemoveProfile(venue.ProfileId);
         SelfService.RemoveProfile(venue.ProfileId);
         Vip.RemoveProfile(venue.ProfileId);
+        VipArrivals.ClearProfile(venue.ProfileId);
         NearbyVipPlayers.ClearProfile(venue.ProfileId);
+        VipArrivalNearby.Clear();
         Finance.RemoveProfile(venue.ProfileId);
         Notifications.RemoveProfile(venue.ProfileId);
         Configuration.VenueConnections.RemoveAll(x => x.ProfileId == venue.ProfileId);
@@ -415,6 +443,7 @@ public sealed class Plugin : IDalamudPlugin
     public void RefreshVip(VenueConnectionConfiguration venue)
     {
         NearbyVipPlayers.ClearProfile(venue.ProfileId);
+        VipArrivalNearby.Clear();
         Observe(
             Vip.LoadAsync(venue, true, LifetimeToken),
             $"refresh VIP data for {venue.VenueCode}");
@@ -489,6 +518,95 @@ public sealed class Plugin : IDalamudPlugin
         Observe(
             SetVipSubscriptionPaymentStatusAndReportAsync(venue, subscriptionId, request),
             $"set VIP payment status {subscriptionId} for {venue.VenueCode}");
+
+    public void EnsureVipArrivalsLoaded(VenueConnectionConfiguration venue)
+    {
+        if (!VipArrivals.ShouldLoad(venue))
+        {
+            return;
+        }
+
+        Observe(
+            VipArrivals.LoadAsync(venue, false, LifetimeToken),
+            $"load VIP arrival data for {venue.VenueCode}");
+    }
+
+    public void RefreshVipArrivals(VenueConnectionConfiguration venue)
+    {
+        VipArrivalNearby.Clear();
+        Observe(
+            VipArrivals.LoadAsync(venue, true, LifetimeToken),
+            $"refresh VIP arrival data for {venue.VenueCode}");
+    }
+
+    public void OpenVipArrivalTracker(VenueConnectionConfiguration venue)
+    {
+        EnsureVipArrivalsLoaded(venue);
+        vipArrivalWindow.Open(venue.ProfileId);
+    }
+
+    public void SubmitVipArrivalObservations(
+        VenueConnectionConfiguration venue,
+        long openingId,
+        IReadOnlyList<VipArrivalObservationRequest> observations) =>
+        Observe(
+            SubmitVipArrivalObservationsAsync(venue, openingId, observations),
+            $"submit VIP arrival observations for {venue.VenueCode}");
+
+    public void RunVipArrivalMacro(
+        VenueConnectionConfiguration venue,
+        VipArrivalSummary arrival,
+        NearbyVipArrivalCharacter nearby,
+        VenueMacroSummary macro,
+        string actionKey) =>
+        Observe(
+            RunVipArrivalMacroAndReportAsync(venue, arrival, nearby, macro, actionKey),
+            $"run VIP arrival {actionKey} macro for {venue.VenueCode}");
+
+    public void DismissVipArrival(
+        VenueConnectionConfiguration venue,
+        VipArrivalSummary arrival) =>
+        Observe(
+            RecordVipArrivalActionAndReportAsync(
+                venue,
+                arrival.VipPlayerId,
+                new RecordVipArrivalActionRequest(arrival.OpeningId, "dismiss", arrival.LastSeenCharacterId),
+                "VIP arrival dismissed."),
+            $"dismiss VIP arrival for {venue.VenueCode}");
+
+    public void UpdateVenueMacro(
+        VenueConnectionConfiguration venue,
+        string macroCode,
+        string? macroText) =>
+        Observe(
+            UpdateVenueMacroAndReportAsync(venue, macroCode, macroText),
+            $"update venue macro {macroCode} for {venue.VenueCode}");
+
+    public void StartTemporaryVenueOpening(
+        VenueConnectionConfiguration venue,
+        int durationMinutes,
+        string? title) =>
+        Observe(
+            StartTemporaryVenueOpeningAndReportAsync(venue, durationMinutes, title),
+            $"start temporary opening for {venue.VenueCode}");
+
+    public void CloseVenueOpening(
+        VenueConnectionConfiguration venue,
+        long openingId) =>
+        Observe(
+            CloseVenueOpeningAndReportAsync(venue, openingId),
+            $"close opening {openingId} for {venue.VenueCode}");
+
+    public void RunNewVipMacro(
+        VenueConnectionConfiguration venue,
+        VipNewMemberOffer offer,
+        VenueMacroSummary macro) =>
+        Observe(
+            RunNewVipMacroAndReportAsync(venue, offer, macro),
+            $"run new VIP macro for {venue.VenueCode}");
+
+    public void DismissNewVipOffer(Guid profileId) =>
+        VipArrivals.ClearNewMemberOffer(profileId);
 
     public void EnsureFinanceLoaded(VenueConnectionConfiguration venue)
     {
@@ -600,7 +718,9 @@ public sealed class Plugin : IDalamudPlugin
                 UserManagement.Clear("Character logged out or changed.");
                 SelfService.Clear("Character logged out or changed.");
                 Vip.Clear("Character logged out or changed.");
+                VipArrivals.Clear();
                 NearbyVipPlayers.Clear();
+                VipArrivalNearby.Clear();
                 Finance.Clear("Character logged out or changed.");
                 Notifications.Clear();
             }
@@ -616,7 +736,9 @@ public sealed class Plugin : IDalamudPlugin
             UserManagement.Clear("Character changed; venue-user data was cleared.");
             SelfService.Clear("Character changed; self-service data was cleared.");
             Vip.Clear("Character changed; VIP data was cleared.");
+            VipArrivals.Clear();
             NearbyVipPlayers.Clear();
+            VipArrivalNearby.Clear();
             Finance.Clear("Character changed; finance data was cleared.");
             Notifications.Clear();
         }
@@ -755,7 +877,9 @@ public sealed class Plugin : IDalamudPlugin
         UserManagement.RemoveProfile(venue.ProfileId);
         SelfService.RemoveProfile(venue.ProfileId);
         Vip.RemoveProfile(venue.ProfileId);
+        VipArrivals.ClearProfile(venue.ProfileId);
         NearbyVipPlayers.ClearProfile(venue.ProfileId);
+        VipArrivalNearby.Clear();
         Finance.RemoveProfile(venue.ProfileId);
         Notifications.RemoveProfile(venue.ProfileId);
         ChatGui.Print($"Unauthorized from {venue.DisplayLabel}. The venue remains saved in visitor mode.", "PartyPulse");
@@ -907,6 +1031,26 @@ public sealed class Plugin : IDalamudPlugin
             ChatGui.Print(
                 $"Sold VIP to {request.CharacterName} @ {request.WorldName} ({period}).",
                 "PartyPulse");
+
+            if (result.Value.WasNewVip && result.Value.OpeningId is { } openingId)
+            {
+                var character = Vip.GetSnapshot(venue).View?.Characters.FirstOrDefault(value =>
+                    value.VipPlayerId == result.Value.VipPlayerId &&
+                    string.Equals(value.CharacterName, request.CharacterName, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(value.WorldName, request.WorldName, StringComparison.OrdinalIgnoreCase));
+                if (character is not null)
+                {
+                    VipArrivals.SetNewMemberOffer(new VipNewMemberOffer(
+                        venue.ProfileId,
+                        openingId,
+                        result.Value.VipPlayerId,
+                        character.CharacterId,
+                        character.CharacterName,
+                        character.WorldName));
+                    await VipArrivals.LoadAsync(venue, true, LifetimeToken);
+                    ChatGui.Print("This player had no active VIP before the sale. An optional new-member message is available in the VIP tab.", "PartyPulse");
+                }
+            }
             return;
         }
 
@@ -1030,6 +1174,176 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         ReportVipFailure(result.Failure, "The VIP payment status could not be updated.");
+    }
+
+    private async Task SubmitVipArrivalObservationsAsync(
+        VenueConnectionConfiguration venue,
+        long openingId,
+        IReadOnlyList<VipArrivalObservationRequest> observations)
+    {
+        var result = await VipArrivals.ObserveAsync(
+            venue,
+            new ObserveVipArrivalsRequest(openingId, observations),
+            LifetimeToken);
+        if (result.Success)
+        {
+            VipArrivalNearby.MarkSubmitted(observations);
+            return;
+        }
+
+        VipArrivalNearby.ReleaseSubmission(observations);
+        Log.Warning(
+            "VIP arrival observation upload failed: {Code} {Message}",
+            result.Failure?.Code,
+            result.Failure?.Message);
+    }
+
+    private async Task RunVipArrivalMacroAndReportAsync(
+        VenueConnectionConfiguration venue,
+        VipArrivalSummary arrival,
+        NearbyVipArrivalCharacter nearby,
+        VenueMacroSummary macro,
+        string actionKey)
+    {
+        if (!macro.IsConfigured)
+        {
+            ChatGui.PrintError($"The {macro.DisplayName} macro is not configured.", "PartyPulse");
+            return;
+        }
+
+        var execution = await gameMacroExecutionService.ExecuteAsync(
+            nearby.GameObjectId,
+            nearby.CharacterName,
+            nearby.WorldName,
+            macro.MacroText!,
+            LifetimeToken);
+        if (!execution.Success)
+        {
+            ChatGui.PrintError($"{execution.ErrorMessage} [{execution.ErrorCode}]", "PartyPulse");
+            return;
+        }
+
+        var result = await VipArrivals.RecordActionAsync(
+            venue,
+            arrival.VipPlayerId,
+            new RecordVipArrivalActionRequest(arrival.OpeningId, actionKey, nearby.CharacterId),
+            LifetimeToken);
+        if (!result.Success)
+        {
+            ReportVipFailure(result.Failure, "The macro started, but the arrival action could not be recorded.");
+        }
+    }
+
+    private async Task RecordVipArrivalActionAndReportAsync(
+        VenueConnectionConfiguration venue,
+        int vipPlayerId,
+        RecordVipArrivalActionRequest request,
+        string successMessage)
+    {
+        var result = await VipArrivals.RecordActionAsync(
+            venue,
+            vipPlayerId,
+            request,
+            LifetimeToken);
+        if (result.Success)
+        {
+            ChatGui.Print(successMessage, "PartyPulse");
+            return;
+        }
+
+        ReportVipFailure(result.Failure, "The VIP arrival action could not be recorded.");
+    }
+
+    private async Task UpdateVenueMacroAndReportAsync(
+        VenueConnectionConfiguration venue,
+        string macroCode,
+        string? macroText)
+    {
+        var result = await VipArrivals.UpdateMacroAsync(
+            venue,
+            macroCode,
+            new UpdateVenueMacroRequest(macroText),
+            LifetimeToken);
+        if (result.Success)
+        {
+            ChatGui.Print("Venue macro updated.", "PartyPulse");
+            return;
+        }
+
+        ReportVipFailure(result.Failure, "The venue macro could not be updated.");
+    }
+
+    private async Task StartTemporaryVenueOpeningAndReportAsync(
+        VenueConnectionConfiguration venue,
+        int durationMinutes,
+        string? title)
+    {
+        var result = await VipArrivals.StartTemporaryOpeningAsync(
+            venue,
+            new StartTemporaryOpeningRequest(durationMinutes, title),
+            LifetimeToken);
+        if (result.Success && result.Value is not null)
+        {
+            VipArrivalNearby.Clear();
+            ChatGui.Print(
+                $"Started opening #{result.Value.OpeningId} until {result.Value.ClosesAt.ToLocalTime():g} at {result.Value.AddressDisplay}.",
+                "PartyPulse");
+            return;
+        }
+
+        ReportVipFailure(result.Failure, "The temporary venue opening could not be started.");
+    }
+
+    private async Task CloseVenueOpeningAndReportAsync(
+        VenueConnectionConfiguration venue,
+        long openingId)
+    {
+        var result = await VipArrivals.CloseOpeningAsync(venue, openingId, LifetimeToken);
+        if (result.Success)
+        {
+            VipArrivalNearby.Clear();
+            ChatGui.Print($"Closed venue opening #{openingId}.", "PartyPulse");
+            return;
+        }
+
+        ReportVipFailure(result.Failure, "The venue opening could not be closed.");
+    }
+
+    private async Task RunNewVipMacroAndReportAsync(
+        VenueConnectionConfiguration venue,
+        VipNewMemberOffer offer,
+        VenueMacroSummary macro)
+    {
+        if (!macro.IsConfigured)
+        {
+            ChatGui.PrintError("The new VIP message macro is not configured.", "PartyPulse");
+            return;
+        }
+
+        var execution = await gameMacroExecutionService.ExecuteForIdentityAsync(
+            offer.CharacterName,
+            offer.WorldName,
+            macro.MacroText!,
+            LifetimeToken);
+        if (!execution.Success)
+        {
+            ChatGui.PrintError($"{execution.ErrorMessage} [{execution.ErrorCode}]", "PartyPulse");
+            return;
+        }
+
+        var result = await VipArrivals.RecordActionAsync(
+            venue,
+            offer.VipPlayerId,
+            new RecordVipArrivalActionRequest(offer.OpeningId, "new_vip", offer.CharacterId),
+            LifetimeToken);
+        if (!result.Success)
+        {
+            ReportVipFailure(result.Failure, "The message started, but the new-VIP action could not be recorded.");
+            return;
+        }
+
+        VipArrivals.ClearNewMemberOffer(venue.ProfileId);
+        ChatGui.Print("Started the new VIP message macro.", "PartyPulse");
     }
 
     private async Task CreateVipSettlementAndReportAsync(

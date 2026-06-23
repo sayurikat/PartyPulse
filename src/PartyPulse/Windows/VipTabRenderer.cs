@@ -23,6 +23,9 @@ public sealed class VipTabRenderer(Plugin plugin)
     private bool vipPlayerActiveOnly;
     private bool vipPlayerExpiringSoonOnly;
     private bool vipPlayerNearbyOnly;
+    private readonly Dictionary<string, string> arrivalMacroDrafts = new(StringComparer.OrdinalIgnoreCase);
+    private int temporaryOpeningDurationMinutes = 480;
+    private string temporaryOpeningTitle = string.Empty;
 
     private int editingPackageId;
     private string packageName = string.Empty;
@@ -45,6 +48,7 @@ public sealed class VipTabRenderer(Plugin plugin)
 
         ResetForVenueChange(venue);
         plugin.EnsureVipLoaded(venue);
+        plugin.EnsureVipArrivalsLoaded(venue);
 
         var snapshot = plugin.Vip.GetSnapshot(venue);
         var isBusy = plugin.Vip.IsBusy(venue.ProfileId);
@@ -59,15 +63,20 @@ public sealed class VipTabRenderer(Plugin plugin)
         ImGui.SameLine();
         ImGui.TextDisabled("Data is cached for this venue until refreshed or changed.");
 
-        if (snapshot.Status != VipManagementStatus.Ready || snapshot.View is null)
+        var vipDataReady = snapshot.Status == VipManagementStatus.Ready && snapshot.View is not null;
+        DrawArrivalToolbar(venue, vipDataReady);
+        DrawNewVipOffer(venue);
+
+        if (!vipDataReady)
         {
             ImGui.Spacing();
             ImGui.TextWrapped(snapshot.Message);
+            DrawArrivalAdministration(venue);
             ImGui.EndTabItem();
             return;
         }
 
-        var view = snapshot.View;
+        var view = snapshot.View!;
         if (view.Capabilities.CanSell)
         {
             ImGui.SameLine();
@@ -96,7 +105,220 @@ public sealed class VipTabRenderer(Plugin plugin)
             DrawPackageManagement(venue, view, isBusy);
         }
 
+        DrawArrivalAdministration(venue);
+
         ImGui.EndTabItem();
+    }
+
+    private void DrawArrivalToolbar(VenueConnectionConfiguration venue, bool vipDataReady)
+    {
+        var snapshot = plugin.VipArrivals.GetSnapshot(venue);
+        if (snapshot.Status != VipArrivalManagementStatus.Ready || snapshot.Context is null)
+        {
+            return;
+        }
+
+        var context = snapshot.Context;
+        if (context.Capabilities.CanUseArrival)
+        {
+            ImGui.SameLine();
+            ImGui.BeginDisabled(!vipDataReady);
+            if (ImGui.Button("Open arrival tracker"))
+            {
+                plugin.OpenVipArrivalTracker(venue);
+            }
+            ImGui.EndDisabled();
+            if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled) && !vipDataReady)
+            {
+                ImGui.SetTooltip("VIP player data permission is also required to run the arrival tracker.");
+            }
+
+            if (context.CurrentOpening is { } opening)
+            {
+                ImGui.SameLine();
+                ImGui.TextDisabled($"Opening #{opening.OpeningId} until {opening.ClosesAt.ToLocalTime():g}");
+            }
+            else
+            {
+                ImGui.SameLine();
+                ImGui.TextDisabled("No active opening");
+            }
+        }
+    }
+
+    private void DrawNewVipOffer(VenueConnectionConfiguration venue)
+    {
+        if (!plugin.VipArrivals.TryGetNewMemberOffer(venue.ProfileId, out var offer) || offer is null)
+        {
+            return;
+        }
+
+        var context = plugin.VipArrivals.GetSnapshot(venue).Context;
+        var macro = context?.Macros.FirstOrDefault(value =>
+            string.Equals(value.MacroCode, VipArrivalMacroCodes.NewMember, StringComparison.OrdinalIgnoreCase));
+
+        ImGui.Spacing();
+        ImGui.TextColored(
+            new Vector4(0.45f, 0.9f, 0.55f, 1f),
+            $"New or returning VIP: {offer.CharacterName} @ {offer.WorldName}");
+        ImGui.SameLine();
+        ImGui.BeginDisabled(
+            macro?.IsConfigured != true ||
+            plugin.VipArrivals.IsBusy(venue.ProfileId) ||
+            plugin.IsGameMacroBusy);
+        if (ImGui.SmallButton("Send new VIP message"))
+        {
+            plugin.RunNewVipMacro(venue, offer, macro!);
+        }
+        ImGui.EndDisabled();
+        if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled) && macro?.IsConfigured != true)
+        {
+            ImGui.SetTooltip("Configure the New VIP message macro first.");
+        }
+        ImGui.SameLine();
+        if (ImGui.SmallButton("Dismiss##NewVipOffer"))
+        {
+            plugin.DismissNewVipOffer(venue.ProfileId);
+        }
+    }
+
+    private void DrawArrivalAdministration(VenueConnectionConfiguration venue)
+    {
+        var snapshot = plugin.VipArrivals.GetSnapshot(venue);
+        if (snapshot.Status != VipArrivalManagementStatus.Ready || snapshot.Context is null)
+        {
+            return;
+        }
+
+        var context = snapshot.Context;
+        if (!context.Capabilities.CanManageMacros && !context.Capabilities.CanManageOpenings)
+        {
+            return;
+        }
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+        if (!ImGui.CollapsingHeader("VIP arrival setup"))
+        {
+            return;
+        }
+
+        var isBusy = plugin.VipArrivals.IsBusy(venue.ProfileId);
+        if (context.Capabilities.CanManageOpenings)
+        {
+            ImGui.TextUnformatted("Current venue opening");
+            if (context.CurrentOpening is { } opening)
+            {
+                ImGui.TextWrapped(
+                    $"#{opening.OpeningId}: {opening.OpensAt.ToLocalTime():g} – {opening.ClosesAt.ToLocalTime():g} at {opening.AddressDisplay}");
+                ImGui.BeginDisabled(isBusy);
+                if (ImGui.Button("Close current opening"))
+                {
+                    plugin.CloseVenueOpening(venue, opening.OpeningId);
+                }
+                ImGui.EndDisabled();
+            }
+            else
+            {
+                ImGui.TextDisabled(
+                    "Temporary placeholder: starts now at the venue's published address. The future calendar will create the same opening records.");
+                ImGui.SetNextItemWidth(150 * ImGuiHelpers.GlobalScale);
+                ImGui.InputInt("Duration (minutes)", ref temporaryOpeningDurationMinutes);
+                temporaryOpeningDurationMinutes = Math.Clamp(temporaryOpeningDurationMinutes, 30, 1440);
+                ImGui.SetNextItemWidth(320 * ImGuiHelpers.GlobalScale);
+                ImGui.InputText("Opening title (optional)", ref temporaryOpeningTitle, 100);
+                ImGui.BeginDisabled(isBusy);
+                if (ImGui.Button("Start temporary opening"))
+                {
+                    plugin.StartTemporaryVenueOpening(
+                        venue,
+                        temporaryOpeningDurationMinutes,
+                        string.IsNullOrWhiteSpace(temporaryOpeningTitle)
+                            ? null
+                            : temporaryOpeningTitle.Trim());
+                }
+                ImGui.EndDisabled();
+            }
+        }
+
+        if (!context.Capabilities.CanManageMacros)
+        {
+            return;
+        }
+
+        if (context.Capabilities.CanManageOpenings)
+        {
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+        }
+
+        ImGui.TextUnformatted("VIP macros");
+        ImGui.TextDisabled(
+            "Each line is copied into a temporary in-game macro. Game macro syntax such as <wait.1> is supported.");
+
+        foreach (var macro in context.Macros.Where(value => value.CanManage))
+        {
+            if (!arrivalMacroDrafts.TryGetValue(macro.MacroCode, out var draft))
+            {
+                draft = macro.MacroText ?? string.Empty;
+                arrivalMacroDrafts[macro.MacroCode] = draft;
+            }
+
+            ImGui.PushID(macro.MacroCode);
+            ImGui.Spacing();
+            ImGui.TextUnformatted(macro.DisplayName);
+            if (!string.IsNullOrWhiteSpace(macro.Description))
+            {
+                ImGui.TextDisabled(macro.Description);
+            }
+
+            ImGui.SetNextItemWidth(-1);
+            ImGui.InputTextMultiline(
+                "##MacroText",
+                ref draft,
+                4000,
+                new Vector2(0, 105 * ImGuiHelpers.GlobalScale));
+            arrivalMacroDrafts[macro.MacroCode] = draft;
+
+            var normalizedLines = draft
+                .Replace("\r\n", "\n", StringComparison.Ordinal)
+                .Replace('\r', '\n')
+                .Split('\n');
+            var lineCount = normalizedLines.Length == 1 && normalizedLines[0].Length == 0
+                ? 0
+                : normalizedLines.Length;
+            var longestLine = normalizedLines.Length == 0 ? 0 : normalizedLines.Max(value => value.Length);
+            var valid = lineCount <= macro.MaxLines && longestLine <= macro.MaxLineLength;
+            ImGui.TextDisabled(
+                $"{lineCount}/{macro.MaxLines} lines; longest line {longestLine}/{macro.MaxLineLength} characters");
+
+            ImGui.BeginDisabled(isBusy || !valid);
+            if (ImGui.SmallButton("Save"))
+            {
+                plugin.UpdateVenueMacro(
+                    venue,
+                    macro.MacroCode,
+                    string.IsNullOrWhiteSpace(draft) ? null : draft);
+            }
+            ImGui.EndDisabled();
+            ImGui.SameLine();
+            ImGui.BeginDisabled(isBusy);
+            if (ImGui.SmallButton("Clear"))
+            {
+                arrivalMacroDrafts[macro.MacroCode] = string.Empty;
+                plugin.UpdateVenueMacro(venue, macro.MacroCode, null);
+            }
+            ImGui.EndDisabled();
+
+            if (!valid)
+            {
+                ImGui.SameLine();
+                ImGui.TextColored(new Vector4(1f, 0.4f, 0.4f, 1f), "Macro exceeds the configured game limits.");
+            }
+            ImGui.PopID();
+        }
     }
 
     private void DrawTargetSection(
@@ -811,7 +1033,11 @@ public sealed class VipTabRenderer(Plugin plugin)
         vipPlayerActiveOnly = false;
         vipPlayerExpiringSoonOnly = false;
         vipPlayerNearbyOnly = false;
+        arrivalMacroDrafts.Clear();
+        temporaryOpeningDurationMinutes = 480;
+        temporaryOpeningTitle = string.Empty;
         plugin.NearbyVipPlayers.Clear();
+        plugin.VipArrivalNearby.Clear();
         ResetPackageEditor();
     }
 

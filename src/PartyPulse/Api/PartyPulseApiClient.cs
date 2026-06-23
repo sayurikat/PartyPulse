@@ -474,6 +474,91 @@ public sealed class PartyPulseApiClient : IDisposable
                               (!payload.Settled || payload.PaidToVenueAt is not null),
             cancellationToken);
 
+    public Task<ApiResult<VipArrivalContextResponse>> GetVipArrivalContextAsync(
+        Uri baseUri,
+        string accessToken,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<VipArrivalContextResponse>(
+            baseUri,
+            HttpMethod.Get,
+            "api/v1/vip-arrivals",
+            accessToken,
+            null,
+            ValidateVipArrivalContextResponse,
+            cancellationToken);
+
+    public Task<ApiResult<ObserveVipArrivalsResponse>> ObserveVipArrivalsAsync(
+        Uri baseUri,
+        string accessToken,
+        ObserveVipArrivalsRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<ObserveVipArrivalsResponse>(
+            baseUri,
+            HttpMethod.Post,
+            "api/v1/vip-arrivals/observations",
+            accessToken,
+            request,
+            static payload => payload.OpeningId > 0 && payload.ObservedCount >= 0 && payload.PendingCount >= 0,
+            cancellationToken);
+
+    public Task<ApiResult<RecordVipArrivalActionResponse>> RecordVipArrivalActionAsync(
+        Uri baseUri,
+        string accessToken,
+        int vipPlayerId,
+        RecordVipArrivalActionRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<RecordVipArrivalActionResponse>(
+            baseUri,
+            HttpMethod.Post,
+            $"api/v1/vip-arrivals/players/{vipPlayerId}/actions",
+            accessToken,
+            request,
+            static payload => payload.OpeningId > 0 && payload.VipPlayerId > 0 && !string.IsNullOrWhiteSpace(payload.ActionKey),
+            cancellationToken);
+
+    public Task<ApiResult<UpdateVenueMacroResponse>> UpdateVenueMacroAsync(
+        Uri baseUri,
+        string accessToken,
+        string macroCode,
+        UpdateVenueMacroRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<UpdateVenueMacroResponse>(
+            baseUri,
+            HttpMethod.Put,
+            $"api/v1/vip-arrivals/macros/{Uri.EscapeDataString(macroCode)}",
+            accessToken,
+            request,
+            static payload => !string.IsNullOrWhiteSpace(payload.MacroCode) && payload.UpdatedAt != default,
+            cancellationToken);
+
+    public Task<ApiResult<VenueOpeningSummary>> StartTemporaryVenueOpeningAsync(
+        Uri baseUri,
+        string accessToken,
+        StartTemporaryOpeningRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<VenueOpeningSummary>(
+            baseUri,
+            HttpMethod.Post,
+            "api/v1/vip-arrivals/openings/temporary",
+            accessToken,
+            request,
+            ValidateVenueOpening,
+            cancellationToken);
+
+    public Task<ApiResult<CloseVenueOpeningResponse>> CloseVenueOpeningAsync(
+        Uri baseUri,
+        string accessToken,
+        long openingId,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<CloseVenueOpeningResponse>(
+            baseUri,
+            HttpMethod.Post,
+            $"api/v1/vip-arrivals/openings/{openingId}/close",
+            accessToken,
+            null,
+            static payload => payload.OpeningId > 0 && payload.ClosedAt != default,
+            cancellationToken);
+
     public Task<ApiResult<FinanceViewResponse>> GetFinanceAsync(
         Uri baseUri,
         string accessToken,
@@ -607,6 +692,33 @@ public sealed class PartyPulseApiClient : IDisposable
             item.AmountGil > 0 &&
             !string.IsNullOrWhiteSpace(item.SourceType));
 
+    private static bool ValidateVipArrivalContextResponse(VipArrivalContextResponse payload) =>
+        payload.Capabilities is not null &&
+        payload.Macros is not null &&
+        payload.Arrivals is not null &&
+        (payload.CurrentOpening is null || ValidateVenueOpening(payload.CurrentOpening)) &&
+        payload.Macros.All(static macro =>
+            !string.IsNullOrWhiteSpace(macro.MacroCode) &&
+            !string.IsNullOrWhiteSpace(macro.DisplayName) &&
+            macro.MaxLines is > 0 and <= 15 &&
+            macro.MaxLineLength > 0) &&
+        payload.Arrivals.All(static arrival =>
+            arrival.OpeningId > 0 &&
+            arrival.VipPlayerId > 0 &&
+            arrival.LastSeenCharacterId > 0 &&
+            arrival.LastSeenAt >= arrival.FirstSeenAt);
+
+    private static bool ValidateVenueOpening(VenueOpeningSummary opening) =>
+        opening.OpeningId > 0 &&
+        opening.ClosesAt > opening.OpensAt &&
+        opening.AddressWorldId > 0 &&
+        !string.IsNullOrWhiteSpace(opening.AddressWorldName) &&
+        opening.AddressCityId > 0 &&
+        !string.IsNullOrWhiteSpace(opening.AddressCityName) &&
+        opening.AddressWard > 0 &&
+        opening.AddressPlot > 0 &&
+        !string.IsNullOrWhiteSpace(opening.SourceType);
+
     private static bool ValidateNotificationPollResponse(NotificationPollResponse payload) =>
         payload.UnseenNotificationCount >= 0 &&
         payload.PendingSettlementCount >= 0 &&
@@ -626,7 +738,8 @@ public sealed class PartyPulseApiClient : IDisposable
         payload.PurchasePriceGil >= 0 &&
         payload.StartsAt != default &&
         (payload.Lifetime ? payload.EndsAt is null : payload.EndsAt > payload.StartsAt) &&
-        payload.PersonalUnpaidGil >= 0;
+        payload.PersonalUnpaidGil >= 0 &&
+        (!payload.WasNewVip || payload.OpeningId is null or > 0);
 
     private static bool ValidateSelfServiceViewResponse(SelfServiceViewResponse payload) =>
         payload.Characters is not null &&
