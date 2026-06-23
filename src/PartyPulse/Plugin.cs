@@ -21,6 +21,7 @@ using PartyPulse.VenueUsers;
 using PartyPulse.Vip;
 using PartyPulse.VenueOpenings;
 using PartyPulse.TimedMacros;
+using PartyPulse.Djs;
 using PartyPulse.Windows;
 
 namespace PartyPulse;
@@ -106,6 +107,12 @@ public sealed class Plugin : IDalamudPlugin
             apiClient,
             IdentityProvider,
             Log);
+        Djs = new DjManagementManager(
+            Configuration,
+            Authentication,
+            apiClient,
+            IdentityProvider,
+            Log);
         NearbyVipPlayers = new NearbyVipPlayerTracker(ObjectTable, TargetManager);
         VipArrivalNearby = new VipArrivalNearbyTracker(ObjectTable);
         gameMacroExecutionService = new GameMacroExecutionService(
@@ -181,6 +188,8 @@ public sealed class Plugin : IDalamudPlugin
 
     public TimedMacroManagementManager TimedMacros { get; }
 
+    public DjManagementManager Djs { get; }
+
     public NearbyVipPlayerTracker NearbyVipPlayers { get; }
 
     public VipArrivalNearbyTracker VipArrivalNearby { get; }
@@ -220,6 +229,7 @@ public sealed class Plugin : IDalamudPlugin
         notificationToastWindow.Dispose();
         Notifications.Dispose();
         Finance.Dispose();
+        Djs.Dispose();
         TimedMacros.Dispose();
         VenueOpenings.Dispose();
         VipArrivals.Dispose();
@@ -384,6 +394,7 @@ public sealed class Plugin : IDalamudPlugin
         VipArrivals.ClearProfile(venue.ProfileId);
         VenueOpenings.RemoveProfile(venue.ProfileId);
         TimedMacros.RemoveProfile(venue.ProfileId);
+        Djs.RemoveProfile(venue.ProfileId);
         NearbyVipPlayers.ClearProfile(venue.ProfileId);
         VipArrivalNearby.Clear();
         Finance.RemoveProfile(venue.ProfileId);
@@ -667,6 +678,50 @@ public sealed class Plugin : IDalamudPlugin
     public void DismissNewVipOffer(Guid profileId) =>
         VipArrivals.ClearNewMemberOffer(profileId);
 
+    public void EnsureDjsLoaded(VenueConnectionConfiguration venue)
+    {
+        if (!Djs.ShouldLoad(venue))
+            return;
+
+        Observe(
+            Djs.LoadAsync(venue, false, LifetimeToken),
+            $"load DJs for {venue.VenueCode}");
+    }
+
+    public void RefreshDjs(VenueConnectionConfiguration venue) =>
+        Observe(
+            Djs.LoadAsync(venue, true, LifetimeToken),
+            $"refresh DJs for {venue.VenueCode}");
+
+    public void SaveDj(
+        VenueConnectionConfiguration venue,
+        long? djId,
+        SaveDjRequest request) =>
+        Observe(
+            SaveDjAndReportAsync(venue, djId, request),
+            $"save DJ for {venue.VenueCode}");
+
+    public void ArchiveDj(VenueConnectionConfiguration venue, long djId) =>
+        Observe(
+            ArchiveDjAndReportAsync(venue, djId),
+            $"archive DJ {djId} for {venue.VenueCode}");
+
+    public void SaveDjBooking(
+        VenueConnectionConfiguration venue,
+        long? bookingId,
+        SaveDjBookingRequest request) =>
+        Observe(
+            SaveDjBookingAndReportAsync(venue, bookingId, request),
+            $"save DJ booking for {venue.VenueCode}");
+
+    public void DeleteDjBooking(
+        VenueConnectionConfiguration venue,
+        long openingId,
+        long bookingId) =>
+        Observe(
+            DeleteDjBookingAndReportAsync(venue, openingId, bookingId),
+            $"delete DJ booking {bookingId} for {venue.VenueCode}");
+
     public void EnsureTimedMacrosLoaded(VenueConnectionConfiguration venue)
     {
         if (!TimedMacros.ShouldLoad(venue))
@@ -825,6 +880,7 @@ public sealed class Plugin : IDalamudPlugin
                 VipArrivals.Clear();
                 VenueOpenings.Clear("Character logged out or changed.");
                 TimedMacros.Clear("Character logged out or changed.");
+                Djs.Clear("Character logged out or changed.");
                 NearbyVipPlayers.Clear();
                 VipArrivalNearby.Clear();
                 Finance.Clear("Character logged out or changed.");
@@ -845,6 +901,7 @@ public sealed class Plugin : IDalamudPlugin
             VipArrivals.Clear();
             VenueOpenings.Clear("Character changed; opening schedule was cleared.");
             TimedMacros.Clear("Character changed; timed macro data was cleared.");
+            Djs.Clear("Character changed; DJ data was cleared.");
             NearbyVipPlayers.Clear();
             VipArrivalNearby.Clear();
             Finance.Clear("Character changed; finance data was cleared.");
@@ -988,6 +1045,7 @@ public sealed class Plugin : IDalamudPlugin
         VipArrivals.ClearProfile(venue.ProfileId);
         VenueOpenings.RemoveProfile(venue.ProfileId);
         TimedMacros.RemoveProfile(venue.ProfileId);
+        Djs.RemoveProfile(venue.ProfileId);
         NearbyVipPlayers.ClearProfile(venue.ProfileId);
         VipArrivalNearby.Clear();
         Finance.RemoveProfile(venue.ProfileId);
@@ -1477,6 +1535,71 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         ReportVipFailure(result.Failure, "The active venue opening could not be closed.");
+    }
+
+    private async Task SaveDjAndReportAsync(
+        VenueConnectionConfiguration venue,
+        long? djId,
+        SaveDjRequest request)
+    {
+        var result = await Djs.SaveDjAsync(venue, djId, request, LifetimeToken);
+        if (result.Success && result.Value is not null)
+        {
+            ChatGui.Print(
+                $"{(djId is null ? "Registered" : "Updated")} DJ {result.Value.Name}.",
+                "PartyPulse");
+            return;
+        }
+
+        ReportVipFailure(result.Failure, "The DJ could not be saved.");
+    }
+
+    private async Task ArchiveDjAndReportAsync(
+        VenueConnectionConfiguration venue,
+        long djId)
+    {
+        var result = await Djs.ArchiveDjAsync(venue, djId, LifetimeToken);
+        if (result.Success)
+        {
+            ChatGui.Print("DJ removed from the active directory. Booking history was preserved.", "PartyPulse");
+            return;
+        }
+
+        ReportVipFailure(result.Failure, "The DJ could not be removed.");
+    }
+
+    private async Task SaveDjBookingAndReportAsync(
+        VenueConnectionConfiguration venue,
+        long? bookingId,
+        SaveDjBookingRequest request)
+    {
+        var result = await Djs.SaveBookingAsync(venue, bookingId, request, LifetimeToken);
+        if (result.Success && result.Value is not null)
+        {
+            await TimedMacros.LoadAsync(venue, true, LifetimeToken);
+            ChatGui.Print(
+                $"{(bookingId is null ? "Scheduled" : "Updated")} {result.Value.DjName} for {result.Value.StartsAt.ToLocalTime():g}.",
+                "PartyPulse");
+            return;
+        }
+
+        ReportVipFailure(result.Failure, "The DJ booking could not be saved.");
+    }
+
+    private async Task DeleteDjBookingAndReportAsync(
+        VenueConnectionConfiguration venue,
+        long openingId,
+        long bookingId)
+    {
+        var result = await Djs.DeleteBookingAsync(venue, openingId, bookingId, LifetimeToken);
+        if (result.Success)
+        {
+            await TimedMacros.LoadAsync(venue, true, LifetimeToken);
+            ChatGui.Print("DJ booking removed. Historical status changes were preserved.", "PartyPulse");
+            return;
+        }
+
+        ReportVipFailure(result.Failure, "The DJ booking could not be removed.");
     }
 
     private async Task RunNewVipMacroAndReportAsync(

@@ -7,6 +7,9 @@ public static class TimedMacroTypeCodes
 {
     public const string VipAdvertisement = "vip.advertisement";
     public const string Custom = "custom";
+    public const string DjRegularAdvertisement = "dj.advertisement.regular";
+    public const string DjResidentAdvertisement = "dj.advertisement.resident";
+    public const string DjSchedule = "dj.schedule";
 }
 
 public sealed record TimedMacroCapabilities(
@@ -51,7 +54,9 @@ public sealed record TimedMacroSummary(
     int? LastExecutedByUserId,
     int ExecutionCount,
     DateTimeOffset? NextDueAt,
-    bool IsDue)
+    bool IsDue,
+    bool IsTemplate,
+    bool IsScheduleInstance)
 {
     public bool IsConfigured => !string.IsNullOrWhiteSpace(MacroText);
     public bool IsCustom => string.Equals(TypeCode, TimedMacroTypeCodes.Custom, StringComparison.OrdinalIgnoreCase);

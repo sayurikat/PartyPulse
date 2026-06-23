@@ -123,7 +123,7 @@ public sealed class TimedMacrosTabRenderer(Plugin plugin)
 
         var now = snapshot.EstimatedServerNow;
         foreach (var macro in view.Macros
-                     .Where(value => value.CanExecute || value.CanManage)
+                     .Where(value => !value.IsTemplate && (value.CanExecute || value.CanManage))
                      .OrderBy(value => value.DisplayName, StringComparer.OrdinalIgnoreCase)
                      .ThenBy(value => value.TimedMacroId))
         {
@@ -196,7 +196,7 @@ public sealed class TimedMacrosTabRenderer(Plugin plugin)
         ImGui.TextDisabled("Macros support normal in-game macro lines and <wait.X>. Maximum 15 lines.");
 
         foreach (var macro in view.Macros
-                     .Where(value => value.CanManage)
+                     .Where(value => value.CanManage && !value.IsScheduleInstance)
                      .OrderBy(value => value.TypeCode == TimedMacroTypeCodes.VipAdvertisement ? 0 : 1)
                      .ThenBy(value => value.DisplayName, StringComparer.OrdinalIgnoreCase))
         {

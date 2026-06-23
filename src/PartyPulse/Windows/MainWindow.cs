@@ -17,6 +17,7 @@ public sealed class MainWindow : Window, IDisposable
     private readonly Plugin plugin;
     private readonly VipTabRenderer vipTab;
     private readonly VenueOpeningsTabRenderer venueOpeningsTab;
+    private readonly DjsTabRenderer djsTab;
     private readonly TimedMacrosTabRenderer timedMacrosTab;
     private readonly FinanceTabRenderer financeTab;
     private bool requestSelectFinanceTab;
@@ -39,6 +40,7 @@ public sealed class MainWindow : Window, IDisposable
         this.plugin = plugin;
         vipTab = new VipTabRenderer(plugin);
         venueOpeningsTab = new VenueOpeningsTabRenderer(plugin);
+        djsTab = new DjsTabRenderer(plugin);
         timedMacrosTab = new TimedMacrosTabRenderer(plugin);
         financeTab = new FinanceTabRenderer(plugin);
 
@@ -212,6 +214,7 @@ public sealed class MainWindow : Window, IDisposable
                 DrawUsersTab(selectedVenue, userSnapshot);
             }
 
+            djsTab.Draw(selectedVenue);
             venueOpeningsTab.Draw(selectedVenue);
             timedMacrosTab.Draw(selectedVenue);
             vipTab.Draw(selectedVenue);

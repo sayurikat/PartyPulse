@@ -516,6 +516,79 @@ public sealed class PartyPulseApiClient : IDisposable
             static payload => payload.OpeningId > 0 && payload.CancelledAt != default,
             cancellationToken);
 
+
+    public Task<ApiResult<DjViewResponse>> GetDjsAsync(
+        Uri baseUri,
+        string accessToken,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<DjViewResponse>(
+            baseUri,
+            HttpMethod.Get,
+            "api/v1/djs",
+            accessToken,
+            null,
+            ValidateDjViewResponse,
+            cancellationToken);
+
+    public Task<ApiResult<DjSummary>> SaveDjAsync(
+        Uri baseUri,
+        string accessToken,
+        long? djId,
+        SaveDjRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<DjSummary>(
+            baseUri,
+            djId is null ? HttpMethod.Post : HttpMethod.Put,
+            djId is null ? "api/v1/djs" : $"api/v1/djs/{djId.Value}",
+            accessToken,
+            request,
+            ValidateDjSummary,
+            cancellationToken);
+
+    public Task<ApiResult<ArchiveDjResponse>> ArchiveDjAsync(
+        Uri baseUri,
+        string accessToken,
+        long djId,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<ArchiveDjResponse>(
+            baseUri,
+            HttpMethod.Post,
+            $"api/v1/djs/{djId}/archive",
+            accessToken,
+            null,
+            static payload => payload.DjId > 0 && payload.ArchivedAt != default,
+            cancellationToken);
+
+    public Task<ApiResult<DjBookingSummary>> SaveDjBookingAsync(
+        Uri baseUri,
+        string accessToken,
+        long? bookingId,
+        SaveDjBookingRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<DjBookingSummary>(
+            baseUri,
+            bookingId is null ? HttpMethod.Post : HttpMethod.Put,
+            bookingId is null ? "api/v1/djs/bookings" : $"api/v1/djs/bookings/{bookingId.Value}",
+            accessToken,
+            request,
+            ValidateDjBookingSummary,
+            cancellationToken);
+
+    public Task<ApiResult<DeleteDjBookingResponse>> DeleteDjBookingAsync(
+        Uri baseUri,
+        string accessToken,
+        long openingId,
+        long bookingId,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<DeleteDjBookingResponse>(
+            baseUri,
+            HttpMethod.Delete,
+            $"api/v1/djs/bookings/{bookingId}?openingId={openingId}",
+            accessToken,
+            null,
+            static payload => payload.BookingId > 0 && payload.DeletedAt != default,
+            cancellationToken);
+
     public Task<ApiResult<TimedMacroViewResponse>> GetTimedMacrosAsync(
         Uri baseUri,
         string accessToken,
@@ -836,6 +909,35 @@ public sealed class PartyPulseApiClient : IDisposable
         !string.IsNullOrWhiteSpace(address.CityName) &&
         address.Ward is >= 1 and <= 30 &&
         address.Plot is >= 1 and <= 60;
+
+
+    private static bool ValidateDjViewResponse(DjViewResponse payload) =>
+        payload.Capabilities is not null &&
+        payload.Djs is not null &&
+        payload.Bookings is not null &&
+        payload.Statuses is not null &&
+        payload.Djs.All(ValidateDjSummary) &&
+        payload.Bookings.All(ValidateDjBookingSummary) &&
+        payload.Statuses.All(static status =>
+            !string.IsNullOrWhiteSpace(status.StatusCode) &&
+            !string.IsNullOrWhiteSpace(status.DisplayName) &&
+            status.SortOrder > 0);
+
+    private static bool ValidateDjSummary(DjSummary dj) =>
+        dj.DjId > 0 &&
+        !string.IsNullOrWhiteSpace(dj.Name) &&
+        dj.CreatedAt != default;
+
+    private static bool ValidateDjBookingSummary(DjBookingSummary booking) =>
+        booking.BookingId > 0 &&
+        booking.OpeningId > 0 &&
+        booking.DjId > 0 &&
+        booking.EndsAt > booking.StartsAt &&
+        !string.IsNullOrWhiteSpace(booking.StatusCode) &&
+        !string.IsNullOrWhiteSpace(booking.StatusName) &&
+        !string.IsNullOrWhiteSpace(booking.DjName) &&
+        booking.TimedMacroId > 0 &&
+        booking.CreatedAt != default;
 
     private static bool ValidateTimedMacroViewResponse(TimedMacroViewResponse payload) =>
         payload.Capabilities is not null &&
