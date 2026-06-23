@@ -82,6 +82,42 @@ public sealed class GameMacroExecutionService : IDisposable
             "The player is no longer nearby."));
     }
 
+    public async Task<GameMacroExecutionResult> ExecuteUntargetedAsync(
+        string macroText,
+        CancellationToken cancellationToken)
+    {
+        if (!await gate.WaitAsync(0, cancellationToken))
+            return GameMacroExecutionResult.Fail("MACRO_BUSY", "Another PartyPulse macro is already being started.");
+
+        try
+        {
+            var lines = NormalizeLines(macroText);
+            if (lines.Length == 0)
+                return GameMacroExecutionResult.Fail("MACRO_NOT_CONFIGURED", "This venue macro has not been configured.");
+            if (lines.Length > 15)
+                return GameMacroExecutionResult.Fail("MACRO_TOO_LONG", "Game macros can contain at most 15 lines.");
+            if (lines.Any(static line => line.Length > 180))
+                return GameMacroExecutionResult.Fail("MACRO_LINE_TOO_LONG", "Game macro lines can contain at most 180 characters.");
+
+            return await framework.RunOnTick(
+                () => ExecuteMacroLinesOnFrameworkThread(lines),
+                cancellationToken: cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            return GameMacroExecutionResult.Fail("MACRO_CANCELLED", "Macro execution was cancelled.");
+        }
+        catch (Exception exception)
+        {
+            log.Error(exception, "PartyPulse untargeted macro execution failed.");
+            return GameMacroExecutionResult.Fail("MACRO_EXECUTION_FAILED", "The in-game macro could not be started.");
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
     public async Task<GameMacroExecutionResult> ExecuteAsync(
         ulong gameObjectId,
         string characterName,
@@ -149,6 +185,11 @@ public sealed class GameMacroExecutionService : IDisposable
             targetManager.Target?.GameObjectId != player!.GameObjectId)
             return GameMacroExecutionResult.Fail("TARGET_VERIFICATION_FAILED", "The intended player could not be verified as the current target.");
 
+        return ExecuteMacroLinesOnFrameworkThread(lines);
+    }
+
+    private static unsafe GameMacroExecutionResult ExecuteMacroLinesOnFrameworkThread(string[] lines)
+    {
         var macroModule = RaptureMacroModule.Instance();
         var shellModule = RaptureShellModule.Instance();
         if (macroModule == null || shellModule == null)

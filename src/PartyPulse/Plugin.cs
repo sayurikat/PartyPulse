@@ -20,6 +20,7 @@ using PartyPulse.Services;
 using PartyPulse.VenueUsers;
 using PartyPulse.Vip;
 using PartyPulse.VenueOpenings;
+using PartyPulse.TimedMacros;
 using PartyPulse.Windows;
 
 namespace PartyPulse;
@@ -99,6 +100,12 @@ public sealed class Plugin : IDalamudPlugin
             apiClient,
             IdentityProvider,
             Log);
+        TimedMacros = new TimedMacroManagementManager(
+            Configuration,
+            Authentication,
+            apiClient,
+            IdentityProvider,
+            Log);
         NearbyVipPlayers = new NearbyVipPlayerTracker(ObjectTable, TargetManager);
         VipArrivalNearby = new VipArrivalNearbyTracker(ObjectTable);
         gameMacroExecutionService = new GameMacroExecutionService(
@@ -172,6 +179,8 @@ public sealed class Plugin : IDalamudPlugin
 
     public VenueOpeningScheduleManager VenueOpenings { get; }
 
+    public TimedMacroManagementManager TimedMacros { get; }
+
     public NearbyVipPlayerTracker NearbyVipPlayers { get; }
 
     public VipArrivalNearbyTracker VipArrivalNearby { get; }
@@ -211,6 +220,7 @@ public sealed class Plugin : IDalamudPlugin
         notificationToastWindow.Dispose();
         Notifications.Dispose();
         Finance.Dispose();
+        TimedMacros.Dispose();
         VenueOpenings.Dispose();
         VipArrivals.Dispose();
         Vip.Dispose();
@@ -373,6 +383,7 @@ public sealed class Plugin : IDalamudPlugin
         Vip.RemoveProfile(venue.ProfileId);
         VipArrivals.ClearProfile(venue.ProfileId);
         VenueOpenings.RemoveProfile(venue.ProfileId);
+        TimedMacros.RemoveProfile(venue.ProfileId);
         NearbyVipPlayers.ClearProfile(venue.ProfileId);
         VipArrivalNearby.Clear();
         Finance.RemoveProfile(venue.ProfileId);
@@ -656,6 +667,51 @@ public sealed class Plugin : IDalamudPlugin
     public void DismissNewVipOffer(Guid profileId) =>
         VipArrivals.ClearNewMemberOffer(profileId);
 
+    public void EnsureTimedMacrosLoaded(VenueConnectionConfiguration venue)
+    {
+        if (!TimedMacros.ShouldLoad(venue))
+            return;
+
+        Observe(
+            TimedMacros.LoadAsync(venue, false, LifetimeToken),
+            $"load timed macros for {venue.VenueCode}");
+    }
+
+    public void RefreshTimedMacros(VenueConnectionConfiguration venue) =>
+        Observe(
+            TimedMacros.LoadAsync(venue, true, LifetimeToken),
+            $"refresh timed macros for {venue.VenueCode}");
+
+    public void CreateTimedMacro(
+        VenueConnectionConfiguration venue,
+        CreateTimedMacroRequest request) =>
+        Observe(
+            CreateTimedMacroAndReportAsync(venue, request),
+            $"create timed macro for {venue.VenueCode}");
+
+    public void UpdateTimedMacro(
+        VenueConnectionConfiguration venue,
+        long timedMacroId,
+        UpdateTimedMacroRequest request) =>
+        Observe(
+            UpdateTimedMacroAndReportAsync(venue, timedMacroId, request),
+            $"update timed macro {timedMacroId} for {venue.VenueCode}");
+
+    public void ArchiveTimedMacro(
+        VenueConnectionConfiguration venue,
+        long timedMacroId) =>
+        Observe(
+            ArchiveTimedMacroAndReportAsync(venue, timedMacroId),
+            $"archive timed macro {timedMacroId} for {venue.VenueCode}");
+
+    public void RunTimedMacro(
+        VenueConnectionConfiguration venue,
+        TimedMacroSummary macro,
+        TimedMacroOpeningSummary opening) =>
+        Observe(
+            RunTimedMacroAndReportAsync(venue, macro, opening),
+            $"run timed macro {macro.TimedMacroId} for {venue.VenueCode}");
+
     public void EnsureFinanceLoaded(VenueConnectionConfiguration venue)
     {
         if (!Finance.ShouldLoad(venue))
@@ -768,6 +824,7 @@ public sealed class Plugin : IDalamudPlugin
                 Vip.Clear("Character logged out or changed.");
                 VipArrivals.Clear();
                 VenueOpenings.Clear("Character logged out or changed.");
+                TimedMacros.Clear("Character logged out or changed.");
                 NearbyVipPlayers.Clear();
                 VipArrivalNearby.Clear();
                 Finance.Clear("Character logged out or changed.");
@@ -787,6 +844,7 @@ public sealed class Plugin : IDalamudPlugin
             Vip.Clear("Character changed; VIP data was cleared.");
             VipArrivals.Clear();
             VenueOpenings.Clear("Character changed; opening schedule was cleared.");
+            TimedMacros.Clear("Character changed; timed macro data was cleared.");
             NearbyVipPlayers.Clear();
             VipArrivalNearby.Clear();
             Finance.Clear("Character changed; finance data was cleared.");
@@ -929,6 +987,7 @@ public sealed class Plugin : IDalamudPlugin
         Vip.RemoveProfile(venue.ProfileId);
         VipArrivals.ClearProfile(venue.ProfileId);
         VenueOpenings.RemoveProfile(venue.ProfileId);
+        TimedMacros.RemoveProfile(venue.ProfileId);
         NearbyVipPlayers.ClearProfile(venue.ProfileId);
         VipArrivalNearby.Clear();
         Finance.RemoveProfile(venue.ProfileId);
@@ -1336,6 +1395,7 @@ public sealed class Plugin : IDalamudPlugin
         if (result.Success && result.Value is not null)
         {
             VipArrivalNearby.Clear();
+            await TimedMacros.LoadAsync(venue, true, LifetimeToken);
             ChatGui.Print(
                 $"Started opening #{result.Value.OpeningId} until {result.Value.ClosesAt.ToLocalTime():g} at {result.Value.AddressDisplay}.",
                 "PartyPulse");
@@ -1353,6 +1413,7 @@ public sealed class Plugin : IDalamudPlugin
         if (result.Success)
         {
             VipArrivalNearby.Clear();
+            await TimedMacros.LoadAsync(venue, true, LifetimeToken);
             ChatGui.Print($"Closed venue opening #{openingId}.", "PartyPulse");
             return;
         }
@@ -1374,6 +1435,7 @@ public sealed class Plugin : IDalamudPlugin
         {
             VipArrivalNearby.Clear();
             await VipArrivals.LoadAsync(venue, true, LifetimeToken);
+            await TimedMacros.LoadAsync(venue, true, LifetimeToken);
             ChatGui.Print(
                 $"{(openingId is null ? "Scheduled" : "Updated")} opening #{result.Value.OpeningId} for {result.Value.OpensAt.ToLocalTime():g}.",
                 "PartyPulse");
@@ -1392,6 +1454,7 @@ public sealed class Plugin : IDalamudPlugin
         {
             VipArrivalNearby.Clear();
             await VipArrivals.LoadAsync(venue, true, LifetimeToken);
+            await TimedMacros.LoadAsync(venue, true, LifetimeToken);
             ChatGui.Print($"Cancelled venue opening #{openingId}.", "PartyPulse");
             return;
         }
@@ -1408,6 +1471,7 @@ public sealed class Plugin : IDalamudPlugin
         {
             VipArrivalNearby.Clear();
             await VipArrivals.LoadAsync(venue, true, LifetimeToken);
+            await TimedMacros.LoadAsync(venue, true, LifetimeToken);
             ChatGui.Print($"Closed venue opening #{openingId}.", "PartyPulse");
             return;
         }
@@ -1450,6 +1514,130 @@ public sealed class Plugin : IDalamudPlugin
 
         VipArrivals.ClearNewMemberOffer(venue.ProfileId);
         ChatGui.Print("Started the new VIP message macro.", "PartyPulse");
+    }
+
+    private async Task CreateTimedMacroAndReportAsync(
+        VenueConnectionConfiguration venue,
+        CreateTimedMacroRequest request)
+    {
+        var result = await TimedMacros.CreateAsync(venue, request, LifetimeToken);
+        if (result.Success)
+        {
+            ChatGui.Print("Custom timed macro created.", "PartyPulse");
+            return;
+        }
+
+        ReportVipFailure(result.Failure, "The timed macro could not be created.");
+    }
+
+    private async Task UpdateTimedMacroAndReportAsync(
+        VenueConnectionConfiguration venue,
+        long timedMacroId,
+        UpdateTimedMacroRequest request)
+    {
+        var result = await TimedMacros.UpdateAsync(
+            venue,
+            timedMacroId,
+            request,
+            LifetimeToken);
+        if (result.Success)
+        {
+            ChatGui.Print("Timed macro updated.", "PartyPulse");
+            return;
+        }
+
+        ReportVipFailure(result.Failure, "The timed macro could not be updated.");
+    }
+
+    private async Task ArchiveTimedMacroAndReportAsync(
+        VenueConnectionConfiguration venue,
+        long timedMacroId)
+    {
+        var result = await TimedMacros.ArchiveAsync(
+            venue,
+            timedMacroId,
+            LifetimeToken);
+        if (result.Success)
+        {
+            ChatGui.Print("Timed macro archived.", "PartyPulse");
+            return;
+        }
+
+        ReportVipFailure(result.Failure, "The timed macro could not be archived.");
+    }
+
+    private async Task RunTimedMacroAndReportAsync(
+        VenueConnectionConfiguration venue,
+        TimedMacroSummary macro,
+        TimedMacroOpeningSummary opening)
+    {
+        var refresh = await TimedMacros.LoadAsync(venue, true, LifetimeToken);
+        if (!refresh.Success || refresh.Value is null)
+        {
+            ReportVipFailure(
+                refresh.Failure,
+                "The latest timed-macro state could not be loaded, so the macro was not started.");
+            return;
+        }
+
+        var currentOpening = refresh.Value.CurrentOpening;
+        if (currentOpening is null || currentOpening.OpeningId != opening.OpeningId)
+        {
+            ChatGui.PrintError("The venue opening changed. Refresh the timed-macro data and try again.", "PartyPulse");
+            return;
+        }
+
+        var currentMacro = refresh.Value.Macros.FirstOrDefault(value =>
+            value.TimedMacroId == macro.TimedMacroId);
+        if (currentMacro is null || !currentMacro.CanExecute)
+        {
+            ChatGui.PrintError("You no longer have permission to execute this timed macro.", "PartyPulse");
+            return;
+        }
+
+        if (!currentMacro.Enabled || !currentMacro.IsConfigured)
+        {
+            ChatGui.PrintError("The timed macro is disabled or not configured.", "PartyPulse");
+            return;
+        }
+
+        if (!LocationProvider.IsAtAddress(
+                currentOpening.AddressWorldName,
+                currentOpening.AddressCityName,
+                currentOpening.AddressWard,
+                currentOpening.AddressPlot,
+                out var locationMessage))
+        {
+            ChatGui.PrintError($"Timed macros only run at the active opening address. {locationMessage}", "PartyPulse");
+            return;
+        }
+
+        var execution = await gameMacroExecutionService.ExecuteUntargetedAsync(
+            currentMacro.MacroText!,
+            LifetimeToken);
+        if (!execution.Success)
+        {
+            ChatGui.PrintError($"{execution.ErrorMessage} [{execution.ErrorCode}]", "PartyPulse");
+            return;
+        }
+
+        var clientExecutionId = Guid.NewGuid();
+        var result = await TimedMacros.RecordExecutionAsync(
+            venue,
+            currentMacro.TimedMacroId,
+            new RecordTimedMacroExecutionRequest(currentOpening.OpeningId, clientExecutionId),
+            LifetimeToken);
+        if (!result.Success || result.Value is null)
+        {
+            ReportVipFailure(
+                result.Failure,
+                "The macro started, but the shared timer could not be reset. Refresh and verify the timer before running it again.");
+            return;
+        }
+
+        ChatGui.Print(
+            $"Started {currentMacro.DisplayName}. Shared timer reset until {result.Value.NextDueAt.ToLocalTime():t}.",
+            "PartyPulse");
     }
 
     private async Task CreateVipSettlementAndReportAsync(

@@ -8,6 +8,7 @@ using Dalamud.Interface.Utility;
 using PartyPulse.Api;
 using PartyPulse.Models;
 using PartyPulse.Vip;
+using PartyPulse.TimedMacros;
 
 namespace PartyPulse.Windows;
 
@@ -49,6 +50,7 @@ public sealed class VipTabRenderer(Plugin plugin)
         ResetForVenueChange(venue);
         plugin.EnsureVipLoaded(venue);
         plugin.EnsureVipArrivalsLoaded(venue);
+        plugin.EnsureTimedMacrosLoaded(venue);
 
         var snapshot = plugin.Vip.GetSnapshot(venue);
         var isBusy = plugin.Vip.IsBusy(venue.ProfileId);
@@ -66,6 +68,7 @@ public sealed class VipTabRenderer(Plugin plugin)
         var vipDataReady = snapshot.Status == VipManagementStatus.Ready && snapshot.View is not null;
         DrawArrivalToolbar(venue, vipDataReady);
         DrawNewVipOffer(venue);
+        DrawVipTimedMacro(venue);
 
         if (!vipDataReady)
         {
@@ -108,6 +111,76 @@ public sealed class VipTabRenderer(Plugin plugin)
         DrawArrivalAdministration(venue);
 
         ImGui.EndTabItem();
+    }
+
+    private void DrawVipTimedMacro(VenueConnectionConfiguration venue)
+    {
+        var snapshot = plugin.TimedMacros.GetSnapshot(venue);
+        var view = snapshot.View;
+        var macro = view?.Macros.FirstOrDefault(value =>
+            string.Equals(value.TypeCode, TimedMacroTypeCodes.VipAdvertisement, StringComparison.OrdinalIgnoreCase) &&
+            value.CanExecute);
+        if (view is null || macro is null)
+            return;
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+        ImGui.TextUnformatted("VIP advertisement");
+
+        var opening = view.CurrentOpening;
+        var locationMessage = string.Empty;
+        var atAddress = opening is not null && plugin.LocationProvider.IsAtAddress(
+            opening.AddressWorldName,
+            opening.AddressCityName,
+            opening.AddressWard,
+            opening.AddressPlot,
+            out locationMessage);
+        var now = snapshot.EstimatedServerNow;
+        var stateText = opening is null
+            ? "Paused: no active opening"
+            : !atAddress
+                ? "Paused: not at opening address"
+                : macro.NextDueAt is not { } dueAt || dueAt <= now
+                    ? "Due now"
+                    : $"Next in {FormatTimedMacroRemaining(dueAt - now)}";
+
+        ImGui.TextDisabled($"{stateText} · every {macro.IntervalMinutes} minutes · shared across users");
+        ImGui.SameLine();
+        var canExecute =
+            opening is not null &&
+            atAddress &&
+            macro.Enabled &&
+            macro.IsConfigured;
+        ImGui.BeginDisabled(
+            plugin.TimedMacros.IsBusy(venue.ProfileId) ||
+            plugin.IsGameMacroBusy ||
+            !canExecute);
+        if (ImGui.SmallButton("Execute VIP ad"))
+            plugin.RunTimedMacro(venue, macro, opening!);
+        ImGui.EndDisabled();
+        if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled) && !canExecute)
+        {
+            var reason = opening is null
+                ? "There is no active opening."
+                : !atAddress
+                    ? locationMessage
+                    : !macro.Enabled
+                        ? "The VIP advertisement macro is disabled."
+                        : "The VIP advertisement macro has not been configured.";
+            ImGui.SetTooltip(reason);
+        }
+        else if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip("Running early is allowed and resets the shared timer.");
+        }
+    }
+
+    private static string FormatTimedMacroRemaining(TimeSpan remaining)
+    {
+        if (remaining.TotalHours >= 1)
+            return $"{(int)remaining.TotalHours:00}:{remaining.Minutes:00}:{remaining.Seconds:00}";
+        return $"{remaining.Minutes:00}:{remaining.Seconds:00}";
     }
 
     private void DrawArrivalToolbar(VenueConnectionConfiguration venue, bool vipDataReady)

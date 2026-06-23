@@ -73,6 +73,30 @@ public sealed class VenueLocationProvider(
         return true;
     }
 
+    public bool IsAtAddress(
+        string worldName,
+        string cityName,
+        int ward,
+        int plot,
+        out string message)
+    {
+        if (!TryGetCurrentHousingAddress(out var current, out var reason) || current is null)
+        {
+            message = reason;
+            return false;
+        }
+
+        var matches =
+            string.Equals(current.WorldName, worldName, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(current.CityName, cityName, StringComparison.OrdinalIgnoreCase) &&
+            current.Ward == ward &&
+            current.Plot == plot;
+        message = matches
+            ? string.Empty
+            : $"Current: {current.DisplayText}\nRequired: {worldName}, {cityName}, Ward {ward}, Plot {plot}";
+        return matches;
+    }
+
     private static string NormalizeHousingDistrictName(string placeName)
     {
         var normalized = placeName.Trim();

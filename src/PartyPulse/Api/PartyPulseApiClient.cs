@@ -516,6 +516,83 @@ public sealed class PartyPulseApiClient : IDisposable
             static payload => payload.OpeningId > 0 && payload.CancelledAt != default,
             cancellationToken);
 
+    public Task<ApiResult<TimedMacroViewResponse>> GetTimedMacrosAsync(
+        Uri baseUri,
+        string accessToken,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<TimedMacroViewResponse>(
+            baseUri,
+            HttpMethod.Get,
+            "api/v1/timed-macros",
+            accessToken,
+            null,
+            ValidateTimedMacroViewResponse,
+            cancellationToken);
+
+    public Task<ApiResult<SaveTimedMacroResponse>> CreateTimedMacroAsync(
+        Uri baseUri,
+        string accessToken,
+        CreateTimedMacroRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<SaveTimedMacroResponse>(
+            baseUri,
+            HttpMethod.Post,
+            "api/v1/timed-macros",
+            accessToken,
+            request,
+            static payload => payload.TimedMacroId > 0 && payload.UpdatedAt != default,
+            cancellationToken);
+
+    public Task<ApiResult<SaveTimedMacroResponse>> UpdateTimedMacroAsync(
+        Uri baseUri,
+        string accessToken,
+        long timedMacroId,
+        UpdateTimedMacroRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<SaveTimedMacroResponse>(
+            baseUri,
+            HttpMethod.Put,
+            $"api/v1/timed-macros/{timedMacroId}",
+            accessToken,
+            request,
+            static payload => payload.TimedMacroId > 0 && payload.UpdatedAt != default,
+            cancellationToken);
+
+    public Task<ApiResult<ArchiveTimedMacroResponse>> ArchiveTimedMacroAsync(
+        Uri baseUri,
+        string accessToken,
+        long timedMacroId,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<ArchiveTimedMacroResponse>(
+            baseUri,
+            HttpMethod.Post,
+            $"api/v1/timed-macros/{timedMacroId}/archive",
+            accessToken,
+            null,
+            static payload => payload.TimedMacroId > 0 && payload.ArchivedAt != default,
+            cancellationToken);
+
+    public Task<ApiResult<RecordTimedMacroExecutionResponse>> RecordTimedMacroExecutionAsync(
+        Uri baseUri,
+        string accessToken,
+        long timedMacroId,
+        RecordTimedMacroExecutionRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<RecordTimedMacroExecutionResponse>(
+            baseUri,
+            HttpMethod.Post,
+            $"api/v1/timed-macros/{timedMacroId}/executions",
+            accessToken,
+            request,
+            static payload =>
+                payload.OpeningId > 0 &&
+                payload.TimedMacroId > 0 &&
+                payload.LastExecutedAt != default &&
+                payload.LastExecutedByUserId > 0 &&
+                payload.ExecutionCount > 0 &&
+                payload.NextDueAt > payload.LastExecutedAt,
+            cancellationToken);
+
     public Task<ApiResult<VipArrivalContextResponse>> GetVipArrivalContextAsync(
         Uri baseUri,
         string accessToken,
@@ -759,6 +836,30 @@ public sealed class PartyPulseApiClient : IDisposable
         !string.IsNullOrWhiteSpace(address.CityName) &&
         address.Ward is >= 1 and <= 30 &&
         address.Plot is >= 1 and <= 60;
+
+    private static bool ValidateTimedMacroViewResponse(TimedMacroViewResponse payload) =>
+        payload.Capabilities is not null &&
+        payload.Macros is not null &&
+        (payload.CurrentOpening is null ||
+         (payload.CurrentOpening.OpeningId > 0 &&
+          payload.CurrentOpening.ClosesAt > payload.CurrentOpening.OpensAt &&
+          payload.CurrentOpening.AddressWorldId > 0 &&
+          !string.IsNullOrWhiteSpace(payload.CurrentOpening.AddressWorldName) &&
+          payload.CurrentOpening.AddressCityId > 0 &&
+          !string.IsNullOrWhiteSpace(payload.CurrentOpening.AddressCityName) &&
+          payload.CurrentOpening.AddressWard is >= 1 and <= 30 &&
+          payload.CurrentOpening.AddressPlot is >= 1 and <= 60)) &&
+        payload.Macros.All(static macro =>
+            macro.TimedMacroId > 0 &&
+            !string.IsNullOrWhiteSpace(macro.InstanceCode) &&
+            !string.IsNullOrWhiteSpace(macro.TypeCode) &&
+            !string.IsNullOrWhiteSpace(macro.DisplayName) &&
+            macro.MaxLines is > 0 and <= 15 &&
+            macro.MaxLineLength > 0 &&
+            macro.IntervalMinutes is >= 1 and <= 10080 &&
+            !string.IsNullOrWhiteSpace(macro.SourceType) &&
+            macro.ExecutionCount >= 0 &&
+            (macro.NextDueAt is null || payload.CurrentOpening is not null));
 
     private static bool ValidateVipArrivalContextResponse(VipArrivalContextResponse payload) =>
         payload.Capabilities is not null &&
