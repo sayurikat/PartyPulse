@@ -849,6 +849,8 @@ public sealed class PartyPulseApiClient : IDisposable
           !string.IsNullOrWhiteSpace(payload.CurrentOpening.AddressCityName) &&
           payload.CurrentOpening.AddressWard is >= 1 and <= 30 &&
           payload.CurrentOpening.AddressPlot is >= 1 and <= 60)) &&
+        (payload.CurrentOpening is not null ||
+         payload.Macros.All(static macro => macro.NextDueAt is null)) &&
         payload.Macros.All(static macro =>
             macro.TimedMacroId > 0 &&
             !string.IsNullOrWhiteSpace(macro.InstanceCode) &&
@@ -858,8 +860,7 @@ public sealed class PartyPulseApiClient : IDisposable
             macro.MaxLineLength > 0 &&
             macro.IntervalMinutes is >= 1 and <= 10080 &&
             !string.IsNullOrWhiteSpace(macro.SourceType) &&
-            macro.ExecutionCount >= 0 &&
-            (macro.NextDueAt is null || payload.CurrentOpening is not null));
+            macro.ExecutionCount >= 0);
 
     private static bool ValidateVipArrivalContextResponse(VipArrivalContextResponse payload) =>
         payload.Capabilities is not null &&
