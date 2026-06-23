@@ -19,6 +19,7 @@ using PartyPulse.SelfService;
 using PartyPulse.Services;
 using PartyPulse.VenueUsers;
 using PartyPulse.Vip;
+using PartyPulse.VenueOpenings;
 using PartyPulse.Windows;
 
 namespace PartyPulse;
@@ -87,6 +88,12 @@ public sealed class Plugin : IDalamudPlugin
             IdentityProvider,
             Log);
         VipArrivals = new VipArrivalManagementManager(
+            Configuration,
+            Authentication,
+            apiClient,
+            IdentityProvider,
+            Log);
+        VenueOpenings = new VenueOpeningScheduleManager(
             Configuration,
             Authentication,
             apiClient,
@@ -163,6 +170,8 @@ public sealed class Plugin : IDalamudPlugin
 
     public VipArrivalManagementManager VipArrivals { get; }
 
+    public VenueOpeningScheduleManager VenueOpenings { get; }
+
     public NearbyVipPlayerTracker NearbyVipPlayers { get; }
 
     public VipArrivalNearbyTracker VipArrivalNearby { get; }
@@ -202,6 +211,7 @@ public sealed class Plugin : IDalamudPlugin
         notificationToastWindow.Dispose();
         Notifications.Dispose();
         Finance.Dispose();
+        VenueOpenings.Dispose();
         VipArrivals.Dispose();
         Vip.Dispose();
         gameMacroExecutionService.Dispose();
@@ -362,6 +372,7 @@ public sealed class Plugin : IDalamudPlugin
         SelfService.RemoveProfile(venue.ProfileId);
         Vip.RemoveProfile(venue.ProfileId);
         VipArrivals.ClearProfile(venue.ProfileId);
+        VenueOpenings.RemoveProfile(venue.ProfileId);
         NearbyVipPlayers.ClearProfile(venue.ProfileId);
         VipArrivalNearby.Clear();
         Finance.RemoveProfile(venue.ProfileId);
@@ -597,6 +608,43 @@ public sealed class Plugin : IDalamudPlugin
             CloseVenueOpeningAndReportAsync(venue, openingId),
             $"close opening {openingId} for {venue.VenueCode}");
 
+    public void EnsureVenueOpeningsLoaded(VenueConnectionConfiguration venue)
+    {
+        if (!VenueOpenings.ShouldLoad(venue))
+            return;
+
+        Observe(
+            VenueOpenings.LoadAsync(venue, false, LifetimeToken),
+            $"load venue openings for {venue.VenueCode}");
+    }
+
+    public void RefreshVenueOpenings(VenueConnectionConfiguration venue) =>
+        Observe(
+            VenueOpenings.LoadAsync(venue, true, LifetimeToken),
+            $"refresh venue openings for {venue.VenueCode}");
+
+    public void SaveVenueOpening(
+        VenueConnectionConfiguration venue,
+        long? openingId,
+        SaveVenueOpeningRequest request) =>
+        Observe(
+            SaveVenueOpeningAndReportAsync(venue, openingId, request),
+            $"save venue opening for {venue.VenueCode}");
+
+    public void CancelVenueOpening(
+        VenueConnectionConfiguration venue,
+        long openingId) =>
+        Observe(
+            CancelVenueOpeningAndReportAsync(venue, openingId),
+            $"cancel opening {openingId} for {venue.VenueCode}");
+
+    public void CloseScheduledVenueOpening(
+        VenueConnectionConfiguration venue,
+        long openingId) =>
+        Observe(
+            CloseScheduledVenueOpeningAndReportAsync(venue, openingId),
+            $"close scheduled opening {openingId} for {venue.VenueCode}");
+
     public void RunNewVipMacro(
         VenueConnectionConfiguration venue,
         VipNewMemberOffer offer,
@@ -719,6 +767,7 @@ public sealed class Plugin : IDalamudPlugin
                 SelfService.Clear("Character logged out or changed.");
                 Vip.Clear("Character logged out or changed.");
                 VipArrivals.Clear();
+                VenueOpenings.Clear("Character logged out or changed.");
                 NearbyVipPlayers.Clear();
                 VipArrivalNearby.Clear();
                 Finance.Clear("Character logged out or changed.");
@@ -737,6 +786,7 @@ public sealed class Plugin : IDalamudPlugin
             SelfService.Clear("Character changed; self-service data was cleared.");
             Vip.Clear("Character changed; VIP data was cleared.");
             VipArrivals.Clear();
+            VenueOpenings.Clear("Character changed; opening schedule was cleared.");
             NearbyVipPlayers.Clear();
             VipArrivalNearby.Clear();
             Finance.Clear("Character changed; finance data was cleared.");
@@ -878,6 +928,7 @@ public sealed class Plugin : IDalamudPlugin
         SelfService.RemoveProfile(venue.ProfileId);
         Vip.RemoveProfile(venue.ProfileId);
         VipArrivals.ClearProfile(venue.ProfileId);
+        VenueOpenings.RemoveProfile(venue.ProfileId);
         NearbyVipPlayers.ClearProfile(venue.ProfileId);
         VipArrivalNearby.Clear();
         Finance.RemoveProfile(venue.ProfileId);
@@ -1307,6 +1358,61 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         ReportVipFailure(result.Failure, "The venue opening could not be closed.");
+    }
+
+    private async Task SaveVenueOpeningAndReportAsync(
+        VenueConnectionConfiguration venue,
+        long? openingId,
+        SaveVenueOpeningRequest request)
+    {
+        var result = await VenueOpenings.SaveAsync(
+            venue,
+            openingId,
+            request,
+            LifetimeToken);
+        if (result.Success && result.Value is not null)
+        {
+            VipArrivalNearby.Clear();
+            await VipArrivals.LoadAsync(venue, true, LifetimeToken);
+            ChatGui.Print(
+                $"{(openingId is null ? "Scheduled" : "Updated")} opening #{result.Value.OpeningId} for {result.Value.OpensAt.ToLocalTime():g}.",
+                "PartyPulse");
+            return;
+        }
+
+        ReportVipFailure(result.Failure, "The venue opening could not be saved.");
+    }
+
+    private async Task CancelVenueOpeningAndReportAsync(
+        VenueConnectionConfiguration venue,
+        long openingId)
+    {
+        var result = await VenueOpenings.CancelAsync(venue, openingId, LifetimeToken);
+        if (result.Success)
+        {
+            VipArrivalNearby.Clear();
+            await VipArrivals.LoadAsync(venue, true, LifetimeToken);
+            ChatGui.Print($"Cancelled venue opening #{openingId}.", "PartyPulse");
+            return;
+        }
+
+        ReportVipFailure(result.Failure, "The scheduled venue opening could not be cancelled.");
+    }
+
+    private async Task CloseScheduledVenueOpeningAndReportAsync(
+        VenueConnectionConfiguration venue,
+        long openingId)
+    {
+        var result = await VenueOpenings.CloseAsync(venue, openingId, LifetimeToken);
+        if (result.Success)
+        {
+            VipArrivalNearby.Clear();
+            await VipArrivals.LoadAsync(venue, true, LifetimeToken);
+            ChatGui.Print($"Closed venue opening #{openingId}.", "PartyPulse");
+            return;
+        }
+
+        ReportVipFailure(result.Failure, "The active venue opening could not be closed.");
     }
 
     private async Task RunNewVipMacroAndReportAsync(

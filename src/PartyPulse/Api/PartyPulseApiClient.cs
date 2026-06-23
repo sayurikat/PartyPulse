@@ -474,6 +474,48 @@ public sealed class PartyPulseApiClient : IDisposable
                               (!payload.Settled || payload.PaidToVenueAt is not null),
             cancellationToken);
 
+    public Task<ApiResult<VenueOpeningScheduleResponse>> GetVenueOpeningScheduleAsync(
+        Uri baseUri,
+        string accessToken,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<VenueOpeningScheduleResponse>(
+            baseUri,
+            HttpMethod.Get,
+            "api/v1/venue-openings",
+            accessToken,
+            null,
+            ValidateVenueOpeningScheduleResponse,
+            cancellationToken);
+
+    public Task<ApiResult<VenueOpeningScheduleItem>> SaveVenueOpeningAsync(
+        Uri baseUri,
+        string accessToken,
+        long? openingId,
+        SaveVenueOpeningRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<VenueOpeningScheduleItem>(
+            baseUri,
+            openingId is null ? HttpMethod.Post : HttpMethod.Put,
+            openingId is null ? "api/v1/venue-openings" : $"api/v1/venue-openings/{openingId.Value}",
+            accessToken,
+            request,
+            ValidateVenueOpeningScheduleItem,
+            cancellationToken);
+
+    public Task<ApiResult<CancelVenueOpeningResponse>> CancelVenueOpeningAsync(
+        Uri baseUri,
+        string accessToken,
+        long openingId,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<CancelVenueOpeningResponse>(
+            baseUri,
+            HttpMethod.Post,
+            $"api/v1/venue-openings/{openingId}/cancel",
+            accessToken,
+            null,
+            static payload => payload.OpeningId > 0 && payload.CancelledAt != default,
+            cancellationToken);
+
     public Task<ApiResult<VipArrivalContextResponse>> GetVipArrivalContextAsync(
         Uri baseUri,
         string accessToken,
@@ -691,6 +733,32 @@ public sealed class PartyPulseApiClient : IDisposable
             item.SourceId > 0 &&
             item.AmountGil > 0 &&
             !string.IsNullOrWhiteSpace(item.SourceType));
+
+    private static bool ValidateVenueOpeningScheduleResponse(VenueOpeningScheduleResponse payload) =>
+        payload.Capabilities is not null &&
+        payload.SuggestedOpensAt != default &&
+        payload.SuggestedDurationMinutes is >= 30 and <= 2880 &&
+        payload.Themes is not null &&
+        payload.Openings is not null &&
+        (payload.DefaultAddress is null || ValidateVenueOpeningAddress(payload.DefaultAddress)) &&
+        payload.Themes.All(static theme =>
+            theme.ThemeId > 0 && !string.IsNullOrWhiteSpace(theme.Name)) &&
+        payload.Openings.All(ValidateVenueOpeningScheduleItem);
+
+    private static bool ValidateVenueOpeningScheduleItem(VenueOpeningScheduleItem opening) =>
+        opening.OpeningId > 0 &&
+        opening.ClosesAt > opening.OpensAt &&
+        ValidateVenueOpeningAddress(opening.Address) &&
+        !string.IsNullOrWhiteSpace(opening.SourceType) &&
+        opening.CreatedAt != default;
+
+    private static bool ValidateVenueOpeningAddress(VenueOpeningAddressSummary address) =>
+        address.WorldId > 0 &&
+        !string.IsNullOrWhiteSpace(address.WorldName) &&
+        address.CityId > 0 &&
+        !string.IsNullOrWhiteSpace(address.CityName) &&
+        address.Ward is >= 1 and <= 30 &&
+        address.Plot is >= 1 and <= 60;
 
     private static bool ValidateVipArrivalContextResponse(VipArrivalContextResponse payload) =>
         payload.Capabilities is not null &&

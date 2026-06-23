@@ -113,7 +113,7 @@ public sealed class VipTabRenderer(Plugin plugin)
     private void DrawArrivalToolbar(VenueConnectionConfiguration venue, bool vipDataReady)
     {
         var snapshot = plugin.VipArrivals.GetSnapshot(venue);
-        if (snapshot.Status != VipArrivalManagementStatus.Ready || snapshot.Context is null)
+        if (snapshot.Context is null)
         {
             return;
         }
@@ -185,7 +185,7 @@ public sealed class VipTabRenderer(Plugin plugin)
     private void DrawArrivalAdministration(VenueConnectionConfiguration venue)
     {
         var snapshot = plugin.VipArrivals.GetSnapshot(venue);
-        if (snapshot.Status != VipArrivalManagementStatus.Ready || snapshot.Context is null)
+        if (snapshot.Context is null)
         {
             return;
         }

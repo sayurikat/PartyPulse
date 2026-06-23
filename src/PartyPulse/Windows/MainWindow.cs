@@ -16,6 +16,7 @@ public sealed class MainWindow : Window, IDisposable
 {
     private readonly Plugin plugin;
     private readonly VipTabRenderer vipTab;
+    private readonly VenueOpeningsTabRenderer venueOpeningsTab;
     private readonly FinanceTabRenderer financeTab;
     private bool requestSelectFinanceTab;
     private long? requestedFinanceSettlementId;
@@ -36,6 +37,7 @@ public sealed class MainWindow : Window, IDisposable
     {
         this.plugin = plugin;
         vipTab = new VipTabRenderer(plugin);
+        venueOpeningsTab = new VenueOpeningsTabRenderer(plugin);
         financeTab = new FinanceTabRenderer(plugin);
 
         SizeConstraints = new WindowSizeConstraints
@@ -197,7 +199,7 @@ public sealed class MainWindow : Window, IDisposable
         DrawOverviewTab(selectedVenue);
 
         if (selectedVenue?.IsRegistered == true &&
-            plugin.Authentication.GetSnapshot(selectedVenue).Status == AuthenticationStatus.Connected)
+            CanDrawAuthenticatedFeatures(plugin.Authentication.GetSnapshot(selectedVenue)))
         {
             DrawMyAccountTab(selectedVenue);
 
@@ -208,6 +210,7 @@ public sealed class MainWindow : Window, IDisposable
                 DrawUsersTab(selectedVenue, userSnapshot);
             }
 
+            venueOpeningsTab.Draw(selectedVenue);
             vipTab.Draw(selectedVenue);
             if (financeTab.Draw(
                     selectedVenue,
@@ -225,6 +228,19 @@ public sealed class MainWindow : Window, IDisposable
         DrawPlaceholderTab("Greeter", "Target-aware greeting actions and VIP-specific greeting selection will live here.");
 
         ImGui.EndTabBar();
+    }
+
+    private static bool CanDrawAuthenticatedFeatures(AuthenticationSnapshot snapshot)
+    {
+        if (snapshot.Status == AuthenticationStatus.Connected)
+        {
+            return true;
+        }
+
+        return snapshot.LastSuccessAt is not null &&
+               (snapshot.Status == AuthenticationStatus.Connecting ||
+                snapshot.Status == AuthenticationStatus.Expired ||
+                snapshot.Status == AuthenticationStatus.Failed);
     }
 
     private void DrawOverviewTab(VenueConnectionConfiguration? selectedVenue)
