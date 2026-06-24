@@ -65,8 +65,9 @@ public sealed class DjsTabRenderer(Plugin plugin)
         ImGui.SetNextItemWidth(420 * ImGuiHelpers.GlobalScale);
         ImGui.InputText("Twitch link", ref twitchUrl, 500);
         ImGui.Checkbox("Resident DJ", ref resident);
+        ImGui.TextUnformatted("Notes");
         ImGui.SetNextItemWidth(-1);
-        ImGui.InputTextMultiline("Note", ref note, 2000, new Vector2(0, 85 * ImGuiHelpers.GlobalScale));
+        ImGui.InputTextMultiline("##DjNotes", ref note, 2000, new Vector2(0, 85 * ImGuiHelpers.GlobalScale));
 
         var valid = !string.IsNullOrWhiteSpace(name) &&
                     (string.IsNullOrWhiteSpace(twitchUrl) ||

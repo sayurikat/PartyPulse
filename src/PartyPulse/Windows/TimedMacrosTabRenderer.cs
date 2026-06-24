@@ -203,7 +203,12 @@ public sealed class TimedMacrosTabRenderer(Plugin plugin)
             var draft = GetDraft(macro);
             ImGui.PushID($"setup-{macro.TimedMacroId}");
             ImGui.Spacing();
-            ImGui.Separator();
+            var headerLabel = $"{macro.DisplayName}##TimedMacroSetup{macro.TimedMacroId}";
+            if (!ImGui.CollapsingHeader(headerLabel))
+            {
+                ImGui.PopID();
+                continue;
+            }
             ImGui.Spacing();
 
             if (macro.IsCustom)

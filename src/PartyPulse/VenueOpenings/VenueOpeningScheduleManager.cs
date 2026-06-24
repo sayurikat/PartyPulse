@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Dalamud.Plugin.Services;
@@ -18,6 +19,7 @@ public sealed class VenueOpeningScheduleManager : IDisposable
     private readonly PlayerIdentityProvider identityProvider;
     private readonly IPluginLog log;
     private readonly ConcurrentDictionary<Guid, VenueOpeningScheduleSnapshot> snapshots = new();
+    private readonly ConcurrentDictionary<Guid, VenueOpeningHistorySnapshot> historySnapshots = new();
     private readonly ConcurrentDictionary<Guid, SemaphoreSlim> gates = new();
 
     public VenueOpeningScheduleManager(
@@ -38,6 +40,11 @@ public sealed class VenueOpeningScheduleManager : IDisposable
         snapshots.TryGetValue(venue.ProfileId, out var snapshot)
             ? snapshot
             : VenueOpeningScheduleSnapshot.NotLoaded;
+
+    public VenueOpeningHistorySnapshot GetHistorySnapshot(VenueConnectionConfiguration venue) =>
+        historySnapshots.TryGetValue(venue.ProfileId, out var snapshot)
+            ? snapshot
+            : VenueOpeningHistorySnapshot.NotLoaded;
 
     public bool IsBusy(Guid profileId) =>
         gates.TryGetValue(profileId, out var gate) && gate.CurrentCount == 0;
@@ -81,6 +88,86 @@ public sealed class VenueOpeningScheduleManager : IDisposable
                 VenueOpeningScheduleStatus.Ready,
                 "Venue openings loaded.",
                 result.Value,
+                attemptAt);
+            return result;
+        }, cancellationToken);
+
+    public Task<ApiResult<VenueOpeningHistoryResponse>> LoadHistoryAsync(
+        VenueConnectionConfiguration venue,
+        bool append,
+        CancellationToken cancellationToken) =>
+        WithGateAsync(venue, async () =>
+        {
+            var existing = GetHistorySnapshot(venue);
+            var cursorTime = append ? existing.NextBeforeOpensAt : null;
+            var cursorId = append ? existing.NextBeforeOpeningId : null;
+            if (append && (!existing.HasMore || cursorTime is null || cursorId is null))
+            {
+                return ApiResult<VenueOpeningHistoryResponse>.Succeeded(new VenueOpeningHistoryResponse(
+                    DateTimeOffset.UtcNow,
+                    Array.Empty<VenueOpeningScheduleItem>(),
+                    false,
+                    null,
+                    null));
+            }
+
+            var attemptAt = DateTimeOffset.UtcNow;
+            historySnapshots[venue.ProfileId] = existing with
+            {
+                Status = VenueOpeningHistoryStatus.Loading,
+                Message = append ? "Loading more previous openings..." : "Loading previous openings...",
+                LastAttemptAt = attemptAt
+            };
+
+            var context = await GetAuthorizedContextAsync(venue, cancellationToken);
+            if (!context.Success)
+            {
+                historySnapshots[venue.ProfileId] = existing with
+                {
+                    Status = VenueOpeningHistoryStatus.Failed,
+                    Message = context.Failure!.Message,
+                    LastAttemptAt = attemptAt
+                };
+                return ApiResult<VenueOpeningHistoryResponse>.Failed(context.Failure!);
+            }
+
+            var result = await apiClient.GetVenueOpeningHistoryAsync(
+                context.BaseUri!,
+                context.AccessToken!,
+                100,
+                cursorTime,
+                cursorId,
+                cancellationToken);
+            if (!result.Success || result.Value is null)
+            {
+                historySnapshots[venue.ProfileId] = existing with
+                {
+                    Status = VenueOpeningHistoryStatus.Failed,
+                    Message = result.Failure!.Message,
+                    LastAttemptAt = attemptAt
+                };
+                return result;
+            }
+
+            var openings = append
+                ? existing.Openings.Concat(result.Value.Openings)
+                    .GroupBy(value => value.OpeningId)
+                    .Select(group => group.First())
+                    .OrderByDescending(value => value.OpensAt)
+                    .ThenByDescending(value => value.OpeningId)
+                    .ToArray()
+                : result.Value.Openings
+                    .OrderByDescending(value => value.OpensAt)
+                    .ThenByDescending(value => value.OpeningId)
+                    .ToArray();
+
+            historySnapshots[venue.ProfileId] = new VenueOpeningHistorySnapshot(
+                VenueOpeningHistoryStatus.Ready,
+                "Previous openings loaded.",
+                openings,
+                result.Value.HasMore,
+                result.Value.NextBeforeOpensAt,
+                result.Value.NextBeforeOpeningId,
                 attemptAt);
             return result;
         }, cancellationToken);
@@ -137,14 +224,18 @@ public sealed class VenueOpeningScheduleManager : IDisposable
             ApiResult<CloseVenueOpeningResponse>.Failed,
             cancellationToken);
 
-    public void RemoveProfile(Guid profileId) => snapshots.TryRemove(profileId, out _);
+    public void RemoveProfile(Guid profileId)
+    {
+        snapshots.TryRemove(profileId, out _);
+        historySnapshots.TryRemove(profileId, out _);
+    }
 
     public void Clear(string message = "Opening schedule was cleared.")
     {
         foreach (var pair in snapshots)
-        {
             snapshots[pair.Key] = VenueOpeningScheduleSnapshot.NotLoaded with { Message = message };
-        }
+        foreach (var pair in historySnapshots)
+            historySnapshots[pair.Key] = VenueOpeningHistorySnapshot.NotLoaded with { Message = message };
     }
 
     public void Dispose()
@@ -153,6 +244,7 @@ public sealed class VenueOpeningScheduleManager : IDisposable
             gate.Dispose();
         gates.Clear();
         snapshots.Clear();
+        historySnapshots.Clear();
     }
 
     private async Task RefreshCoreAsync(
@@ -169,6 +261,13 @@ public sealed class VenueOpeningScheduleManager : IDisposable
                 "Venue openings loaded.",
                 result.Value,
                 DateTimeOffset.UtcNow);
+            if (historySnapshots.ContainsKey(venue.ProfileId))
+            {
+                historySnapshots[venue.ProfileId] = VenueOpeningHistorySnapshot.NotLoaded with
+                {
+                    Message = "Opening history changed. Refresh previous openings to reload it."
+                };
+            }
         }
         else
         {

@@ -98,10 +98,12 @@ public sealed class VenueUserEditWindow : Window, IDisposable
         ImGui.Separator();
 
         ImGui.BeginDisabled(isBusy || !view.Capabilities.CanEdit);
+        ImGui.TextUnformatted("Display name");
         ImGui.SetNextItemWidth(-1);
-        ImGui.InputText("Display name", ref displayName, 50);
+        ImGui.InputText("##VenueUserDisplayName", ref displayName, 50);
+        ImGui.TextUnformatted("Discord handle");
         ImGui.SetNextItemWidth(-1);
-        ImGui.InputText("Discord handle", ref discordHandle, 50);
+        ImGui.InputText("##VenueUserDiscordHandle", ref discordHandle, 50);
 
         if (!string.IsNullOrWhiteSpace(user.DiscordName))
         {

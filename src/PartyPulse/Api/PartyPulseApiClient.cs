@@ -7,6 +7,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Linq;
+using System.Globalization;
 using PartyPulse.Models;
 
 namespace PartyPulse.Api;
@@ -487,6 +488,31 @@ public sealed class PartyPulseApiClient : IDisposable
             ValidateVenueOpeningScheduleResponse,
             cancellationToken);
 
+    public Task<ApiResult<VenueOpeningHistoryResponse>> GetVenueOpeningHistoryAsync(
+        Uri baseUri,
+        string accessToken,
+        int pageSize,
+        DateTimeOffset? beforeOpensAt,
+        long? beforeOpeningId,
+        CancellationToken cancellationToken)
+    {
+        var path = $"api/v1/venue-openings/history?pageSize={pageSize}";
+        if (beforeOpensAt is { } cursorTime && beforeOpeningId is { } cursorId)
+        {
+            path += $"&beforeOpensAt={Uri.EscapeDataString(cursorTime.UtcDateTime.ToString("O", CultureInfo.InvariantCulture))}" +
+                    $"&beforeOpeningId={cursorId}";
+        }
+
+        return SendAuthorizedAsync<VenueOpeningHistoryResponse>(
+            baseUri,
+            HttpMethod.Get,
+            path,
+            accessToken,
+            null,
+            ValidateVenueOpeningHistoryResponse,
+            cancellationToken);
+    }
+
     public Task<ApiResult<VenueOpeningScheduleItem>> SaveVenueOpeningAsync(
         Uri baseUri,
         string accessToken,
@@ -751,6 +777,66 @@ public sealed class PartyPulseApiClient : IDisposable
             static payload => payload.OpeningId > 0 && payload.ClosedAt != default,
             cancellationToken);
 
+    public Task<ApiResult<GreeterContextResponse>> GetGreeterContextAsync(
+        Uri baseUri,
+        string accessToken,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<GreeterContextResponse>(
+            baseUri,
+            HttpMethod.Get,
+            "api/v1/greeter",
+            accessToken,
+            null,
+            ValidateGreeterContextResponse,
+            cancellationToken);
+
+    public Task<ApiResult<ObserveGreeterArrivalsResponse>> ObserveGreeterArrivalsAsync(
+        Uri baseUri,
+        string accessToken,
+        ObserveGreeterArrivalsRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<ObserveGreeterArrivalsResponse>(
+            baseUri,
+            HttpMethod.Post,
+            "api/v1/greeter/observations",
+            accessToken,
+            request,
+            static payload => payload.OpeningId > 0 && payload.ObservedCount >= 0 && payload.PendingCount >= 0,
+            cancellationToken);
+
+    public Task<ApiResult<RecordGreeterActionResponse>> RecordGreeterActionAsync(
+        Uri baseUri,
+        string accessToken,
+        RecordGreeterActionRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<RecordGreeterActionResponse>(
+            baseUri,
+            HttpMethod.Post,
+            "api/v1/greeter/actions",
+            accessToken,
+            request,
+            static payload =>
+                payload.OpeningId > 0 &&
+                !string.IsNullOrWhiteSpace(payload.CharacterName) &&
+                !string.IsNullOrWhiteSpace(payload.WorldName) &&
+                !string.IsNullOrWhiteSpace(payload.ActionKey),
+            cancellationToken);
+
+    public Task<ApiResult<UpdateGreeterMacroResponse>> UpdateGreeterMacroAsync(
+        Uri baseUri,
+        string accessToken,
+        string macroCode,
+        UpdateGreeterMacroRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<UpdateGreeterMacroResponse>(
+            baseUri,
+            HttpMethod.Put,
+            $"api/v1/greeter/macros/{Uri.EscapeDataString(macroCode)}",
+            accessToken,
+            request,
+            static payload => !string.IsNullOrWhiteSpace(payload.MacroCode) && payload.UpdatedAt != default,
+            cancellationToken);
+
     public Task<ApiResult<FinanceViewResponse>> GetFinanceAsync(
         Uri baseUri,
         string accessToken,
@@ -895,6 +981,11 @@ public sealed class PartyPulseApiClient : IDisposable
             theme.ThemeId > 0 && !string.IsNullOrWhiteSpace(theme.Name)) &&
         payload.Openings.All(ValidateVenueOpeningScheduleItem);
 
+    private static bool ValidateVenueOpeningHistoryResponse(VenueOpeningHistoryResponse payload) =>
+        payload.Openings is not null &&
+        payload.Openings.All(ValidateVenueOpeningScheduleItem) &&
+        (!payload.HasMore || (payload.NextBeforeOpensAt is not null && payload.NextBeforeOpeningId is > 0));
+
     private static bool ValidateVenueOpeningScheduleItem(VenueOpeningScheduleItem opening) =>
         opening.OpeningId > 0 &&
         opening.ClosesAt > opening.OpensAt &&
@@ -990,6 +1081,35 @@ public sealed class PartyPulseApiClient : IDisposable
         opening.AddressWard > 0 &&
         opening.AddressPlot > 0 &&
         !string.IsNullOrWhiteSpace(opening.SourceType);
+
+    private static bool ValidateGreeterContextResponse(GreeterContextResponse payload) =>
+        payload.Capabilities is not null &&
+        payload.Macros is not null &&
+        payload.Arrivals is not null &&
+        (payload.CurrentOpening is null ||
+         (payload.CurrentOpening.OpeningId > 0 &&
+          payload.CurrentOpening.ClosesAt > payload.CurrentOpening.OpensAt &&
+          payload.CurrentOpening.AddressWorldId > 0 &&
+          !string.IsNullOrWhiteSpace(payload.CurrentOpening.AddressWorldName) &&
+          payload.CurrentOpening.AddressCityId > 0 &&
+          !string.IsNullOrWhiteSpace(payload.CurrentOpening.AddressCityName) &&
+          payload.CurrentOpening.AddressWard is >= 1 and <= 30 &&
+          payload.CurrentOpening.AddressPlot is >= 1 and <= 60)) &&
+        (payload.CurrentDj is null ||
+         (payload.CurrentDj.BookingId > 0 &&
+          !string.IsNullOrWhiteSpace(payload.CurrentDj.Name) &&
+          payload.CurrentDj.EndsAt > payload.CurrentDj.StartsAt)) &&
+        payload.Macros.All(static macro =>
+            !string.IsNullOrWhiteSpace(macro.MacroCode) &&
+            !string.IsNullOrWhiteSpace(macro.DisplayName) &&
+            macro.MaxLines is > 0 and <= 15 &&
+            macro.MaxLineLength > 0) &&
+        payload.Arrivals.All(static arrival =>
+            arrival.OpeningId > 0 &&
+            arrival.WorldId > 0 &&
+            !string.IsNullOrWhiteSpace(arrival.WorldName) &&
+            !string.IsNullOrWhiteSpace(arrival.CharacterName) &&
+            arrival.LastSeenAt >= arrival.FirstSeenAt);
 
     private static bool ValidateNotificationPollResponse(NotificationPollResponse payload) =>
         payload.UnseenNotificationCount >= 0 &&

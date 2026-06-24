@@ -20,6 +20,7 @@ public sealed class MainWindow : Window, IDisposable
     private readonly DjsTabRenderer djsTab;
     private readonly TimedMacrosTabRenderer timedMacrosTab;
     private readonly FinanceTabRenderer financeTab;
+    private readonly GreeterTabRenderer greeterTab;
     private bool requestSelectFinanceTab;
     private long? requestedFinanceSettlementId;
     private Guid addUserProfileId;
@@ -43,6 +44,7 @@ public sealed class MainWindow : Window, IDisposable
         djsTab = new DjsTabRenderer(plugin);
         timedMacrosTab = new TimedMacrosTabRenderer(plugin);
         financeTab = new FinanceTabRenderer(plugin);
+        greeterTab = new GreeterTabRenderer(plugin);
 
         SizeConstraints = new WindowSizeConstraints
         {
@@ -218,6 +220,7 @@ public sealed class MainWindow : Window, IDisposable
             venueOpeningsTab.Draw(selectedVenue);
             timedMacrosTab.Draw(selectedVenue);
             vipTab.Draw(selectedVenue);
+            greeterTab.Draw(selectedVenue);
             if (financeTab.Draw(
                     selectedVenue,
                     requestSelectFinanceTab,
@@ -231,7 +234,6 @@ public sealed class MainWindow : Window, IDisposable
         DrawPlaceholderTab("Staff", "Clock-in state, staff tools, macros, timers, and Party Finder controls will live here.");
         DrawPlaceholderTab("Bar", "Bar sales, gambashots, jackpots, and buyout tracking will live here.");
         DrawPlaceholderTab("Games", "Venue-wide game state, rolls, host controls, and timers will live here.");
-        DrawPlaceholderTab("Greeter", "Target-aware greeting actions and VIP-specific greeting selection will live here.");
 
         ImGui.EndTabBar();
     }

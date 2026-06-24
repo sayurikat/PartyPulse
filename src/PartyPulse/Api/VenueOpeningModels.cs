@@ -53,4 +53,11 @@ public sealed record SaveVenueOpeningRequest(
     string ThemeName,
     string? Title);
 
+public sealed record VenueOpeningHistoryResponse(
+    DateTimeOffset ServerNow,
+    IReadOnlyList<VenueOpeningScheduleItem> Openings,
+    bool HasMore,
+    DateTimeOffset? NextBeforeOpensAt,
+    long? NextBeforeOpeningId);
+
 public sealed record CancelVenueOpeningResponse(long OpeningId, DateTimeOffset CancelledAt);

@@ -145,7 +145,16 @@ public sealed class VipTabRenderer(Plugin plugin)
                     ? "Due now"
                     : $"Next in {FormatTimedMacroRemaining(dueAt - now)}";
 
-        ImGui.TextDisabled($"{stateText} · every {macro.IntervalMinutes} minutes · shared across users");
+        if (string.Equals(stateText, "Due now", StringComparison.Ordinal))
+        {
+            ImGui.TextColored(new Vector4(1f, 0.72f, 0.25f, 1f), stateText);
+            ImGui.SameLine();
+            ImGui.TextDisabled($"· every {macro.IntervalMinutes} minutes · shared across users");
+        }
+        else
+        {
+            ImGui.TextDisabled($"{stateText} · every {macro.IntervalMinutes} minutes · shared across users");
+        }
         ImGui.SameLine();
         var canExecute =
             opening is not null &&
@@ -750,7 +759,7 @@ public sealed class VipTabRenderer(Plugin plugin)
         ImGui.TableSetupColumn("Discord");
         ImGui.TableSetupColumn("Expires at");
         ImGui.TableSetupColumn("Characters");
-        ImGui.TableSetupColumn("Actions", ImGuiTableColumnFlags.WidthFixed, 125 * ImGuiHelpers.GlobalScale);
+        ImGui.TableSetupColumn("Actions", ImGuiTableColumnFlags.WidthFixed, 165 * ImGuiHelpers.GlobalScale);
         ImGui.TableHeadersRow();
 
         foreach (var player in filteredPlayers)

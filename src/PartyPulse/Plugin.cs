@@ -11,6 +11,7 @@ using Dalamud.Plugin.Services;
 using PartyPulse.Api;
 using PartyPulse.Authentication;
 using PartyPulse.Finance;
+using PartyPulse.Greeter;
 using PartyPulse.Integrations;
 using PartyPulse.Integrations.Dropbox;
 using PartyPulse.Notifications;
@@ -95,6 +96,12 @@ public sealed class Plugin : IDalamudPlugin
             apiClient,
             IdentityProvider,
             Log);
+        Greeter = new GreeterManagementManager(
+            Configuration,
+            Authentication,
+            apiClient,
+            IdentityProvider,
+            Log);
         VenueOpenings = new VenueOpeningScheduleManager(
             Configuration,
             Authentication,
@@ -115,6 +122,7 @@ public sealed class Plugin : IDalamudPlugin
             Log);
         NearbyVipPlayers = new NearbyVipPlayerTracker(ObjectTable, TargetManager);
         VipArrivalNearby = new VipArrivalNearbyTracker(ObjectTable);
+        GreeterNearby = new GreeterNearbyTracker(ObjectTable);
         gameMacroExecutionService = new GameMacroExecutionService(
             Framework,
             ObjectTable,
@@ -184,6 +192,8 @@ public sealed class Plugin : IDalamudPlugin
 
     public VipArrivalManagementManager VipArrivals { get; }
 
+    public GreeterManagementManager Greeter { get; }
+
     public VenueOpeningScheduleManager VenueOpenings { get; }
 
     public TimedMacroManagementManager TimedMacros { get; }
@@ -193,6 +203,8 @@ public sealed class Plugin : IDalamudPlugin
     public NearbyVipPlayerTracker NearbyVipPlayers { get; }
 
     public VipArrivalNearbyTracker VipArrivalNearby { get; }
+
+    public GreeterNearbyTracker GreeterNearby { get; }
 
     public FinanceManagementManager Finance { get; }
 
@@ -232,6 +244,7 @@ public sealed class Plugin : IDalamudPlugin
         Djs.Dispose();
         TimedMacros.Dispose();
         VenueOpenings.Dispose();
+        Greeter.Dispose();
         VipArrivals.Dispose();
         Vip.Dispose();
         gameMacroExecutionService.Dispose();
@@ -392,11 +405,13 @@ public sealed class Plugin : IDalamudPlugin
         SelfService.RemoveProfile(venue.ProfileId);
         Vip.RemoveProfile(venue.ProfileId);
         VipArrivals.ClearProfile(venue.ProfileId);
+        Greeter.ClearProfile(venue.ProfileId);
         VenueOpenings.RemoveProfile(venue.ProfileId);
         TimedMacros.RemoveProfile(venue.ProfileId);
         Djs.RemoveProfile(venue.ProfileId);
         NearbyVipPlayers.ClearProfile(venue.ProfileId);
         VipArrivalNearby.Clear();
+        GreeterNearby.Clear();
         Finance.RemoveProfile(venue.ProfileId);
         Notifications.RemoveProfile(venue.ProfileId);
         Configuration.VenueConnections.RemoveAll(x => x.ProfileId == venue.ProfileId);
@@ -607,6 +622,64 @@ public sealed class Plugin : IDalamudPlugin
                 "VIP arrival dismissed."),
             $"dismiss VIP arrival for {venue.VenueCode}");
 
+    public void EnsureGreeterLoaded(VenueConnectionConfiguration venue)
+    {
+        if (!Greeter.ShouldLoad(venue))
+            return;
+
+        Observe(
+            Greeter.LoadAsync(venue, false, LifetimeToken),
+            $"load greeter data for {venue.VenueCode}");
+    }
+
+    public void RefreshGreeter(VenueConnectionConfiguration venue)
+    {
+        GreeterNearby.Clear();
+        Observe(
+            Greeter.LoadAsync(venue, true, LifetimeToken),
+            $"refresh greeter data for {venue.VenueCode}");
+    }
+
+    public void SubmitGreeterObservations(
+        VenueConnectionConfiguration venue,
+        long openingId,
+        IReadOnlyList<GreeterObservationRequest> observations) =>
+        Observe(
+            SubmitGreeterObservationsAsync(venue, openingId, observations),
+            $"submit greeter observations for {venue.VenueCode}");
+
+    public void RunGreeterMacro(
+        VenueConnectionConfiguration venue,
+        GreeterArrivalSummary arrival,
+        NearbyGreeterPlayer nearby,
+        GreeterMacroSummary macro,
+        GreeterCurrentDjSummary? currentDj) =>
+        Observe(
+            RunGreeterMacroAndReportAsync(venue, arrival, nearby, macro, currentDj),
+            $"run greeter macro for {venue.VenueCode}");
+
+    public void DismissGreeterArrival(
+        VenueConnectionConfiguration venue,
+        GreeterArrivalSummary arrival) =>
+        Observe(
+            RecordGreeterActionAndReportAsync(
+                venue,
+                new RecordGreeterActionRequest(
+                    arrival.OpeningId,
+                    arrival.CharacterName,
+                    arrival.WorldName,
+                    "dismiss"),
+                "Arrival dismissed."),
+            $"dismiss greeter arrival for {venue.VenueCode}");
+
+    public void UpdateGreeterMacro(
+        VenueConnectionConfiguration venue,
+        string macroCode,
+        string? macroText) =>
+        Observe(
+            UpdateGreeterMacroAndReportAsync(venue, macroCode, macroText),
+            $"update greeter macro {macroCode} for {venue.VenueCode}");
+
     public void UpdateVenueMacro(
         VenueConnectionConfiguration venue,
         string macroCode,
@@ -644,6 +717,16 @@ public sealed class Plugin : IDalamudPlugin
         Observe(
             VenueOpenings.LoadAsync(venue, true, LifetimeToken),
             $"refresh venue openings for {venue.VenueCode}");
+
+    public void RefreshVenueOpeningHistory(VenueConnectionConfiguration venue) =>
+        Observe(
+            VenueOpenings.LoadHistoryAsync(venue, false, LifetimeToken),
+            $"refresh venue opening history for {venue.VenueCode}");
+
+    public void LoadMoreVenueOpeningHistory(VenueConnectionConfiguration venue) =>
+        Observe(
+            VenueOpenings.LoadHistoryAsync(venue, true, LifetimeToken),
+            $"load more venue opening history for {venue.VenueCode}");
 
     public void SaveVenueOpening(
         VenueConnectionConfiguration venue,
@@ -878,11 +961,13 @@ public sealed class Plugin : IDalamudPlugin
                 SelfService.Clear("Character logged out or changed.");
                 Vip.Clear("Character logged out or changed.");
                 VipArrivals.Clear();
+                Greeter.Clear();
                 VenueOpenings.Clear("Character logged out or changed.");
                 TimedMacros.Clear("Character logged out or changed.");
                 Djs.Clear("Character logged out or changed.");
                 NearbyVipPlayers.Clear();
                 VipArrivalNearby.Clear();
+                GreeterNearby.Clear();
                 Finance.Clear("Character logged out or changed.");
                 Notifications.Clear();
             }
@@ -899,11 +984,13 @@ public sealed class Plugin : IDalamudPlugin
             SelfService.Clear("Character changed; self-service data was cleared.");
             Vip.Clear("Character changed; VIP data was cleared.");
             VipArrivals.Clear();
+            Greeter.Clear();
             VenueOpenings.Clear("Character changed; opening schedule was cleared.");
             TimedMacros.Clear("Character changed; timed macro data was cleared.");
             Djs.Clear("Character changed; DJ data was cleared.");
             NearbyVipPlayers.Clear();
             VipArrivalNearby.Clear();
+            GreeterNearby.Clear();
             Finance.Clear("Character changed; finance data was cleared.");
             Notifications.Clear();
         }
@@ -1043,11 +1130,13 @@ public sealed class Plugin : IDalamudPlugin
         SelfService.RemoveProfile(venue.ProfileId);
         Vip.RemoveProfile(venue.ProfileId);
         VipArrivals.ClearProfile(venue.ProfileId);
+        Greeter.ClearProfile(venue.ProfileId);
         VenueOpenings.RemoveProfile(venue.ProfileId);
         TimedMacros.RemoveProfile(venue.ProfileId);
         Djs.RemoveProfile(venue.ProfileId);
         NearbyVipPlayers.ClearProfile(venue.ProfileId);
         VipArrivalNearby.Clear();
+        GreeterNearby.Clear();
         Finance.RemoveProfile(venue.ProfileId);
         Notifications.RemoveProfile(venue.ProfileId);
         ChatGui.Print($"Unauthorized from {venue.DisplayLabel}. The venue remains saved in visitor mode.", "PartyPulse");
@@ -1344,6 +1433,107 @@ public sealed class Plugin : IDalamudPlugin
         ReportVipFailure(result.Failure, "The VIP payment status could not be updated.");
     }
 
+    private async Task SubmitGreeterObservationsAsync(
+        VenueConnectionConfiguration venue,
+        long openingId,
+        IReadOnlyList<GreeterObservationRequest> observations)
+    {
+        var result = await Greeter.ObserveAsync(
+            venue,
+            new ObserveGreeterArrivalsRequest(openingId, observations),
+            LifetimeToken);
+        if (result.Success)
+        {
+            GreeterNearby.MarkSubmitted(observations);
+            return;
+        }
+
+        GreeterNearby.ReleaseSubmission(observations);
+        Log.Warning(
+            "Greeter observation upload failed: {Code} {Message}",
+            result.Failure?.Code,
+            result.Failure?.Message);
+    }
+
+    private async Task RunGreeterMacroAndReportAsync(
+        VenueConnectionConfiguration venue,
+        GreeterArrivalSummary arrival,
+        NearbyGreeterPlayer nearby,
+        GreeterMacroSummary macro,
+        GreeterCurrentDjSummary? currentDj)
+    {
+        if (!macro.IsConfigured)
+        {
+            ChatGui.PrintError("The selected greeter macro has not been configured.", "PartyPulse");
+            return;
+        }
+
+        var macroText = macro.MacroText!
+            .Replace("<name>", currentDj?.Name ?? string.Empty, StringComparison.OrdinalIgnoreCase)
+            .Replace("<twitch>", currentDj?.TwitchUrl ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+        var execution = await gameMacroExecutionService.ExecuteAsync(
+            nearby.GameObjectId,
+            nearby.CharacterName,
+            nearby.WorldName,
+            macroText,
+            LifetimeToken);
+        if (!execution.Success)
+        {
+            ChatGui.PrintError(execution.ErrorMessage ?? "The greeter macro could not be executed.", "PartyPulse");
+            return;
+        }
+
+        var result = await Greeter.RecordActionAsync(
+            venue,
+            new RecordGreeterActionRequest(
+                arrival.OpeningId,
+                arrival.CharacterName,
+                arrival.WorldName,
+                "greet"),
+            LifetimeToken);
+        if (result.Success)
+        {
+            ChatGui.Print($"Greeted {arrival.DisplayName}.", "PartyPulse");
+            return;
+        }
+
+        ReportVipFailure(result.Failure, "The greeting ran, but its arrival state could not be recorded.");
+    }
+
+    private async Task RecordGreeterActionAndReportAsync(
+        VenueConnectionConfiguration venue,
+        RecordGreeterActionRequest request,
+        string successMessage)
+    {
+        var result = await Greeter.RecordActionAsync(venue, request, LifetimeToken);
+        if (result.Success)
+        {
+            ChatGui.Print(successMessage, "PartyPulse");
+            return;
+        }
+
+        ReportVipFailure(result.Failure, "The greeter arrival action could not be recorded.");
+    }
+
+    private async Task UpdateGreeterMacroAndReportAsync(
+        VenueConnectionConfiguration venue,
+        string macroCode,
+        string? macroText)
+    {
+        var result = await Greeter.UpdateMacroAsync(
+            venue,
+            macroCode,
+            new UpdateGreeterMacroRequest(macroText),
+            LifetimeToken);
+        if (result.Success)
+        {
+            ChatGui.Print("Updated greeter macro.", "PartyPulse");
+            return;
+        }
+
+        ReportVipFailure(result.Failure, "The greeter macro could not be updated.");
+    }
+
     private async Task SubmitVipArrivalObservationsAsync(
         VenueConnectionConfiguration venue,
         long openingId,
@@ -1453,6 +1643,8 @@ public sealed class Plugin : IDalamudPlugin
         if (result.Success && result.Value is not null)
         {
             VipArrivalNearby.Clear();
+            GreeterNearby.Clear();
+            await Greeter.LoadAsync(venue, true, LifetimeToken);
             await TimedMacros.LoadAsync(venue, true, LifetimeToken);
             ChatGui.Print(
                 $"Started opening #{result.Value.OpeningId} until {result.Value.ClosesAt.ToLocalTime():g} at {result.Value.AddressDisplay}.",
@@ -1471,6 +1663,8 @@ public sealed class Plugin : IDalamudPlugin
         if (result.Success)
         {
             VipArrivalNearby.Clear();
+            GreeterNearby.Clear();
+            await Greeter.LoadAsync(venue, true, LifetimeToken);
             await TimedMacros.LoadAsync(venue, true, LifetimeToken);
             ChatGui.Print($"Closed venue opening #{openingId}.", "PartyPulse");
             return;
@@ -1492,7 +1686,9 @@ public sealed class Plugin : IDalamudPlugin
         if (result.Success && result.Value is not null)
         {
             VipArrivalNearby.Clear();
+            GreeterNearby.Clear();
             await VipArrivals.LoadAsync(venue, true, LifetimeToken);
+            await Greeter.LoadAsync(venue, true, LifetimeToken);
             await TimedMacros.LoadAsync(venue, true, LifetimeToken);
             ChatGui.Print(
                 $"{(openingId is null ? "Scheduled" : "Updated")} opening #{result.Value.OpeningId} for {result.Value.OpensAt.ToLocalTime():g}.",
@@ -1511,7 +1707,9 @@ public sealed class Plugin : IDalamudPlugin
         if (result.Success)
         {
             VipArrivalNearby.Clear();
+            GreeterNearby.Clear();
             await VipArrivals.LoadAsync(venue, true, LifetimeToken);
+            await Greeter.LoadAsync(venue, true, LifetimeToken);
             await TimedMacros.LoadAsync(venue, true, LifetimeToken);
             ChatGui.Print($"Cancelled venue opening #{openingId}.", "PartyPulse");
             return;
@@ -1528,7 +1726,9 @@ public sealed class Plugin : IDalamudPlugin
         if (result.Success)
         {
             VipArrivalNearby.Clear();
+            GreeterNearby.Clear();
             await VipArrivals.LoadAsync(venue, true, LifetimeToken);
+            await Greeter.LoadAsync(venue, true, LifetimeToken);
             await TimedMacros.LoadAsync(venue, true, LifetimeToken);
             ChatGui.Print($"Closed venue opening #{openingId}.", "PartyPulse");
             return;
@@ -1576,6 +1776,7 @@ public sealed class Plugin : IDalamudPlugin
         var result = await Djs.SaveBookingAsync(venue, bookingId, request, LifetimeToken);
         if (result.Success && result.Value is not null)
         {
+            await Greeter.LoadAsync(venue, true, LifetimeToken);
             await TimedMacros.LoadAsync(venue, true, LifetimeToken);
             ChatGui.Print(
                 $"{(bookingId is null ? "Scheduled" : "Updated")} {result.Value.DjName} for {result.Value.StartsAt.ToLocalTime():g}.",
@@ -1594,6 +1795,7 @@ public sealed class Plugin : IDalamudPlugin
         var result = await Djs.DeleteBookingAsync(venue, openingId, bookingId, LifetimeToken);
         if (result.Success)
         {
+            await Greeter.LoadAsync(venue, true, LifetimeToken);
             await TimedMacros.LoadAsync(venue, true, LifetimeToken);
             ChatGui.Print("DJ booking removed. Historical status changes were preserved.", "PartyPulse");
             return;
