@@ -7,6 +7,7 @@ using Dalamud.Interface.Utility;
 using PartyPulse.Api;
 using PartyPulse.Models;
 using PartyPulse.PartyFinder;
+using PartyPulse.Services;
 
 namespace PartyPulse.Windows;
 
@@ -46,7 +47,7 @@ public sealed class PartyFinderTabRenderer(Plugin plugin)
         if (view.Capabilities.CanManagePartyFinderTemplates &&
             ImGui.CollapsingHeader("Party Finder template editor"))
         {
-            ImGui.TextDisabled("Templates support <theme> and <djs>. Generated opening text can be shortened separately in Openings.");
+            ImGui.TextDisabled("Templates support <theme>, <djs>, <date>, and <time>. Generated opening text can be shortened separately in Openings.");
             foreach (var template in view.Templates.Where(value => value.ChannelCode == "partyfinder"))
                 DrawTemplate(venue, template, busy);
         }
@@ -62,7 +63,7 @@ public sealed class PartyFinderTabRenderer(Plugin plugin)
     {
         ImGui.TextUnformatted("Current Party Finder text");
         ImGui.Separator();
-        var active = PartyFinderPublicationSelector.Resolve(view, serverNow);
+        var active = PartyFinderPublicationSelector.Resolve(view, serverNow, VenueTimeZone.Resolve(venue));
         if (active is null)
         {
             ImGui.TextDisabled("No generated Party Finder text currently applies.");
@@ -72,7 +73,7 @@ public sealed class PartyFinderTabRenderer(Plugin plugin)
         }
 
         ImGui.TextUnformatted($"Opening #{active.OpeningId} — {active.DisplayName}");
-        ImGui.TextDisabled($"{active.OpensAt.ToLocalTime():ddd yyyy-MM-dd HH:mm} to {active.ClosesAt.ToLocalTime():yyyy-MM-dd HH:mm}");
+        ImGui.TextDisabled($"{VenueTimeZone.Format(venue, active.OpensAt, "ddd yyyy-MM-dd HH:mm")} to {VenueTimeZone.Format(venue, active.ClosesAt, "yyyy-MM-dd HH:mm")}");
         ImGui.BeginChild("ActivePartyFinderText", new Vector2(0, 95 * ImGuiHelpers.GlobalScale), true);
         ImGui.TextWrapped(active.Text);
         ImGui.EndChild();

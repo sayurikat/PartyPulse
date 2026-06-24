@@ -60,6 +60,10 @@ public sealed record OpeningPublicationOpeningSummary(
     DateTimeOffset ClosesAt,
     string? ThemeName,
     string? Title,
+    string AddressWorldName,
+    string AddressCityName,
+    int AddressWard,
+    int AddressPlot,
     string Djs,
     IReadOnlyList<OpeningPublicationTextSummary> Texts);
 
@@ -71,7 +75,10 @@ public sealed record OpeningPublicationContextResponse(
     IReadOnlyList<ShoutrunnerWorldSummary> Worlds);
 
 public sealed record SaveOpeningPublicationTemplateRequest(string? TemplateText);
-public sealed record GenerateOpeningPublicationsRequest(string ChannelCode);
+public sealed record GenerateOpeningPublicationsRequest(
+    string ChannelCode,
+    string? DisplayDate,
+    string? DisplayTime);
 public sealed record SaveOpeningPublicationTextRequest(string? PublicationText);
 
 public sealed record ShoutrunnerDutyLogEntryRequest(

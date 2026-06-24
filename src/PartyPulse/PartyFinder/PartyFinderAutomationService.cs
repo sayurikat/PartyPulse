@@ -4,6 +4,7 @@ using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.UI.Agent;
 using FFXIVClientStructs.FFXIV.Component.GUI;
 using PartyPulse.Models;
+using PartyPulse.Services;
 using PartyPulse.OpeningPublications;
 
 namespace PartyPulse.PartyFinder;
@@ -155,7 +156,7 @@ public sealed unsafe class PartyFinderAutomationService
         }
 
         var snapshot = publications.GetSnapshot(venue);
-        var current = PartyFinderPublicationSelector.Resolve(snapshot.View, snapshot.EstimatedServerNow);
+        var current = PartyFinderPublicationSelector.Resolve(snapshot.View, snapshot.EstimatedServerNow, VenueTimeZone.Resolve(venue));
         if (current is null ||
             current.OpeningId != openingId ||
             !string.Equals(current.PublicationCode, publicationCode, StringComparison.OrdinalIgnoreCase) ||
@@ -191,7 +192,7 @@ public sealed unsafe class PartyFinderAutomationService
             case PartyFinderAutomationState.WaitingForInitialWindow:
                 if (condition[ConditionFlag.UsingPartyFinder])
                 {
-                    BeginRefreshCountdown(now, "Party Finder recruitment started.");
+                    BeginRefreshCountdown(venue, now, "Party Finder recruitment started.");
                 }
                 else if (TryClickButton("LookingForGroup", 46))
                 {
@@ -211,7 +212,7 @@ public sealed unsafe class PartyFinderAutomationService
             {
                 if (condition[ConditionFlag.UsingPartyFinder])
                 {
-                    BeginRefreshCountdown(now, "Party Finder recruitment started.");
+                    BeginRefreshCountdown(venue, now, "Party Finder recruitment started.");
                     break;
                 }
 
@@ -233,7 +234,7 @@ public sealed unsafe class PartyFinderAutomationService
 
             case PartyFinderAutomationState.AwaitingInitialRecruitment:
                 if (condition[ConditionFlag.UsingPartyFinder])
-                    BeginRefreshCountdown(now, "Party Finder recruitment started.");
+                    BeginRefreshCountdown(venue, now, "Party Finder recruitment started.");
                 break;
 
             case PartyFinderAutomationState.WaitingForRefresh:
@@ -270,7 +271,7 @@ public sealed unsafe class PartyFinderAutomationService
                     NextRefreshAt = now + interval;
                     State = PartyFinderAutomationState.WaitingForRefresh;
                     stageDeadline = null;
-                    StatusMessage = $"Party Finder refreshed. Next refresh at {NextRefreshAt.Value.ToLocalTime():t}.";
+                    StatusMessage = $"Party Finder refreshed. Next refresh at {VenueTimeZone.Format(venue, NextRefreshAt.Value, "t")}.";
                 }
                 else if (stageDeadline is { } conditionsDeadline && now >= conditionsDeadline)
                 {
@@ -280,12 +281,12 @@ public sealed unsafe class PartyFinderAutomationService
         }
     }
 
-    private void BeginRefreshCountdown(DateTimeOffset now, string prefix)
+    private void BeginRefreshCountdown(VenueConnectionConfiguration venue, DateTimeOffset now, string prefix)
     {
         NextRefreshAt = now + interval;
         State = PartyFinderAutomationState.WaitingForRefresh;
         stageDeadline = null;
-        StatusMessage = $"{prefix} Next refresh at {NextRefreshAt.Value.ToLocalTime():t}.";
+        StatusMessage = $"{prefix} Next refresh at {VenueTimeZone.Format(venue, NextRefreshAt.Value, "t")}.";
     }
 
     private void BeginRefresh(DateTimeOffset now)

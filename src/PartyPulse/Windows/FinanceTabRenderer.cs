@@ -6,6 +6,7 @@ using Dalamud.Interface.Utility;
 using PartyPulse.Api;
 using PartyPulse.Finance;
 using PartyPulse.Models;
+using PartyPulse.Services;
 
 namespace PartyPulse.Windows;
 
@@ -81,7 +82,7 @@ public sealed class FinanceTabRenderer(Plugin plugin)
         }
 
         ImGui.Spacing();
-        DrawSettlementList(view);
+        DrawSettlementList(venue, view);
         ImGui.Spacing();
         DrawSelectedSettlement(venue, view, busy);
         DrawResponseConfirmation(venue);
@@ -90,7 +91,7 @@ public sealed class FinanceTabRenderer(Plugin plugin)
         return true;
     }
 
-    private void DrawSettlementList(FinanceViewResponse view)
+    private void DrawSettlementList(VenueConnectionConfiguration venue, FinanceViewResponse view)
     {
         var flags =
             ImGuiTableFlags.Borders |
@@ -132,7 +133,7 @@ public sealed class FinanceTabRenderer(Plugin plugin)
             ImGui.TableSetColumnIndex(3);
             ImGui.TextUnformatted($"{settlement.TargetUserDisplayName}\n{settlement.TargetCharacterName}");
             ImGui.TableSetColumnIndex(4);
-            ImGui.TextUnformatted(settlement.CreatedAt.ToLocalTime().ToString("g"));
+            ImGui.TextUnformatted(VenueTimeZone.Format(venue, settlement.CreatedAt, "g"));
             ImGui.TableSetColumnIndex(5);
             ImGui.TextUnformatted(settlement.ItemCount.ToString());
             ImGui.PopID();
@@ -162,7 +163,7 @@ public sealed class FinanceTabRenderer(Plugin plugin)
         if (settlement.RespondedAt is { } respondedAt)
         {
             ImGui.TextUnformatted(
-                $"Resolved {respondedAt.ToLocalTime():g} by {settlement.RespondedByDisplayName ?? "unknown"}.");
+                $"Resolved {VenueTimeZone.Format(venue, respondedAt, "g")} by {settlement.RespondedByDisplayName ?? "unknown"}.");
             if (!string.IsNullOrWhiteSpace(settlement.ResponseNote))
             {
                 ImGui.TextWrapped($"Note: {settlement.ResponseNote}");

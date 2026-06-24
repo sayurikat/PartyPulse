@@ -14,7 +14,7 @@ public sealed class Configuration : IPluginConfiguration
 
     private const string LegacyAzureApiBaseUrl = "https://partypulse.azurewebsites.net";
 
-    public int Version { get; set; } = 5;
+    public int Version { get; set; } = 6;
 
     public bool IsConfigWindowMovable { get; set; } = true;
 
@@ -76,6 +76,12 @@ public sealed class Configuration : IPluginConfiguration
             venue.AddressWorldName ??= string.Empty;
             venue.AddressCityName ??= string.Empty;
             venue.DisplayName ??= string.Empty;
+            venue.DisplayTimeZoneId ??= string.Empty;
+            if (!PartyPulse.Services.VenueTimeZone.IsValid(venue.DisplayTimeZoneId))
+            {
+                venue.DisplayTimeZoneId = TimeZoneInfo.Local.Id;
+                changed = true;
+            }
             venue.DeviceName ??= string.Empty;
             venue.RefreshToken ??= string.Empty;
         }
@@ -182,9 +188,9 @@ public sealed class Configuration : IPluginConfiguration
             }
         }
 
-        if (Version < 5)
+        if (Version < 6)
         {
-            Version = 5;
+            Version = 6;
             changed = true;
         }
 

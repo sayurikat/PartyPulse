@@ -8,6 +8,7 @@ using PartyPulse.Api;
 using PartyPulse.Authentication;
 using PartyPulse.Models;
 using PartyPulse.SelfService;
+using PartyPulse.Services;
 using PartyPulse.VenueUsers;
 
 namespace PartyPulse.Windows;
@@ -119,7 +120,7 @@ public sealed class MainWindow : Window, IDisposable
         if (selectedVenue.IsRegistered)
         {
             var auth = plugin.Authentication.GetSnapshot(selectedVenue);
-            DrawConnectionStatus(auth);
+            DrawConnectionStatus(selectedVenue, auth);
             if (auth.Status == AuthenticationStatus.Connected)
             {
                 plugin.EnsureVenueUsersLoaded(selectedVenue);
@@ -175,7 +176,9 @@ public sealed class MainWindow : Window, IDisposable
         return selected;
     }
 
-    private static void DrawConnectionStatus(AuthenticationSnapshot snapshot)
+    private static void DrawConnectionStatus(
+        VenueConnectionConfiguration venue,
+        AuthenticationSnapshot snapshot)
     {
         ImGui.Spacing();
 
@@ -195,7 +198,7 @@ public sealed class MainWindow : Window, IDisposable
         if (snapshot.AccessTokenExpiresAt is { } expiresAt)
         {
             ImGui.SameLine();
-            ImGui.TextDisabled($"Token expires {expiresAt.ToLocalTime():t}");
+            ImGui.TextDisabled($"Token expires {VenueTimeZone.Format(venue, expiresAt, "t")}");
         }
     }
 
@@ -380,7 +383,7 @@ public sealed class MainWindow : Window, IDisposable
         if (snapshot.LatestPairingCode is { } pairing)
         {
             ImGui.TextWrapped($"Pairing code: {pairing.PairingCode}");
-            ImGui.TextDisabled($"Expires: {pairing.ExpiresAt.ToLocalTime():g}");
+            ImGui.TextDisabled($"Expires: {VenueTimeZone.Format(venue, pairing.ExpiresAt, "g")}");
             if (ImGui.Button("Copy pairing code"))
             {
                 ImGui.SetClipboardText(pairing.PairingCode);
@@ -484,7 +487,7 @@ public sealed class MainWindow : Window, IDisposable
         {
             ImGui.Spacing();
             ImGui.TextWrapped($"Invite code for {inviteCode.DisplayName}: {inviteCode.Code}");
-            ImGui.TextDisabled($"Expires: {inviteCode.ExpiresAt.ToLocalTime():g}");
+            ImGui.TextDisabled($"Expires: {VenueTimeZone.Format(venue, inviteCode.ExpiresAt, "g")}");
             if (ImGui.Button("Copy latest invite code"))
             {
                 ImGui.SetClipboardText(inviteCode.Code);

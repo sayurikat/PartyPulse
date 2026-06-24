@@ -6,6 +6,7 @@ using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Utility;
 using Dalamud.Interface.Windowing;
 using PartyPulse.Api;
+using PartyPulse.Services;
 
 namespace PartyPulse.Windows;
 
@@ -216,7 +217,7 @@ public sealed class VenueUserEditWindow : Window, IDisposable
             {
                 ImGui.Spacing();
                 ImGui.TextWrapped($"Recovery code: {recoveryCode.Code}");
-                ImGui.TextDisabled($"Expires: {recoveryCode.ExpiresAt.ToLocalTime():g}");
+                ImGui.TextDisabled($"Expires: {VenueTimeZone.Format(venue, recoveryCode.ExpiresAt, "g")}");
                 if (ImGui.Button("Copy recovery code"))
                 {
                     ImGui.SetClipboardText(recoveryCode.Code);
@@ -229,7 +230,7 @@ public sealed class VenueUserEditWindow : Window, IDisposable
         {
             ImGui.Spacing();
             ImGui.TextWrapped($"Invite code: {latestInviteCode.Code}");
-            ImGui.TextDisabled($"Expires: {latestInviteCode.ExpiresAt.ToLocalTime():g}");
+            ImGui.TextDisabled($"Expires: {VenueTimeZone.Format(venue, latestInviteCode.ExpiresAt, "g")}");
             if (ImGui.Button("Copy invite code"))
             {
                 ImGui.SetClipboardText(latestInviteCode.Code);

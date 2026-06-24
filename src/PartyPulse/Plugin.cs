@@ -867,11 +867,11 @@ public sealed class Plugin : IDalamudPlugin
 
     public void GenerateOpeningPublications(
         VenueConnectionConfiguration venue,
-        long openingId,
+        OpeningPublicationOpeningSummary opening,
         string channelCode) =>
         Observe(
-            GenerateOpeningPublicationsAndReportAsync(venue, openingId, channelCode),
-            $"generate {channelCode} publications for opening {openingId}");
+            GenerateOpeningPublicationsAndReportAsync(venue, opening, channelCode),
+            $"generate {channelCode} publications for opening {opening.OpeningId}");
 
     public void SaveOpeningPublicationText(
         VenueConnectionConfiguration venue,
@@ -909,6 +909,29 @@ public sealed class Plugin : IDalamudPlugin
         string reason)
     {
         var result = ShoutrunnerDuty.Reset(venue, context, publication, reason);
+        if (result.Success)
+            ChatGui.Print(result.Message, "PartyPulse");
+        else
+            ChatGui.PrintError(result.Message, "PartyPulse");
+    }
+
+    public void CompleteShoutrunnerRound(
+        VenueConnectionConfiguration venue,
+        OpeningPublicationContextResponse context,
+        ActiveShoutrunnerPublication publication)
+    {
+        var result = ShoutrunnerDuty.CompleteRound(venue, context, publication);
+        if (result.Success)
+            ChatGui.Print(result.Message, "PartyPulse");
+        else
+            ChatGui.PrintError(result.Message, "PartyPulse");
+    }
+
+    public void ReturnShoutrunnerToVenue(
+        VenueConnectionConfiguration venue,
+        OpeningPublicationOpeningSummary? opening)
+    {
+        var result = ShoutrunnerDuty.ReturnToVenue(venue, opening);
         if (result.Success)
             ChatGui.Print(result.Message, "PartyPulse");
         else
@@ -1234,7 +1257,7 @@ public sealed class Plugin : IDalamudPlugin
         if (result.Success && result.Value is not null)
         {
             ChatGui.Print(
-                $"Device pairing code for {venue.DisplayLabel}: {result.Value.PairingCode} (expires {result.Value.ExpiresAt.ToLocalTime():g}).",
+                $"Device pairing code for {venue.DisplayLabel}: {result.Value.PairingCode} (expires {VenueTimeZone.Format(venue, result.Value.ExpiresAt, "g")}).",
                 "PartyPulse");
             return;
         }
@@ -1289,7 +1312,7 @@ public sealed class Plugin : IDalamudPlugin
         if (result.Success && result.Value is not null)
         {
             ChatGui.Print(
-                $"Created venue user '{displayName}'. Invite code: {result.Value.InviteCode} (expires {result.Value.InviteExpiresAt.ToLocalTime():g}).",
+                $"Created venue user '{displayName}'. Invite code: {result.Value.InviteCode} (expires {VenueTimeZone.Format(venue, result.Value.InviteExpiresAt, "g")}).",
                 "PartyPulse");
             return;
         }
@@ -1351,7 +1374,7 @@ public sealed class Plugin : IDalamudPlugin
         if (result.Success && result.Value is not null)
         {
             ChatGui.Print(
-                $"Recovery code for '{user.DisplayName}': {result.Value.RecoveryCode} (expires {result.Value.RecoveryCodeExpiresAt.ToLocalTime():g}).",
+                $"Recovery code for '{user.DisplayName}': {result.Value.RecoveryCode} (expires {VenueTimeZone.Format(venue, result.Value.RecoveryCodeExpiresAt, "g")}).",
                 "PartyPulse");
             return;
         }
@@ -1371,7 +1394,7 @@ public sealed class Plugin : IDalamudPlugin
         if (result.Success && result.Value is not null)
         {
             ChatGui.Print(
-                $"Restored venue user '{user.DisplayName}'. Invite code: {result.Value.InviteCode} (expires {result.Value.InviteExpiresAt.ToLocalTime():g}). Permissions remain cleared until reassigned.",
+                $"Restored venue user '{user.DisplayName}'. Invite code: {result.Value.InviteCode} (expires {VenueTimeZone.Format(venue, result.Value.InviteExpiresAt, "g")}). Permissions remain cleared until reassigned.",
                 "PartyPulse");
             return;
         }
@@ -1417,7 +1440,7 @@ public sealed class Plugin : IDalamudPlugin
         {
             var period = result.Value.Lifetime
                 ? "lifetime"
-                : $"until {result.Value.EndsAt!.Value.ToLocalTime():g}";
+                : $"until {VenueTimeZone.Format(venue, result.Value.EndsAt!.Value, "g")}";
             ChatGui.Print(
                 $"Sold VIP to {request.CharacterName} @ {request.WorldName} ({period}).",
                 "PartyPulse");
@@ -1781,7 +1804,7 @@ public sealed class Plugin : IDalamudPlugin
             await TimedMacros.LoadAsync(venue, true, LifetimeToken);
             await OpeningPublications.LoadAsync(venue, true, LifetimeToken);
             ChatGui.Print(
-                $"Started opening #{result.Value.OpeningId} until {result.Value.ClosesAt.ToLocalTime():g} at {result.Value.AddressDisplay}.",
+                $"Started opening #{result.Value.OpeningId} until {VenueTimeZone.Format(venue, result.Value.ClosesAt, "g")} at {result.Value.AddressDisplay}.",
                 "PartyPulse");
             return;
         }
@@ -1829,14 +1852,14 @@ public sealed class Plugin : IDalamudPlugin
 
     private async Task GenerateOpeningPublicationsAndReportAsync(
         VenueConnectionConfiguration venue,
-        long openingId,
+        OpeningPublicationOpeningSummary opening,
         string channelCode)
     {
         var result = await OpeningPublications.GenerateAsync(
-            venue, openingId, channelCode, LifetimeToken);
+            venue, opening, channelCode, LifetimeToken);
         if (result.Success)
         {
-            ChatGui.Print($"Generated {channelCode} text for opening #{openingId}.", "PartyPulse");
+            ChatGui.Print($"Generated {channelCode} text for opening #{opening.OpeningId}.", "PartyPulse");
             return;
         }
 
@@ -1926,7 +1949,7 @@ public sealed class Plugin : IDalamudPlugin
             await TimedMacros.LoadAsync(venue, true, LifetimeToken);
             await OpeningPublications.LoadAsync(venue, true, LifetimeToken);
             ChatGui.Print(
-                $"{(openingId is null ? "Scheduled" : "Updated")} opening #{result.Value.OpeningId} for {result.Value.OpensAt.ToLocalTime():g}.",
+                $"{(openingId is null ? "Scheduled" : "Updated")} opening #{result.Value.OpeningId} for {VenueTimeZone.Format(venue, result.Value.OpensAt, "g")}.",
                 "PartyPulse");
             return;
         }
@@ -2017,7 +2040,7 @@ public sealed class Plugin : IDalamudPlugin
             await TimedMacros.LoadAsync(venue, true, LifetimeToken);
             await OpeningPublications.LoadAsync(venue, true, LifetimeToken);
             ChatGui.Print(
-                $"{(bookingId is null ? "Scheduled" : "Updated")} {result.Value.DjName} for {result.Value.StartsAt.ToLocalTime():g}.",
+                $"{(bookingId is null ? "Scheduled" : "Updated")} {result.Value.DjName} for {VenueTimeZone.Format(venue, result.Value.StartsAt, "g")}.",
                 "PartyPulse");
             return;
         }
@@ -2200,7 +2223,7 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         ChatGui.Print(
-            $"Started {currentMacro.DisplayName}. Shared timer reset until {result.Value.NextDueAt.ToLocalTime():t}.",
+            $"Started {currentMacro.DisplayName}. Shared timer reset until {VenueTimeZone.Format(venue, result.Value.NextDueAt, "t")}.",
             "PartyPulse");
     }
 

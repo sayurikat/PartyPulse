@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
 using Dalamud.Plugin.Services;
@@ -125,7 +126,7 @@ public sealed class OpeningPublicationManagementManager : IDisposable
 
     public Task<ApiResult<GenerateOpeningPublicationsResponse>> GenerateAsync(
         VenueConnectionConfiguration venue,
-        long openingId,
+        OpeningPublicationOpeningSummary opening,
         string channelCode,
         CancellationToken cancellationToken) =>
         WithAuthorizedMutationAsync(
@@ -133,8 +134,12 @@ public sealed class OpeningPublicationManagementManager : IDisposable
             async context =>
             {
                 var result = await apiClient.GenerateOpeningPublicationsAsync(
-                    context.BaseUri!, context.AccessToken!, openingId,
-                    new GenerateOpeningPublicationsRequest(channelCode), cancellationToken);
+                    context.BaseUri!, context.AccessToken!, opening.OpeningId,
+                    new GenerateOpeningPublicationsRequest(
+                        channelCode,
+                        VenueTimeZone.Format(venue, opening.OpensAt, "MMM d", CultureInfo.GetCultureInfo("en-US")),
+                        VenueTimeZone.Format(venue, opening.OpensAt, "h tt", CultureInfo.GetCultureInfo("en-US"))),
+                    cancellationToken);
                 if (result.Success) await RefreshCoreAsync(venue, context, cancellationToken);
                 return result;
             },

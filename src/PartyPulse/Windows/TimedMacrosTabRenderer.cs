@@ -7,6 +7,7 @@ using Dalamud.Interface.Utility;
 using PartyPulse.Api;
 using PartyPulse.Models;
 using PartyPulse.TimedMacros;
+using PartyPulse.Services;
 
 namespace PartyPulse.Windows;
 
@@ -56,7 +57,7 @@ public sealed class TimedMacrosTabRenderer(Plugin plugin)
             opening.AddressPlot,
             out locationMessage);
 
-        DrawOpeningStatus(opening, atAddress, locationMessage);
+        DrawOpeningStatus(venue, opening, atAddress, locationMessage);
         ImGui.Spacing();
         DrawExecutionTable(venue, snapshot, view, opening, atAddress, isBusy);
 
@@ -73,6 +74,7 @@ public sealed class TimedMacrosTabRenderer(Plugin plugin)
     }
 
     private static void DrawOpeningStatus(
+        VenueConnectionConfiguration venue,
         TimedMacroOpeningSummary? opening,
         bool atAddress,
         string locationMessage)
@@ -86,7 +88,7 @@ public sealed class TimedMacrosTabRenderer(Plugin plugin)
         }
 
         ImGui.TextUnformatted(opening.Title ?? $"Opening #{opening.OpeningId}");
-        ImGui.TextDisabled($"{opening.OpensAt.ToLocalTime():g} – {opening.ClosesAt.ToLocalTime():g}");
+        ImGui.TextDisabled($"{VenueTimeZone.Format(venue, opening.OpensAt, "g")} – {VenueTimeZone.Format(venue, opening.ClosesAt, "g")}");
         ImGui.TextDisabled(opening.AddressDisplay);
         if (!atAddress)
         {
@@ -144,7 +146,7 @@ public sealed class TimedMacrosTabRenderer(Plugin plugin)
             ImGui.TextUnformatted(FormatInterval(macro.IntervalMinutes));
 
             ImGui.TableSetColumnIndex(2);
-            ImGui.TextUnformatted(macro.LastExecutedAt?.ToLocalTime().ToString("t") ?? "Not this opening");
+            ImGui.TextUnformatted(macro.LastExecutedAt is { } lastExecuted ? VenueTimeZone.Format(venue, lastExecuted, "t") : "Not this opening");
 
             ImGui.TableSetColumnIndex(3);
             DrawCountdown(macro, opening, atAddress, now);

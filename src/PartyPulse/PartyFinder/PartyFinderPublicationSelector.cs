@@ -17,7 +17,8 @@ public static class PartyFinderPublicationSelector
 {
     public static ActivePartyFinderPublication? Resolve(
         OpeningPublicationContextResponse? context,
-        DateTimeOffset serverNow)
+        DateTimeOffset serverNow,
+        TimeZoneInfo displayTimeZone)
     {
         if (context is null) return null;
 
@@ -32,9 +33,9 @@ public static class PartyFinderPublicationSelector
         if (active is not null)
             return Create(active, OpeningPublicationCodes.PartyFinderOpeningDay, true);
 
-        var localDate = serverNow.ToLocalTime().Date;
+        var localDate = TimeZoneInfo.ConvertTime(serverNow, displayTimeZone).Date;
         var sameDay = openings.FirstOrDefault(opening =>
-            opening.OpensAt.ToLocalTime().Date == localDate);
+            TimeZoneInfo.ConvertTime(opening.OpensAt, displayTimeZone).Date == localDate);
         if (sameDay is not null)
             return Create(sameDay, OpeningPublicationCodes.PartyFinderOpeningDay, true);
 

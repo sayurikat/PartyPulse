@@ -9,6 +9,7 @@ using PartyPulse.Api;
 using PartyPulse.Models;
 using PartyPulse.Vip;
 using PartyPulse.TimedMacros;
+using PartyPulse.Services;
 
 namespace PartyPulse.Windows;
 
@@ -218,7 +219,7 @@ public sealed class VipTabRenderer(Plugin plugin)
             if (context.CurrentOpening is { } opening)
             {
                 ImGui.SameLine();
-                ImGui.TextDisabled($"Opening #{opening.OpeningId} until {opening.ClosesAt.ToLocalTime():g}");
+                ImGui.TextDisabled($"Opening #{opening.OpeningId} until {VenueTimeZone.Format(venue, opening.ClosesAt, "g")}");
             }
             else
             {
@@ -293,7 +294,7 @@ public sealed class VipTabRenderer(Plugin plugin)
             if (context.CurrentOpening is { } opening)
             {
                 ImGui.TextWrapped(
-                    $"#{opening.OpeningId}: {opening.OpensAt.ToLocalTime():g} – {opening.ClosesAt.ToLocalTime():g} at {opening.AddressDisplay}");
+                    $"#{opening.OpeningId}: {VenueTimeZone.Format(venue, opening.OpensAt, "g")} – {VenueTimeZone.Format(venue, opening.ClosesAt, "g")} at {opening.AddressDisplay}");
                 ImGui.BeginDisabled(isBusy);
                 if (ImGui.Button("Close current opening"))
                 {
@@ -481,7 +482,7 @@ public sealed class VipTabRenderer(Plugin plugin)
             ImGui.EndDisabled();
         }
 
-        DrawSubscriptionHistory(view, player.VipPlayerId);
+        DrawSubscriptionHistory(view, player.VipPlayerId, venue);
 
         if (view.Capabilities.CanSell)
         {
@@ -626,7 +627,7 @@ public sealed class VipTabRenderer(Plugin plugin)
             "The sale is added to your unpaid-to-club total. Shift settlement will be implemented separately.");
     }
 
-    private static void DrawSubscriptionHistory(VipManagementViewResponse view, int vipPlayerId)
+    private static void DrawSubscriptionHistory(VipManagementViewResponse view, int vipPlayerId, VenueConnectionConfiguration venue)
     {
         var subscriptions = view.Subscriptions
             .Where(subscription => subscription.VipPlayerId == vipPlayerId)
@@ -664,13 +665,13 @@ public sealed class VipTabRenderer(Plugin plugin)
             ImGui.TableSetColumnIndex(1);
             ImGui.TextUnformatted($"{subscription.PackageName} ({subscription.PurchasePriceGil:N0} gil)");
             ImGui.TableSetColumnIndex(2);
-            ImGui.TextUnformatted(subscription.PurchasedAt.ToLocalTime().ToString("g"));
+            ImGui.TextUnformatted(VenueTimeZone.Format(venue, subscription.PurchasedAt, "g"));
             ImGui.TableSetColumnIndex(3);
-            ImGui.TextUnformatted(subscription.StartsAt.ToLocalTime().ToString("g"));
+            ImGui.TextUnformatted(VenueTimeZone.Format(venue, subscription.StartsAt, "g"));
             ImGui.TableSetColumnIndex(4);
             ImGui.TextUnformatted(subscription.Lifetime
                 ? "Lifetime"
-                : subscription.EndsAt!.Value.ToLocalTime().ToString("g"));
+                : VenueTimeZone.Format(venue, subscription.EndsAt!.Value, "g"));
             ImGui.TableSetColumnIndex(5);
             ImGui.TextUnformatted(subscription.SellerDisplayName);
             if (subscription.PaidToVenueAt is null)
@@ -783,7 +784,7 @@ public sealed class VipTabRenderer(Plugin plugin)
             ImGui.TableSetColumnIndex(2);
             ImGui.TextUnformatted(player.HasLifetime
                 ? "Lifetime"
-                : player.LastSubscriptionEndsAt?.ToLocalTime().ToString("g") ?? "None");
+                : player.LastSubscriptionEndsAt is { } lastSubscriptionEnd ? VenueTimeZone.Format(venue, lastSubscriptionEnd, "g") : "None");
             ImGui.TableSetColumnIndex(3);
             ImGui.TextUnformatted(characterCount.ToString(CultureInfo.InvariantCulture));
 

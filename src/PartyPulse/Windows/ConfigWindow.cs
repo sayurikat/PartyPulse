@@ -217,7 +217,7 @@ public sealed class ConfigWindow : Window, IDisposable
                     DrawStatusText(snapshot.Message, snapshot.Status);
                     if (snapshot.AccessTokenExpiresAt is { } expiresAt)
                     {
-                        ImGui.TextDisabled($"Access token expires: {expiresAt.ToLocalTime():g}");
+                        ImGui.TextDisabled($"Access token expires: {VenueTimeZone.Format(venue, expiresAt, "g")}");
                     }
 
                     if (ImGui.Button("Save and authenticate"))
@@ -382,6 +382,27 @@ public sealed class ConfigWindow : Window, IDisposable
             dirty = true;
         }
 
+        var timeZone = VenueTimeZone.Resolve(venue);
+        ImGui.SetNextItemWidth(460 * ImGuiHelpers.GlobalScale);
+        if (ImGui.BeginCombo("Display/input timezone", timeZone.DisplayName))
+        {
+            foreach (var option in VenueTimeZone.Available)
+            {
+                var selected = string.Equals(option.Id, timeZone.Id, StringComparison.Ordinal);
+                if (ImGui.Selectable(option.DisplayName, selected))
+                {
+                    venue.DisplayTimeZoneId = option.Id;
+                    timeZone = option;
+                    dirty = true;
+                }
+
+                if (selected)
+                    ImGui.SetItemDefaultFocus();
+            }
+            ImGui.EndCombo();
+        }
+        ImGui.TextDisabled($"Venue time now: {VenueTimeZone.Convert(timeZone, DateTimeOffset.UtcNow):ddd yyyy-MM-dd HH:mm zzz} ({timeZone.Id})");
+
         var deviceName = venue.DeviceName;
         ImGui.SetNextItemWidth(260 * ImGuiHelpers.GlobalScale);
         if (ImGui.InputText("Device name", ref deviceName, 50))
@@ -396,7 +417,7 @@ public sealed class ConfigWindow : Window, IDisposable
         ImGui.TextUnformatted($"Authorized device ID: {venue.DeviceId}");
         if (venue.RefreshTokenUpdatedAt is { } updatedAt)
         {
-            ImGui.TextDisabled($"Refresh token last updated: {updatedAt.ToLocalTime():g}");
+            ImGui.TextDisabled($"Refresh token last updated: {VenueTimeZone.Format(venue, updatedAt, "g")}");
         }
     }
 
@@ -418,7 +439,7 @@ public sealed class ConfigWindow : Window, IDisposable
         }
 
         ImGui.TextWrapped($"Device code: {pairing.PairingCode}");
-        ImGui.TextDisabled($"Expires: {pairing.ExpiresAt.ToLocalTime():g}");
+        ImGui.TextDisabled($"Expires: {VenueTimeZone.Format(venue, pairing.ExpiresAt, "g")}");
         if (ImGui.Button("Copy device code"))
         {
             ImGui.SetClipboardText(pairing.PairingCode);

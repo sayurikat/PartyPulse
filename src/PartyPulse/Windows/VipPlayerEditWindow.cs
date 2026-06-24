@@ -5,6 +5,8 @@ using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Utility;
 using Dalamud.Interface.Windowing;
 using PartyPulse.Api;
+using PartyPulse.Models;
+using PartyPulse.Services;
 
 namespace PartyPulse.Windows;
 
@@ -249,14 +251,14 @@ public sealed class VipPlayerEditWindow : Window, IDisposable
             ImGui.TextUnformatted($"{subscription.PackageName}\n{subscription.PurchasePriceGil:N0} gil");
             ImGui.TableSetColumnIndex(2);
             ImGui.TextUnformatted(subscription.Lifetime
-                ? $"{subscription.StartsAt.ToLocalTime():g}\nLifetime"
-                : $"{subscription.StartsAt.ToLocalTime():g}\n{subscription.EndsAt!.Value.ToLocalTime():g}");
+                ? $"{VenueTimeZone.Format(venue, subscription.StartsAt, "g")}\nLifetime"
+                : $"{VenueTimeZone.Format(venue, subscription.StartsAt, "g")}\n{VenueTimeZone.Format(venue, subscription.EndsAt!.Value, "g")}");
             ImGui.TableSetColumnIndex(3);
             ImGui.TextUnformatted(subscription.SellerDisplayName);
             ImGui.TableSetColumnIndex(4);
             if (subscription.IsSettled)
             {
-                ImGui.TextUnformatted($"Settled\n{subscription.PaidToVenueAt!.Value.ToLocalTime():g}");
+                ImGui.TextUnformatted($"Settled\n{VenueTimeZone.Format(venue, subscription.PaidToVenueAt!.Value, "g")}");
             }
             else if (subscription.IsInPendingSettlement)
             {

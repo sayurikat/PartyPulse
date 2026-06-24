@@ -6,6 +6,7 @@ using Dalamud.Interface.Utility;
 using Dalamud.Interface.Windowing;
 using PartyPulse.Api;
 using PartyPulse.Models;
+using PartyPulse.Services;
 using PartyPulse.Vip;
 
 namespace PartyPulse.Windows;
@@ -78,7 +79,7 @@ public sealed class VipArrivalWindow : Window, IDisposable
         }
 
         ImGui.TextUnformatted(opening.Title ?? $"Opening #{opening.OpeningId}");
-        ImGui.TextDisabled($"{opening.OpensAt.ToLocalTime():g} – {opening.ClosesAt.ToLocalTime():g}");
+        ImGui.TextDisabled($"{VenueTimeZone.Format(venue, opening.OpensAt, "g")} – {VenueTimeZone.Format(venue, opening.ClosesAt, "g")}");
         ImGui.TextDisabled(opening.AddressDisplay);
 
         if (!IsAtOpeningAddress(opening, out var locationMessage))
@@ -166,10 +167,10 @@ public sealed class VipArrivalWindow : Window, IDisposable
             ImGui.TextDisabled(isNearby ? $"Nearby: {nearby!.DisplayName}" : "Not currently nearby");
 
             ImGui.TableSetColumnIndex(1);
-            ImGui.TextUnformatted(arrival.FirstSeenAt.ToLocalTime().ToString("t"));
+            ImGui.TextUnformatted(VenueTimeZone.Format(venue, arrival.FirstSeenAt, "t"));
 
             ImGui.TableSetColumnIndex(2);
-            DrawActionState(arrival.WelcomedAt, "Pending");
+            DrawActionState(venue, arrival.WelcomedAt, "Pending");
 
             ImGui.TableSetColumnIndex(3);
             if (!arrival.RenewalRequired)
@@ -178,7 +179,7 @@ public sealed class VipArrivalWindow : Window, IDisposable
             }
             else
             {
-                DrawActionState(arrival.RenewalRemindedAt, "Pending");
+                DrawActionState(venue, arrival.RenewalRemindedAt, "Pending");
             }
 
             ImGui.TableSetColumnIndex(4);
@@ -282,11 +283,11 @@ public sealed class VipArrivalWindow : Window, IDisposable
         return matches;
     }
 
-    private static void DrawActionState(DateTimeOffset? completedAt, string pendingText)
+    private static void DrawActionState(VenueConnectionConfiguration venue, DateTimeOffset? completedAt, string pendingText)
     {
         if (completedAt is { } value)
         {
-            ImGui.TextUnformatted(value.ToLocalTime().ToString("t"));
+            ImGui.TextUnformatted(VenueTimeZone.Format(venue, value, "t"));
         }
         else
         {

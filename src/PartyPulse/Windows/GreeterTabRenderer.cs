@@ -7,6 +7,7 @@ using Dalamud.Interface.Utility;
 using PartyPulse.Api;
 using PartyPulse.Greeter;
 using PartyPulse.Models;
+using PartyPulse.Services;
 
 namespace PartyPulse.Windows;
 
@@ -43,7 +44,7 @@ public sealed class GreeterTabRenderer(Plugin plugin)
         }
 
         SynchronizeMacroDrafts(context);
-        DrawOpeningAndDj(context);
+        DrawOpeningAndDj(venue, context);
 
         var opening = context.CurrentOpening;
         var locationMessage = string.Empty;
@@ -75,7 +76,7 @@ public sealed class GreeterTabRenderer(Plugin plugin)
             else
             {
                 TrackNearbyPlayers(venue, opening);
-                DrawTargetStatus(context);
+                DrawTargetStatus(context, venue);
                 DrawArrivalTracker(venue, context, busy);
             }
         }
@@ -96,12 +97,12 @@ public sealed class GreeterTabRenderer(Plugin plugin)
         ImGui.EndTabItem();
     }
 
-    private static void DrawOpeningAndDj(GreeterContextResponse context)
+    private static void DrawOpeningAndDj(VenueConnectionConfiguration venue, GreeterContextResponse context)
     {
         if (context.CurrentOpening is { } opening)
         {
             ImGui.TextUnformatted(opening.Title ?? $"Opening #{opening.OpeningId}");
-            ImGui.TextDisabled($"{opening.OpensAt.ToLocalTime():g} – {opening.ClosesAt.ToLocalTime():g}");
+            ImGui.TextDisabled($"{VenueTimeZone.Format(venue, opening.OpensAt, "g")} – {VenueTimeZone.Format(venue, opening.ClosesAt, "g")}");
             ImGui.TextDisabled(opening.AddressDisplay);
         }
 
@@ -109,7 +110,7 @@ public sealed class GreeterTabRenderer(Plugin plugin)
         if (context.CurrentDj is { } dj)
         {
             ImGui.TextUnformatted($"Current DJ: {dj.Name}{(dj.Resident ? " (Resident)" : string.Empty)}");
-            ImGui.TextDisabled($"{dj.StartsAt.ToLocalTime():t} – {dj.EndsAt.ToLocalTime():t}");
+            ImGui.TextDisabled($"{VenueTimeZone.Format(venue, dj.StartsAt, "t")} – {VenueTimeZone.Format(venue, dj.EndsAt, "t")}");
             if (!string.IsNullOrWhiteSpace(dj.TwitchUrl))
                 ImGui.TextWrapped(dj.TwitchUrl);
         }
@@ -135,7 +136,7 @@ public sealed class GreeterTabRenderer(Plugin plugin)
             "Greeting and dismissal state is shared by all greeters for this opening.");
     }
 
-    private void DrawTargetStatus(GreeterContextResponse context)
+    private void DrawTargetStatus(GreeterContextResponse context, VenueConnectionConfiguration venue)
     {
         ImGui.Spacing();
         ImGui.TextUnformatted("Current target");
@@ -162,7 +163,7 @@ public sealed class GreeterTabRenderer(Plugin plugin)
                 ? new Vector4(0.82f, 0.55f, 1f, 1f)
                 : new Vector4(0.72f, 0.72f, 0.72f, 1f),
             arrival.IsVip ? "VIP" : "Regular guest");
-        ImGui.TextUnformatted(GetArrivalState(arrival));
+        ImGui.TextUnformatted(GetArrivalState(venue, arrival));
     }
 
     private void DrawArrivalTracker(
@@ -226,10 +227,10 @@ public sealed class GreeterTabRenderer(Plugin plugin)
                 arrival.IsVip ? "Yes" : "No");
 
             ImGui.TableSetColumnIndex(2);
-            ImGui.TextUnformatted(arrival.FirstSeenAt.ToLocalTime().ToString("t"));
+            ImGui.TextUnformatted(VenueTimeZone.Format(venue, arrival.FirstSeenAt, "t"));
 
             ImGui.TableSetColumnIndex(3);
-            ImGui.TextUnformatted(GetArrivalState(arrival));
+            ImGui.TextUnformatted(GetArrivalState(venue, arrival));
 
             ImGui.TableSetColumnIndex(4);
             if (arrival.CompletedAt is null)
@@ -346,12 +347,12 @@ public sealed class GreeterTabRenderer(Plugin plugin)
             string.Equals(value.MacroCode, code, StringComparison.OrdinalIgnoreCase));
     }
 
-    private static string GetArrivalState(GreeterArrivalSummary arrival)
+    private static string GetArrivalState(VenueConnectionConfiguration venue, GreeterArrivalSummary arrival)
     {
         if (arrival.GreetedAt is { } greeted)
-            return $"Greeted {greeted.ToLocalTime():t}";
+            return $"Greeted {VenueTimeZone.Format(venue, greeted, "t")}";
         if (arrival.DismissedAt is { } dismissed)
-            return $"Dismissed {dismissed.ToLocalTime():t}";
+            return $"Dismissed {VenueTimeZone.Format(venue, dismissed, "t")}";
         return "Waiting";
     }
 

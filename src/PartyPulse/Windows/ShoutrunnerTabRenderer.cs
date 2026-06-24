@@ -7,6 +7,7 @@ using Dalamud.Interface.Utility;
 using PartyPulse.Api;
 using PartyPulse.Models;
 using PartyPulse.Shoutrunner;
+using PartyPulse.Services;
 
 namespace PartyPulse.Windows;
 
@@ -51,7 +52,7 @@ public sealed class ShoutrunnerTabRenderer(Plugin plugin)
         if (view.Capabilities.CanManageShoutrunnerTemplates &&
             ImGui.CollapsingHeader("Shoutrunner template editor"))
         {
-            ImGui.TextDisabled("Templates support <theme> and <djs>.");
+            ImGui.TextDisabled("Templates support <theme>, <djs>, <date>, and <time>.");
             foreach (var template in view.Templates.Where(value => value.ChannelCode == "shoutrunner"))
                 DrawTemplate(venue, template, busy);
         }
@@ -59,7 +60,7 @@ public sealed class ShoutrunnerTabRenderer(Plugin plugin)
         DrawConfirmations(
             venue,
             view,
-            ShoutrunnerPublicationSelector.Resolve(view, snapshot.EstimatedServerNow));
+            ShoutrunnerPublicationSelector.Resolve(view, snapshot.EstimatedServerNow, VenueTimeZone.Resolve(venue)));
         ImGui.EndTabItem();
     }
 
@@ -73,7 +74,18 @@ public sealed class ShoutrunnerTabRenderer(Plugin plugin)
         ImGui.TextUnformatted("Shoutrunner tools");
         ImGui.Separator();
 
-        var publication = ShoutrunnerPublicationSelector.Resolve(view, serverNow);
+        var publication = ShoutrunnerPublicationSelector.Resolve(view, serverNow, VenueTimeZone.Resolve(venue));
+        var returnOpening = ResolveReturnOpening(view, serverNow);
+        if (ImGui.Button("Return to venue"))
+            plugin.ReturnShoutrunnerToVenue(venue, returnOpening);
+        if (ImGui.IsItemHovered())
+        {
+            var worldName = returnOpening?.AddressWorldName ?? venue.AddressWorldName;
+            var cityName = returnOpening?.AddressCityName ?? venue.AddressCityName;
+            var ward = returnOpening?.AddressWard ?? venue.AddressWard;
+            var plot = returnOpening?.AddressPlot ?? venue.AddressPlot;
+            ImGui.SetTooltip($"/li {worldName} {cityName} {ward} {plot}");
+        }
         var profile = plugin.ShoutrunnerDuty.GetProfile(venue);
         if (publication is null)
         {
@@ -84,7 +96,7 @@ public sealed class ShoutrunnerTabRenderer(Plugin plugin)
 
         var route = plugin.ShoutrunnerDuty.GetRouteSnapshot(venue, view, publication);
         ImGui.TextUnformatted($"Opening #{publication.OpeningId} — {publication.DisplayName}");
-        ImGui.TextDisabled($"{publication.OpensAt.ToLocalTime():ddd yyyy-MM-dd HH:mm} to {publication.ClosesAt.ToLocalTime():yyyy-MM-dd HH:mm}");
+        ImGui.TextDisabled($"{VenueTimeZone.Format(venue, publication.OpensAt, "ddd yyyy-MM-dd HH:mm")} to {VenueTimeZone.Format(venue, publication.ClosesAt, "yyyy-MM-dd HH:mm")}");
 
         if (route.CurrentLocation is null)
             ImGui.TextDisabled("Current game location is not available.");
@@ -104,14 +116,27 @@ public sealed class ShoutrunnerTabRenderer(Plugin plugin)
             new Vector2(-1, 0),
             $"{route.CompletedLocations}/{route.TotalLocations} locations");
 
-        ImGui.BeginDisabled(
-            busy ||
-            route.NextDestination is null ||
-            route.IsAtNextDestination ||
-            route.TravelCooldownActive);
-        if (ImGui.Button(route.CompletedLocations == 0 ? "Start" : "Next"))
-            plugin.TravelShoutrunner(venue, view, publication);
-        ImGui.EndDisabled();
+        var roundComplete = route.TotalLocations > 0 && route.CompletedLocations == route.TotalLocations;
+        if (roundComplete)
+        {
+            ImGui.BeginDisabled(busy);
+            if (ImGui.Button("Complete"))
+                plugin.CompleteShoutrunnerRound(venue, view, publication);
+            ImGui.EndDisabled();
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Finish this round and clear progress without creating a reset log.");
+        }
+        else
+        {
+            ImGui.BeginDisabled(
+                busy ||
+                route.NextDestination is null ||
+                route.IsAtNextDestination ||
+                route.TravelCooldownActive);
+            if (ImGui.Button(route.CompletedLocations == 0 ? "Start" : "Next"))
+                plugin.TravelShoutrunner(venue, view, publication);
+            ImGui.EndDisabled();
+        }
         if (route.TravelCooldownActive)
         {
             ImGui.SameLine();
@@ -119,7 +144,7 @@ public sealed class ShoutrunnerTabRenderer(Plugin plugin)
         }
 
         ImGui.SameLine();
-        ImGui.BeginDisabled(busy || plugin.IsGameMacroBusy || !route.IsAtNextDestination);
+        ImGui.BeginDisabled(busy || plugin.IsGameMacroBusy || route.TravelCooldownActive || !route.IsAtNextDestination);
         if (ImGui.Button("Shout"))
             plugin.RunShoutrunnerShout(venue, view, publication);
         ImGui.EndDisabled();
@@ -138,6 +163,19 @@ public sealed class ShoutrunnerTabRenderer(Plugin plugin)
         ImGui.EndChild();
 
         DrawPendingReportControls(venue, profile, busy);
+    }
+
+    private static OpeningPublicationOpeningSummary? ResolveReturnOpening(
+        OpeningPublicationContextResponse view,
+        DateTimeOffset serverNow)
+    {
+        var available = view.Openings
+            .Where(opening => opening.ClosesAt > serverNow)
+            .OrderBy(opening => opening.OpensAt)
+            .ThenBy(opening => opening.OpeningId)
+            .ToArray();
+        return available.FirstOrDefault(opening => opening.OpensAt <= serverNow)
+               ?? available.FirstOrDefault(opening => opening.OpensAt > serverNow);
     }
 
     private void DrawPendingReportControls(
@@ -176,7 +214,7 @@ public sealed class ShoutrunnerTabRenderer(Plugin plugin)
             if (ImGui.Checkbox("##Selected", ref allSelected))
                 plugin.ShoutrunnerDuty.SetDatacenterSelected(venue, dcWorlds, allSelected);
             ImGui.SameLine();
-            if (ImGui.TreeNode($"{datacenter.Key} ({selectedCount}/{dcWorlds.Length})"))
+            if (ImGui.TreeNode($"{datacenter.Key} ({selectedCount}/{dcWorlds.Length})###ShoutrunnerDcTree{datacenter.Key}"))
             {
                 foreach (var world in dcWorlds)
                 {

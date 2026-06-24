@@ -214,6 +214,57 @@ public sealed class ShoutrunnerDutyManager(
         return ShoutrunnerActionResult.Ok("Shoutrunner progress reset and logged locally.");
     }
 
+
+    public ShoutrunnerActionResult CompleteRound(
+        VenueConnectionConfiguration venue,
+        OpeningPublicationContextResponse context,
+        ActiveShoutrunnerPublication publication)
+    {
+        lock (syncRoot)
+        {
+            var profile = GetProfile(venue);
+            EnsureOpeningLocked(profile, publication.OpeningId);
+            var route = ShoutrunnerRoutePlanner.Build(
+                context.Worlds,
+                profile,
+                TryGetCurrentLocation(out var location) ? location : null,
+                DateTimeOffset.UtcNow);
+            if (route.TotalLocations == 0)
+                return ShoutrunnerActionResult.Fail("Select at least one world before completing a round.");
+            if (route.CompletedLocations != route.TotalLocations)
+                return ShoutrunnerActionResult.Fail("The current Shoutrunner round is not complete yet.");
+
+            profile.CompletedDestinationKeys.Clear();
+            // Keep the post-shout cooldown so starting the next round cannot cut off
+            // the final macro. It expires normally after ten seconds.
+            configuration.Save();
+        }
+
+        return ShoutrunnerActionResult.Ok("Shoutrunner round completed. Progress is ready for a new round.");
+    }
+
+    public ShoutrunnerActionResult ReturnToVenue(
+        VenueConnectionConfiguration venue,
+        OpeningPublicationOpeningSummary? opening)
+    {
+        var worldName = opening?.AddressWorldName ?? venue.AddressWorldName;
+        var cityName = opening?.AddressCityName ?? venue.AddressCityName;
+        var ward = opening?.AddressWard ?? venue.AddressWard;
+        var plot = opening?.AddressPlot ?? venue.AddressPlot;
+        if (string.IsNullOrWhiteSpace(worldName) ||
+            string.IsNullOrWhiteSpace(cityName) ||
+            ward is not (> 0) ||
+            plot is not (> 0))
+        {
+            return ShoutrunnerActionResult.Fail("The current opening does not have a complete housing address.");
+        }
+
+        var command = $"/li {worldName.Trim()} {cityName.Trim()} {ward.Value} {plot.Value}";
+        return commandManager.ProcessCommand(command)
+            ? ShoutrunnerActionResult.Ok($"Started Lifestream travel back to {venue.DisplayLabel}: {command}")
+            : ShoutrunnerActionResult.Fail("Lifestream did not accept the venue return command. Make sure Lifestream is installed and loaded.");
+    }
+
     public ShoutrunnerReportBatch? CreateReportBatch(VenueConnectionConfiguration venue)
     {
         lock (syncRoot)

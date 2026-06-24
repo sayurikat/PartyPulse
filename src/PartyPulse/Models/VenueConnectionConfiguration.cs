@@ -26,6 +26,9 @@ public sealed class VenueConnectionConfiguration
     // Optional local alias. The published venue name remains in VenueName.
     public string DisplayName { get; set; } = string.Empty;
 
+    // Local-only display/input timezone for this venue profile.
+    public string DisplayTimeZoneId { get; set; } = TimeZoneInfo.Local.Id;
+
     public int DeviceId { get; set; }
 
     public string DeviceName { get; set; } = Environment.MachineName;

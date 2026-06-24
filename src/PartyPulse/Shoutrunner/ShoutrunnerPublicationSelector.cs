@@ -16,7 +16,8 @@ public static class ShoutrunnerPublicationSelector
 {
     public static ActiveShoutrunnerPublication? Resolve(
         OpeningPublicationContextResponse? context,
-        DateTimeOffset serverNow)
+        DateTimeOffset serverNow,
+        TimeZoneInfo displayTimeZone)
     {
         if (context is null) return null;
 
@@ -31,9 +32,9 @@ public static class ShoutrunnerPublicationSelector
         if (active is not null)
             return Create(active, OpeningPublicationCodes.ShoutrunnerDuringOpening);
 
-        var localDate = serverNow.ToLocalTime().Date;
+        var localDate = TimeZoneInfo.ConvertTime(serverNow, displayTimeZone).Date;
         var sameDay = openings.FirstOrDefault(opening =>
-            opening.OpensAt > serverNow && opening.OpensAt.ToLocalTime().Date == localDate);
+            opening.OpensAt > serverNow && TimeZoneInfo.ConvertTime(opening.OpensAt, displayTimeZone).Date == localDate);
         if (sameDay is not null)
             return Create(sameDay, OpeningPublicationCodes.ShoutrunnerSameDayBeforeOpening);
 
