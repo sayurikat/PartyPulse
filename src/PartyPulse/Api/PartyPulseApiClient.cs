@@ -606,6 +606,22 @@ public sealed class PartyPulseApiClient : IDisposable
                               payload.UpdatedAt != default,
             cancellationToken);
 
+    public Task<ApiResult<ReportShoutrunnerDutyResponse>> ReportShoutrunnerDutyAsync(
+        Uri baseUri,
+        string accessToken,
+        ReportShoutrunnerDutyRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<ReportShoutrunnerDutyResponse>(
+            baseUri,
+            HttpMethod.Post,
+            "api/v1/opening-publications/shoutrunner/duty-reports",
+            accessToken,
+            request,
+            static payload => payload.AcceptedCount >= 0 &&
+                              payload.DuplicateCount >= 0 &&
+                              payload.ReportedAt != default,
+            cancellationToken);
+
     public Task<ApiResult<DjViewResponse>> GetDjsAsync(
         Uri baseUri,
         string accessToken,
@@ -1149,6 +1165,7 @@ public sealed class PartyPulseApiClient : IDisposable
         payload.Capabilities is not null &&
         payload.Templates is not null &&
         payload.Openings is not null &&
+        payload.Worlds is not null &&
         payload.Templates.All(static template =>
             !string.IsNullOrWhiteSpace(template.PublicationCode) &&
             !string.IsNullOrWhiteSpace(template.ChannelCode) &&
@@ -1164,7 +1181,12 @@ public sealed class PartyPulseApiClient : IDisposable
                 !string.IsNullOrWhiteSpace(text.PublicationCode) &&
                 !string.IsNullOrWhiteSpace(text.ChannelCode) &&
                 text.MaxLines > 0 &&
-                text.MaxLineLength > 0));
+                text.MaxLineLength > 0)) &&
+        payload.Worlds.All(static world =>
+            world.WorldId > 0 &&
+            !string.IsNullOrWhiteSpace(world.WorldName) &&
+            !string.IsNullOrWhiteSpace(world.DatacenterName) &&
+            !string.IsNullOrWhiteSpace(world.RegionName));
 
     private static bool ValidateGreeterContextResponse(GreeterContextResponse payload) =>
         payload.Capabilities is not null &&

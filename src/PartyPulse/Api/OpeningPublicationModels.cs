@@ -12,11 +12,25 @@ public static class OpeningPublicationCodes
     public const string PartyFinderOpeningDay = "partyfinder.opening_day";
 }
 
+public static class ShoutrunnerDutyEventTypes
+{
+    public const string Shout = "shout";
+    public const string Reset = "reset";
+    public const string Completed = "completed";
+}
+
 public sealed record OpeningPublicationCapabilities(
     bool CanManageOpenings,
+    bool CanUseShoutrunner,
     bool CanManageShoutrunnerTemplates,
-    bool CanManagePartyFinderTemplates,
-    bool CanUsePartyFinder);
+    bool CanUsePartyFinder,
+    bool CanManagePartyFinderTemplates);
+
+public sealed record ShoutrunnerWorldSummary(
+    int WorldId,
+    string WorldName,
+    string DatacenterName,
+    string RegionName);
 
 public sealed record OpeningPublicationTemplateSummary(
     string PublicationCode,
@@ -53,11 +67,28 @@ public sealed record OpeningPublicationContextResponse(
     OpeningPublicationCapabilities Capabilities,
     DateTimeOffset ServerNow,
     IReadOnlyList<OpeningPublicationTemplateSummary> Templates,
-    IReadOnlyList<OpeningPublicationOpeningSummary> Openings);
+    IReadOnlyList<OpeningPublicationOpeningSummary> Openings,
+    IReadOnlyList<ShoutrunnerWorldSummary> Worlds);
 
 public sealed record SaveOpeningPublicationTemplateRequest(string? TemplateText);
 public sealed record GenerateOpeningPublicationsRequest(string ChannelCode);
 public sealed record SaveOpeningPublicationTextRequest(string? PublicationText);
+
+public sealed record ShoutrunnerDutyLogEntryRequest(
+    Guid ClientEntryId,
+    long OpeningId,
+    DateTimeOffset OccurredAt,
+    string EventType,
+    int CompletedLocations,
+    int TotalLocations,
+    int? WorldId,
+    string? WorldName,
+    string? DatacenterName,
+    string? CityName,
+    string? Reason);
+
+public sealed record ReportShoutrunnerDutyRequest(
+    IReadOnlyList<ShoutrunnerDutyLogEntryRequest> Entries);
 
 public sealed record SaveOpeningPublicationTemplateResponse(
     string PublicationCode,
@@ -74,3 +105,8 @@ public sealed record SaveOpeningPublicationTextResponse(
     string PublicationCode,
     string? PublicationText,
     DateTimeOffset UpdatedAt);
+
+public sealed record ReportShoutrunnerDutyResponse(
+    int AcceptedCount,
+    int DuplicateCount,
+    DateTimeOffset ReportedAt);

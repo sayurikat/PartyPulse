@@ -1,5 +1,6 @@
 using Dalamud.Configuration;
 using PartyPulse.Models;
+using PartyPulse.Shoutrunner;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -13,7 +14,7 @@ public sealed class Configuration : IPluginConfiguration
 
     private const string LegacyAzureApiBaseUrl = "https://partypulse.azurewebsites.net";
 
-    public int Version { get; set; } = 4;
+    public int Version { get; set; } = 5;
 
     public bool IsConfigWindowMovable { get; set; } = true;
 
@@ -26,6 +27,8 @@ public sealed class Configuration : IPluginConfiguration
     public Guid SelectedVenueProfileId { get; set; } = Guid.Empty;
 
     public List<VenueConnectionConfiguration> VenueConnections { get; set; } = [];
+
+    public List<ShoutrunnerProfileConfiguration> ShoutrunnerProfiles { get; set; } = [];
 
     public bool Normalize()
     {
@@ -77,6 +80,97 @@ public sealed class Configuration : IPluginConfiguration
             venue.RefreshToken ??= string.Empty;
         }
 
+        if (ShoutrunnerProfiles is null)
+        {
+            ShoutrunnerProfiles = [];
+            changed = true;
+        }
+
+        foreach (var profile in ShoutrunnerProfiles)
+        {
+            if (profile.SelectedWorldNames is null)
+            {
+                profile.SelectedWorldNames = [];
+                changed = true;
+            }
+            if (profile.CompletedDestinationKeys is null)
+            {
+                profile.CompletedDestinationKeys = [];
+                changed = true;
+            }
+            if (profile.PendingLogs is null)
+            {
+                profile.PendingLogs = [];
+                changed = true;
+            }
+
+            foreach (var entry in profile.PendingLogs)
+            {
+                if (entry.ClientEntryId == Guid.Empty)
+                {
+                    entry.ClientEntryId = Guid.NewGuid();
+                    changed = true;
+                }
+                var normalizedEventType = entry.EventType?.Trim() ?? string.Empty;
+                if (!string.Equals(entry.EventType, normalizedEventType, StringComparison.Ordinal))
+                {
+                    entry.EventType = normalizedEventType;
+                    changed = true;
+                }
+
+                var normalizedWorldName = NormalizeOptional(entry.WorldName);
+                if (!string.Equals(entry.WorldName, normalizedWorldName, StringComparison.Ordinal))
+                {
+                    entry.WorldName = normalizedWorldName;
+                    changed = true;
+                }
+
+                var normalizedDatacenterName = NormalizeOptional(entry.DatacenterName);
+                if (!string.Equals(entry.DatacenterName, normalizedDatacenterName, StringComparison.Ordinal))
+                {
+                    entry.DatacenterName = normalizedDatacenterName;
+                    changed = true;
+                }
+
+                var normalizedCityName = NormalizeOptional(entry.CityName);
+                if (!string.Equals(entry.CityName, normalizedCityName, StringComparison.Ordinal))
+                {
+                    entry.CityName = normalizedCityName;
+                    changed = true;
+                }
+
+                var normalizedReason = NormalizeOptional(entry.Reason);
+                if (!string.Equals(entry.Reason, normalizedReason, StringComparison.Ordinal))
+                {
+                    entry.Reason = normalizedReason;
+                    changed = true;
+                }
+            }
+
+            var normalizedWorlds = profile.SelectedWorldNames
+                .Where(static value => !string.IsNullOrWhiteSpace(value))
+                .Select(static value => value.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(static value => value, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (!profile.SelectedWorldNames.SequenceEqual(normalizedWorlds, StringComparer.Ordinal))
+            {
+                profile.SelectedWorldNames = normalizedWorlds;
+                changed = true;
+            }
+
+            var normalizedDestinations = profile.CompletedDestinationKeys
+                .Where(static value => !string.IsNullOrWhiteSpace(value))
+                .Select(static value => value.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (!profile.CompletedDestinationKeys.SequenceEqual(normalizedDestinations, StringComparer.Ordinal))
+            {
+                profile.CompletedDestinationKeys = normalizedDestinations;
+                changed = true;
+            }
+        }
+
         if (SelectedVenueProfileId == Guid.Empty ||
             VenueConnections.All(x => x.ProfileId != SelectedVenueProfileId))
         {
@@ -88,9 +182,9 @@ public sealed class Configuration : IPluginConfiguration
             }
         }
 
-        if (Version < 4)
+        if (Version < 5)
         {
-            Version = 4;
+            Version = 5;
             changed = true;
         }
 
@@ -100,6 +194,20 @@ public sealed class Configuration : IPluginConfiguration
     public VenueConnectionConfiguration? GetSelectedVenue() =>
         VenueConnections.FirstOrDefault(x => x.ProfileId == SelectedVenueProfileId)
         ?? VenueConnections.FirstOrDefault();
+
+    public ShoutrunnerProfileConfiguration GetShoutrunnerProfile(Guid venueProfileId)
+    {
+        var existing = ShoutrunnerProfiles.FirstOrDefault(value => value.VenueProfileId == venueProfileId);
+        if (existing is not null)
+            return existing;
+
+        var created = new ShoutrunnerProfileConfiguration { VenueProfileId = venueProfileId };
+        ShoutrunnerProfiles.Add(created);
+        return created;
+    }
+
+    private static string? NormalizeOptional(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     public void Save() => Plugin.PluginInterface.SavePluginConfig(this);
 }

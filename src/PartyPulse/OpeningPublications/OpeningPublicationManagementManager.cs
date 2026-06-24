@@ -159,6 +159,17 @@ public sealed class OpeningPublicationManagementManager : IDisposable
             ApiResult<SaveOpeningPublicationTextResponse>.Failed,
             cancellationToken);
 
+    public Task<ApiResult<ReportShoutrunnerDutyResponse>> ReportShoutrunnerDutyAsync(
+        VenueConnectionConfiguration venue,
+        ReportShoutrunnerDutyRequest request,
+        CancellationToken cancellationToken) =>
+        WithAuthorizedMutationAsync(
+            venue,
+            context => apiClient.ReportShoutrunnerDutyAsync(
+                context.BaseUri!, context.AccessToken!, request, cancellationToken),
+            ApiResult<ReportShoutrunnerDutyResponse>.Failed,
+            cancellationToken);
+
     public void RemoveProfile(Guid profileId) => snapshots.TryRemove(profileId, out _);
 
     public void Clear(string message = "Opening publication data was cleared.")

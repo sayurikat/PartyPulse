@@ -19,6 +19,7 @@ using PartyPulse.OpeningPublications;
 using PartyPulse.PartyFinder;
 using PartyPulse.Models;
 using PartyPulse.SelfService;
+using PartyPulse.Shoutrunner;
 using PartyPulse.Services;
 using PartyPulse.VenueUsers;
 using PartyPulse.Vip;
@@ -145,6 +146,13 @@ public sealed class Plugin : IDalamudPlugin
             ObjectTable,
             TargetManager,
             Log);
+        ShoutrunnerDuty = new ShoutrunnerDutyManager(
+            Configuration,
+            CommandManager,
+            PlayerState,
+            ClientState,
+            DataManager,
+            gameMacroExecutionService);
         Finance = new FinanceManagementManager(
             Configuration,
             Authentication,
@@ -220,6 +228,8 @@ public sealed class Plugin : IDalamudPlugin
     public OpeningPublicationManagementManager OpeningPublications { get; }
 
     public PartyFinderAutomationService PartyFinderAutomation { get; }
+
+    public ShoutrunnerDutyManager ShoutrunnerDuty { get; }
 
     public NearbyVipPlayerTracker NearbyVipPlayers { get; }
 
@@ -441,6 +451,7 @@ public sealed class Plugin : IDalamudPlugin
         Finance.RemoveProfile(venue.ProfileId);
         Notifications.RemoveProfile(venue.ProfileId);
         Configuration.VenueConnections.RemoveAll(x => x.ProfileId == venue.ProfileId);
+        Configuration.ShoutrunnerProfiles.RemoveAll(x => x.VenueProfileId == venue.ProfileId);
         Configuration.Normalize();
         Configuration.Save();
         ChatGui.Print($"Removed {venue.DisplayLabel} from this plugin. Server-side membership was not changed.", "PartyPulse");
@@ -870,6 +881,44 @@ public sealed class Plugin : IDalamudPlugin
         Observe(
             SaveOpeningPublicationTextAndReportAsync(venue, openingId, publicationCode, publicationText),
             $"save publication {publicationCode} for opening {openingId}");
+
+    public void TravelShoutrunner(
+        VenueConnectionConfiguration venue,
+        OpeningPublicationContextResponse context,
+        ActiveShoutrunnerPublication publication)
+    {
+        var result = ShoutrunnerDuty.TravelNext(venue, context, publication);
+        if (result.Success)
+            ChatGui.Print(result.Message, "PartyPulse");
+        else
+            ChatGui.PrintError(result.Message, "PartyPulse");
+    }
+
+    public void RunShoutrunnerShout(
+        VenueConnectionConfiguration venue,
+        OpeningPublicationContextResponse context,
+        ActiveShoutrunnerPublication publication) =>
+        Observe(
+            RunShoutrunnerShoutAndReportAsync(venue, context, publication),
+            $"run Shoutrunner macro for opening {publication.OpeningId}");
+
+    public void ResetShoutrunner(
+        VenueConnectionConfiguration venue,
+        OpeningPublicationContextResponse context,
+        ActiveShoutrunnerPublication publication,
+        string reason)
+    {
+        var result = ShoutrunnerDuty.Reset(venue, context, publication, reason);
+        if (result.Success)
+            ChatGui.Print(result.Message, "PartyPulse");
+        else
+            ChatGui.PrintError(result.Message, "PartyPulse");
+    }
+
+    public void ReportShoutrunnerDuty(VenueConnectionConfiguration venue) =>
+        Observe(
+            ReportShoutrunnerDutyAndReportAsync(venue),
+            $"report Shoutrunner duty for {venue.VenueCode}");
 
     public void EnsureTimedMacrosLoaded(VenueConnectionConfiguration venue)
     {
@@ -1813,6 +1862,49 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         ReportVipFailure(result.Failure, "Opening-specific publication text could not be saved.");
+    }
+
+    private async Task RunShoutrunnerShoutAndReportAsync(
+        VenueConnectionConfiguration venue,
+        OpeningPublicationContextResponse context,
+        ActiveShoutrunnerPublication publication)
+    {
+        var result = await ShoutrunnerDuty.ExecuteShoutAsync(
+            venue,
+            context,
+            publication,
+            LifetimeToken);
+        if (result.Success)
+            ChatGui.Print(result.Message, "PartyPulse");
+        else
+            ChatGui.PrintError(result.Message, "PartyPulse");
+    }
+
+    private async Task ReportShoutrunnerDutyAndReportAsync(
+        VenueConnectionConfiguration venue)
+    {
+        var batch = ShoutrunnerDuty.CreateReportBatch(venue);
+        if (batch is null)
+        {
+            ChatGui.PrintError("There are no pending Shoutrunner duty log entries to report.", "PartyPulse");
+            return;
+        }
+
+        var result = await OpeningPublications.ReportShoutrunnerDutyAsync(
+            venue,
+            batch.Request,
+            LifetimeToken);
+        if (result.Success && result.Value is not null)
+        {
+            ShoutrunnerDuty.ConfirmReported(venue, batch.ClientEntryIds);
+            ChatGui.Print(
+                $"Reported {result.Value.AcceptedCount} Shoutrunner log entries" +
+                (result.Value.DuplicateCount > 0 ? $" ({result.Value.DuplicateCount} already existed)." : "."),
+                "PartyPulse");
+            return;
+        }
+
+        ReportVipFailure(result.Failure, "The Shoutrunner duty report could not be saved.");
     }
 
     private async Task SaveVenueOpeningAndReportAsync(

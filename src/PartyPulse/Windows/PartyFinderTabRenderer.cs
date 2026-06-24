@@ -43,11 +43,9 @@ public sealed class PartyFinderTabRenderer(Plugin plugin)
 
         DrawActivePublication(venue, view, snapshot.EstimatedServerNow, busy);
 
-        if (view.Capabilities.CanManagePartyFinderTemplates)
+        if (view.Capabilities.CanManagePartyFinderTemplates &&
+            ImGui.CollapsingHeader("Party Finder template editor"))
         {
-            ImGui.Spacing();
-            ImGui.TextUnformatted("Party Finder templates");
-            ImGui.Separator();
             ImGui.TextDisabled("Templates support <theme> and <djs>. Generated opening text can be shortened separately in Openings.");
             foreach (var template in view.Templates.Where(value => value.ChannelCode == "partyfinder"))
                 DrawTemplate(venue, template, busy);
