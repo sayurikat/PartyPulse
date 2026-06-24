@@ -7,6 +7,7 @@ using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Utility;
 using PartyPulse.Api;
 using PartyPulse.Models;
+using PartyPulse.OpeningPublications;
 using PartyPulse.VenueOpenings;
 
 namespace PartyPulse.Windows;
@@ -18,7 +19,9 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
     private bool draftInitialized;
     private long? editingOpeningId;
     private string startsAtLocal = string.Empty;
+    private string endsAtLocal = string.Empty;
     private int durationMinutes = 480;
+    private DateTimeOffset? pendingOpeningSuggestionAfter;
     private string addressWorldName = string.Empty;
     private string addressCityName = string.Empty;
     private int addressWard = 1;
@@ -42,12 +45,19 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
     private long? pendingDeleteBookingId;
     private long? pendingDeleteBookingOpeningId;
     private bool requestDeleteBookingPopup;
+    private DateTimeOffset? pendingBookingSuggestionAfter;
+
+    private long? selectedPublicationOpeningId;
+    private readonly Dictionary<string, string> publicationDrafts = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> dirtyPublicationDrafts = new(StringComparer.OrdinalIgnoreCase);
+    private DateTimeOffset? publicationDraftReceivedAt;
 
     public void Draw(VenueConnectionConfiguration venue)
     {
         ResetForVenueChange(venue);
         plugin.EnsureVenueOpeningsLoaded(venue);
         plugin.EnsureDjsLoaded(venue);
+        plugin.EnsureOpeningPublicationsLoaded(venue);
 
         var snapshot = plugin.VenueOpenings.GetSnapshot(venue);
         var historySnapshot = plugin.VenueOpenings.GetHistorySnapshot(venue);
@@ -62,12 +72,14 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
         var djsBusy = plugin.Djs.IsBusy(venue.ProfileId);
         var djSnapshot = plugin.Djs.GetSnapshot(venue);
         var djView = djSnapshot.View;
+        var publicationSnapshot = plugin.OpeningPublications.GetSnapshot(venue);
 
         ImGui.BeginDisabled(isBusy || djsBusy);
         if (ImGui.Button("Refresh schedule"))
         {
             plugin.RefreshVenueOpenings(venue);
             plugin.RefreshDjs(venue);
+            plugin.RefreshOpeningPublications(venue);
         }
         ImGui.EndDisabled();
 
@@ -82,6 +94,7 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
             return;
         }
 
+        ProcessPendingSuggestions(venue, view, djSnapshot, isBusy, djsBusy);
         EnsureDraft(view);
         DrawEditor(venue, view, isBusy);
         ImGui.Spacing();
@@ -110,6 +123,28 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
             }
         }
 
+        if (selectedPublicationOpeningId is { } publicationOpeningId)
+        {
+            var opening = view.Openings.FirstOrDefault(value => value.OpeningId == publicationOpeningId);
+            if (opening is not null)
+            {
+                ImGui.Spacing();
+                ImGui.Separator();
+                ImGui.Spacing();
+                DrawPublicationEditor(
+                    venue,
+                    opening,
+                    publicationSnapshot,
+                    isBusy || djsBusy || plugin.OpeningPublications.IsBusy(venue.ProfileId));
+            }
+            else
+            {
+                selectedPublicationOpeningId = null;
+                publicationDrafts.Clear();
+                dirtyPublicationDrafts.Clear();
+            }
+        }
+
         DrawConfirmationPopups(venue, isBusy || djsBusy);
         ImGui.EndTabItem();
     }
@@ -122,13 +157,35 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
         ImGui.TextUnformatted(editingOpeningId is null ? "Schedule opening" : $"Edit opening #{editingOpeningId}");
 
         ImGui.SetNextItemWidth(210 * ImGuiHelpers.GlobalScale);
-        ImGui.InputText("Starts (local)", ref startsAtLocal, 17);
+        var openingStartChanged = ImGui.InputText("Starts (local)", ref startsAtLocal, 17);
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip($"Format: {LocalDateTimeFormat}");
 
         ImGui.SetNextItemWidth(160 * ImGuiHelpers.GlobalScale);
-        ImGui.InputInt("Duration (minutes)", ref durationMinutes);
-        durationMinutes = Math.Clamp(durationMinutes, 30, 2880);
+        var openingDurationChanged = ImGui.InputInt("Duration (minutes)", ref durationMinutes);
+        if (openingDurationChanged)
+            durationMinutes = Math.Clamp(durationMinutes, 30, 2880);
+        if ((openingStartChanged || openingDurationChanged) &&
+            TryParseLocalDateTime(startsAtLocal, out var calculatedOpeningStart, out _))
+        {
+            var synchronizedDuration = openingDurationChanged
+                ? durationMinutes
+                : Math.Clamp(durationMinutes, 30, 2880);
+            endsAtLocal = calculatedOpeningStart
+                .AddMinutes(synchronizedDuration)
+                .ToString(LocalDateTimeFormat, CultureInfo.InvariantCulture);
+        }
+
+        ImGui.SetNextItemWidth(210 * ImGuiHelpers.GlobalScale);
+        var openingEndChanged = ImGui.InputText("Ends (local)", ref endsAtLocal, 17);
+        if (openingEndChanged &&
+            TryParseLocalDateTime(startsAtLocal, out var durationOpeningStart, out _) &&
+            TryParseLocalDateTime(endsAtLocal, out var durationOpeningEnd, out _) &&
+            durationOpeningEnd > durationOpeningStart)
+        {
+            durationMinutes = (int)Math.Round(
+                (durationOpeningEnd - durationOpeningStart).TotalMinutes);
+        }
 
         ImGui.SetNextItemWidth(260 * ImGuiHelpers.GlobalScale);
         if (ImGui.BeginCombo("Theme", string.IsNullOrWhiteSpace(themeName) ? "Select or enter a theme" : themeName))
@@ -172,23 +229,35 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
         }
 
         var validStart = TryParseLocalDateTime(startsAtLocal, out var startsAt, out var dateError);
-        var closesAt = validStart ? startsAt.AddMinutes(durationMinutes) : default;
+        var validEnd = TryParseLocalDateTime(endsAtLocal, out var closesAt, out var endDateError);
+        var actualDurationMinutes = validStart && validEnd
+            ? (closesAt - startsAt).TotalMinutes
+            : 0;
         var valid = validStart &&
-                    durationMinutes is >= 30 and <= 2880 &&
+                    validEnd &&
+                    closesAt > startsAt &&
+                    actualDurationMinutes is >= 30 and <= 2880 &&
                     !string.IsNullOrWhiteSpace(themeName) &&
                     !string.IsNullOrWhiteSpace(addressWorldName) &&
                     !string.IsNullOrWhiteSpace(addressCityName) &&
                     addressWard is >= 1 and <= 30 &&
                     addressPlot is >= 1 and <= 60;
 
-        if (validStart)
-            ImGui.TextDisabled($"Ends locally: {closesAt.ToLocalTime():yyyy-MM-dd HH:mm}");
-        else
+        if (!validStart)
             ImGui.TextColored(new Vector4(1f, 0.45f, 0.4f, 1f), dateError);
+        else if (!validEnd)
+            ImGui.TextColored(new Vector4(1f, 0.45f, 0.4f, 1f), endDateError);
+        else if (closesAt <= startsAt)
+            ImGui.TextColored(new Vector4(1f, 0.45f, 0.4f, 1f), "Opening must end after it starts.");
+        else if (actualDurationMinutes is < 30 or > 2880)
+            ImGui.TextColored(new Vector4(1f, 0.45f, 0.4f, 1f), "Opening duration must be between 30 and 2880 minutes.");
+        else
+            ImGui.TextDisabled($"Duration: {actualDurationMinutes:N0} minutes.");
 
         ImGui.BeginDisabled(isBusy || !valid);
         if (ImGui.Button(editingOpeningId is null ? "Schedule opening" : "Save changes"))
         {
+            pendingOpeningSuggestionAfter = DateTimeOffset.UtcNow;
             plugin.SaveVenueOpening(
                 venue,
                 editingOpeningId,
@@ -202,15 +271,13 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
                     themeName.Trim(),
                     string.IsNullOrWhiteSpace(openingTitle) ? null : openingTitle.Trim()));
             editingOpeningId = null;
-            draftInitialized = true;
-            startsAtLocal = startsAt.AddDays(7).ToString(LocalDateTimeFormat, CultureInfo.InvariantCulture);
-            openingTitle = string.Empty;
         }
         ImGui.EndDisabled();
 
         ImGui.SameLine();
         if (ImGui.Button(editingOpeningId is null ? "Reset suggestion" : "Cancel edit"))
         {
+            pendingOpeningSuggestionAfter = null;
             editingOpeningId = null;
             LoadSuggestedDraft(view);
         }
@@ -244,7 +311,7 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
         ImGui.TableSetupColumn("Title");
         ImGui.TableSetupColumn("DJs");
         ImGui.TableSetupColumn("State");
-        ImGui.TableSetupColumn("Actions", ImGuiTableColumnFlags.WidthFixed, 215 * ImGuiHelpers.GlobalScale);
+        ImGui.TableSetupColumn("Actions", ImGuiTableColumnFlags.WidthFixed, 300 * ImGuiHelpers.GlobalScale);
         ImGui.TableHeadersRow();
 
         foreach (var opening in openings)
@@ -290,6 +357,13 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
                 }
                 ImGui.SameLine();
             }
+            if (ImGui.SmallButton("Publicity"))
+            {
+                selectedPublicationOpeningId = opening.OpeningId;
+                publicationDraftReceivedAt = null;
+                dirtyPublicationDrafts.Clear();
+            }
+            ImGui.SameLine();
             if (isFuture)
             {
                 if (ImGui.SmallButton("Edit"))
@@ -464,12 +538,16 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
         var bookingStartChanged = ImGui.InputText("Starts (local)##DjBooking", ref bookingStartsAtLocal, 17);
         ImGui.SetNextItemWidth(160 * ImGuiHelpers.GlobalScale);
         var bookingDurationChanged = ImGui.InputInt("Duration (minutes)##DjBooking", ref bookingDurationMinutes);
-        bookingDurationMinutes = Math.Clamp(bookingDurationMinutes, 15, 2880);
+        if (bookingDurationChanged)
+            bookingDurationMinutes = Math.Clamp(bookingDurationMinutes, 15, 2880);
         if ((bookingStartChanged || bookingDurationChanged) &&
             TryParseLocalDateTime(bookingStartsAtLocal, out var calculatedStart, out _))
         {
+            var synchronizedDuration = bookingDurationChanged
+                ? bookingDurationMinutes
+                : Math.Clamp(bookingDurationMinutes, 15, 2880);
             bookingEndsAtLocal = calculatedStart
-                .AddMinutes(bookingDurationMinutes)
+                .AddMinutes(synchronizedDuration)
                 .ToString(LocalDateTimeFormat, CultureInfo.InvariantCulture);
         }
 
@@ -480,10 +558,8 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
             TryParseLocalDateTime(bookingEndsAtLocal, out var durationEnd, out _) &&
             durationEnd > durationStart)
         {
-            bookingDurationMinutes = Math.Clamp(
-                (int)Math.Round((durationEnd - durationStart).TotalMinutes),
-                15,
-                2880);
+            bookingDurationMinutes = (int)Math.Round(
+                (durationEnd - durationStart).TotalMinutes);
         }
 
         var selectedStatus = view.Statuses.FirstOrDefault(value =>
@@ -517,7 +593,11 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
         var startValid = TryParseLocalDateTime(bookingStartsAtLocal, out var startsAt, out var startError);
         var endValid = TryParseLocalDateTime(bookingEndsAtLocal, out var endsAt, out var endError);
         var macroValid = ValidateMacroText(bookingMacroOverride, 15, 180, out var lines, out var longestLine);
+        var actualBookingDurationMinutes = startValid && endValid
+            ? (endsAt - startsAt).TotalMinutes
+            : 0;
         var bookingValid = startValid && endValid && endsAt > startsAt &&
+                           actualBookingDurationMinutes is >= 15 and <= 2880 &&
                            startsAt.ToUniversalTime() >= opening.OpensAt &&
                            endsAt.ToUniversalTime() <= opening.ClosesAt &&
                            macroValid;
@@ -528,6 +608,8 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
             ImGui.TextColored(new Vector4(1f, 0.45f, 0.4f, 1f), endError);
         else if (endsAt <= startsAt)
             ImGui.TextColored(new Vector4(1f, 0.45f, 0.4f, 1f), "DJ slot must end after it starts.");
+        else if (actualBookingDurationMinutes is < 15 or > 2880)
+            ImGui.TextColored(new Vector4(1f, 0.45f, 0.4f, 1f), "DJ slot duration must be between 15 and 2880 minutes.");
         else if (startsAt.ToUniversalTime() < opening.OpensAt || endsAt.ToUniversalTime() > opening.ClosesAt)
             ImGui.TextColored(new Vector4(1f, 0.45f, 0.4f, 1f), "DJ slot must remain entirely inside the opening.");
         ImGui.TextDisabled($"Macro: {lines}/15 lines; longest line {longestLine}/180 characters.");
@@ -535,6 +617,7 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
         ImGui.BeginDisabled(isBusy || !bookingValid);
         if (ImGui.Button(editingBookingId is null ? "Add DJ slot" : "Save DJ slot"))
         {
+            pendingBookingSuggestionAfter = DateTimeOffset.UtcNow;
             plugin.SaveDjBooking(
                 venue,
                 editingBookingId,
@@ -546,7 +629,6 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
                     bookingStatusCode,
                     string.IsNullOrWhiteSpace(bookingNote) ? null : bookingNote.Trim(),
                     string.IsNullOrWhiteSpace(bookingMacroOverride) ? null : bookingMacroOverride));
-            InitializeBookingDraft(opening, bookings, view);
         }
         ImGui.EndDisabled();
 
@@ -554,7 +636,10 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
         {
             ImGui.SameLine();
             if (ImGui.Button("Cancel slot edit"))
+            {
+                pendingBookingSuggestionAfter = null;
                 InitializeBookingDraft(opening, bookings, view);
+            }
         }
 
         ImGui.SameLine();
@@ -615,6 +700,177 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
         }
 
         ImGui.EndTable();
+    }
+
+    private void ProcessPendingSuggestions(
+        VenueConnectionConfiguration venue,
+        VenueOpeningScheduleResponse view,
+        PartyPulse.Djs.DjManagementSnapshot djSnapshot,
+        bool openingsBusy,
+        bool djsBusy)
+    {
+        if (pendingOpeningSuggestionAfter is { } openingRequestedAt &&
+            !openingsBusy &&
+            plugin.VenueOpenings.GetLastSuccessfulOpeningSaveAt(venue.ProfileId) is { } openingLoadedAt &&
+            openingLoadedAt >= openingRequestedAt)
+        {
+            pendingOpeningSuggestionAfter = null;
+            LoadSuggestedDraft(view);
+        }
+
+        if (pendingBookingSuggestionAfter is { } bookingRequestedAt &&
+            selectedDjOpeningId is { } openingId &&
+            !djsBusy &&
+            djSnapshot.Status == PartyPulse.Djs.DjManagementStatus.Ready &&
+            plugin.Djs.GetLastSuccessfulBookingSaveAt(venue.ProfileId) is { } bookingLoadedAt &&
+            bookingLoadedAt >= bookingRequestedAt &&
+            djSnapshot.View is { } djView)
+        {
+            var opening = view.Openings.FirstOrDefault(value => value.OpeningId == openingId);
+            if (opening is not null)
+            {
+                var bookings = djView.Bookings
+                    .Where(value => value.OpeningId == openingId)
+                    .OrderBy(value => value.StartsAt)
+                    .ThenBy(value => value.BookingId)
+                    .ToArray();
+                InitializeBookingDraft(opening, bookings, djView);
+            }
+            pendingBookingSuggestionAfter = null;
+        }
+    }
+
+    private void DrawPublicationEditor(
+        VenueConnectionConfiguration venue,
+        VenueOpeningScheduleItem opening,
+        OpeningPublicationManagementSnapshot snapshot,
+        bool isBusy)
+    {
+        ImGui.TextUnformatted($"Opening publicity — opening #{opening.OpeningId}");
+        ImGui.TextDisabled($"{opening.OpensAt.ToLocalTime():g} to {opening.ClosesAt.ToLocalTime():g} — {opening.ThemeName ?? "No theme"}");
+
+        var view = snapshot.View;
+        if (view is null)
+        {
+            ImGui.TextWrapped(snapshot.Message);
+            return;
+        }
+
+        var publicationOpening = view.Openings.FirstOrDefault(value => value.OpeningId == opening.OpeningId);
+        if (publicationOpening is null)
+        {
+            ImGui.TextDisabled("Opening-publication data for this opening is not available yet.");
+            ImGui.BeginDisabled(isBusy);
+            if (ImGui.Button("Refresh publication data"))
+                plugin.RefreshOpeningPublications(venue);
+            ImGui.EndDisabled();
+            return;
+        }
+
+        SyncPublicationDrafts(publicationOpening, view, snapshot.ReceivedAt);
+        ImGui.TextDisabled($"Placeholder values: <theme> = {publicationOpening.ThemeName ?? string.Empty}; <djs> = {publicationOpening.Djs}");
+
+        ImGui.BeginDisabled(isBusy);
+        if (ImGui.Button("Create Shoutrunner Macros"))
+        {
+            ClearPublicationDirtyState("shoutrunner", view);
+            plugin.GenerateOpeningPublications(venue, opening.OpeningId, "shoutrunner");
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Create Party Finder Text"))
+        {
+            ClearPublicationDirtyState("partyfinder", view);
+            plugin.GenerateOpeningPublications(venue, opening.OpeningId, "partyfinder");
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Reload saved text"))
+        {
+            dirtyPublicationDrafts.Clear();
+            publicationDraftReceivedAt = null;
+            SyncPublicationDrafts(publicationOpening, view, snapshot.ReceivedAt);
+        }
+        ImGui.EndDisabled();
+
+        foreach (var template in view.Templates)
+        {
+            publicationDrafts.TryAdd(template.PublicationCode, string.Empty);
+            var value = publicationDrafts[template.PublicationCode];
+            ImGui.Spacing();
+            //ImGui.SeparatorText($"{(template.ChannelCode == "shoutrunner" ? "Shoutrunner" : "Party Finder")} — {template.DisplayName}");
+            ImGui.TextUnformatted($"{(template.ChannelCode == "shoutrunner" ? "Shoutrunner" : "Party Finder")} — {template.DisplayName}");
+            ImGui.Separator();
+            ImGui.SetNextItemWidth(-1);
+            var height = template.ChannelCode == "partyfinder" ? 65 : 105;
+            if (ImGui.InputTextMultiline(
+                    $"##OpeningPublication{opening.OpeningId}-{template.PublicationCode}",
+                    ref value,
+                    4000,
+                    new Vector2(0, height * ImGuiHelpers.GlobalScale)))
+            {
+                publicationDrafts[template.PublicationCode] = value;
+                dirtyPublicationDrafts.Add(template.PublicationCode);
+            }
+
+            var valid = ShoutrunnerTabRenderer.Validate(
+                value,
+                template.MaxLines,
+                template.MaxLineLength,
+                out var lineCount,
+                out var longestLine);
+            ImGui.TextDisabled($"{lineCount}/{template.MaxLines} lines; longest line {longestLine}/{template.MaxLineLength} characters.");
+            ImGui.BeginDisabled(isBusy || !valid || !dirtyPublicationDrafts.Contains(template.PublicationCode));
+            if (ImGui.Button($"Save {template.DisplayName}##OpeningPublicationSave{template.PublicationCode}"))
+            {
+                plugin.SaveOpeningPublicationText(
+                    venue,
+                    opening.OpeningId,
+                    template.PublicationCode,
+                    value);
+                dirtyPublicationDrafts.Remove(template.PublicationCode);
+            }
+            ImGui.EndDisabled();
+            if (!valid)
+            {
+                ImGui.SameLine();
+                ImGui.TextColored(new Vector4(1f, 0.45f, 0.4f, 1f), "Text exceeds its line limit.");
+            }
+        }
+
+        ImGui.Spacing();
+        if (ImGui.Button("Close publicity editor"))
+        {
+            selectedPublicationOpeningId = null;
+            publicationDrafts.Clear();
+            dirtyPublicationDrafts.Clear();
+            publicationDraftReceivedAt = null;
+        }
+    }
+
+    private void SyncPublicationDrafts(
+        OpeningPublicationOpeningSummary opening,
+        OpeningPublicationContextResponse view,
+        DateTimeOffset? receivedAt)
+    {
+        if (publicationDraftReceivedAt == receivedAt) return;
+        foreach (var template in view.Templates)
+        {
+            if (dirtyPublicationDrafts.Contains(template.PublicationCode)) continue;
+            publicationDrafts[template.PublicationCode] = opening.Texts
+                .FirstOrDefault(value => string.Equals(
+                    value.PublicationCode,
+                    template.PublicationCode,
+                    StringComparison.OrdinalIgnoreCase))
+                ?.PublicationText ?? string.Empty;
+        }
+        publicationDraftReceivedAt = receivedAt;
+    }
+
+    private void ClearPublicationDirtyState(string channelCode, OpeningPublicationContextResponse view)
+    {
+        foreach (var template in view.Templates.Where(value =>
+                     string.Equals(value.ChannelCode, channelCode, StringComparison.OrdinalIgnoreCase)))
+            dirtyPublicationDrafts.Remove(template.PublicationCode);
+        publicationDraftReceivedAt = null;
     }
 
     private void DrawConfirmationPopups(VenueConnectionConfiguration venue, bool isBusy)
@@ -836,6 +1092,7 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
 
     private void ClearBookingDraft()
     {
+        pendingBookingSuggestionAfter = null;
         editingBookingId = null;
         selectedDjId = 0;
         bookingStartsAtLocal = string.Empty;
@@ -857,6 +1114,9 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
         draftInitialized = true;
         startsAtLocal = view.SuggestedOpensAt.ToLocalTime().ToString(LocalDateTimeFormat, CultureInfo.InvariantCulture);
         durationMinutes = Math.Clamp(view.SuggestedDurationMinutes, 30, 2880);
+        endsAtLocal = view.SuggestedOpensAt.ToLocalTime()
+            .AddMinutes(durationMinutes)
+            .ToString(LocalDateTimeFormat, CultureInfo.InvariantCulture);
         openingTitle = string.Empty;
         themeName = view.Openings
             .Where(value => !string.IsNullOrWhiteSpace(value.ThemeName))
@@ -875,6 +1135,7 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
         editingOpeningId = opening.OpeningId;
         startsAtLocal = opening.OpensAt.ToLocalTime().ToString(LocalDateTimeFormat, CultureInfo.InvariantCulture);
         durationMinutes = Math.Clamp((int)Math.Round(opening.Duration.TotalMinutes), 30, 2880);
+        endsAtLocal = opening.ClosesAt.ToLocalTime().ToString(LocalDateTimeFormat, CultureInfo.InvariantCulture);
         addressWorldName = opening.Address.WorldName;
         addressCityName = opening.Address.CityName;
         addressWard = opening.Address.Ward;
@@ -903,6 +1164,12 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
         selectedDjOpeningId = null;
         pendingDeleteBookingId = null;
         pendingDeleteBookingOpeningId = null;
+        pendingOpeningSuggestionAfter = null;
+        pendingBookingSuggestionAfter = null;
+        selectedPublicationOpeningId = null;
+        publicationDrafts.Clear();
+        dirtyPublicationDrafts.Clear();
+        publicationDraftReceivedAt = null;
         ClearBookingDraft();
     }
 

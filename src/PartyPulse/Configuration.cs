@@ -13,11 +13,13 @@ public sealed class Configuration : IPluginConfiguration
 
     private const string LegacyAzureApiBaseUrl = "https://partypulse.azurewebsites.net";
 
-    public int Version { get; set; } = 3;
+    public int Version { get; set; } = 4;
 
     public bool IsConfigWindowMovable { get; set; } = true;
 
     public bool AutoConnect { get; set; } = true;
+
+    public int PartyFinderRefreshMinutes { get; set; } = 60;
 
     public string ApiBaseUrl { get; set; } = DefaultApiBaseUrl;
 
@@ -42,6 +44,13 @@ public sealed class Configuration : IPluginConfiguration
                 ApiBaseUrl = normalizedApiBaseUrl;
                 changed = true;
             }
+        }
+
+        var normalizedPartyFinderRefreshMinutes = Math.Clamp(PartyFinderRefreshMinutes, 1, 1440);
+        if (PartyFinderRefreshMinutes != normalizedPartyFinderRefreshMinutes)
+        {
+            PartyFinderRefreshMinutes = normalizedPartyFinderRefreshMinutes;
+            changed = true;
         }
 
         foreach (var venue in VenueConnections)
@@ -79,9 +88,9 @@ public sealed class Configuration : IPluginConfiguration
             }
         }
 
-        if (Version < 3)
+        if (Version < 4)
         {
-            Version = 3;
+            Version = 4;
             changed = true;
         }
 

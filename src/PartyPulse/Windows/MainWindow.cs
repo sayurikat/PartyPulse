@@ -21,6 +21,8 @@ public sealed class MainWindow : Window, IDisposable
     private readonly TimedMacrosTabRenderer timedMacrosTab;
     private readonly FinanceTabRenderer financeTab;
     private readonly GreeterTabRenderer greeterTab;
+    private readonly ShoutrunnerTabRenderer shoutrunnerTab;
+    private readonly PartyFinderTabRenderer partyFinderTab;
     private bool requestSelectFinanceTab;
     private long? requestedFinanceSettlementId;
     private Guid addUserProfileId;
@@ -45,6 +47,8 @@ public sealed class MainWindow : Window, IDisposable
         timedMacrosTab = new TimedMacrosTabRenderer(plugin);
         financeTab = new FinanceTabRenderer(plugin);
         greeterTab = new GreeterTabRenderer(plugin);
+        shoutrunnerTab = new ShoutrunnerTabRenderer(plugin);
+        partyFinderTab = new PartyFinderTabRenderer(plugin);
 
         SizeConstraints = new WindowSizeConstraints
         {
@@ -219,6 +223,8 @@ public sealed class MainWindow : Window, IDisposable
             djsTab.Draw(selectedVenue);
             venueOpeningsTab.Draw(selectedVenue);
             timedMacrosTab.Draw(selectedVenue);
+            shoutrunnerTab.Draw(selectedVenue);
+            partyFinderTab.Draw(selectedVenue);
             vipTab.Draw(selectedVenue);
             greeterTab.Draw(selectedVenue);
             if (financeTab.Draw(

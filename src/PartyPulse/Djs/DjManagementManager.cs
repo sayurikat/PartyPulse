@@ -19,6 +19,7 @@ public sealed class DjManagementManager : IDisposable
     private readonly IPluginLog log;
     private readonly ConcurrentDictionary<Guid, DjManagementSnapshot> snapshots = new();
     private readonly ConcurrentDictionary<Guid, SemaphoreSlim> gates = new();
+    private readonly ConcurrentDictionary<Guid, DateTimeOffset> lastSuccessfulBookingSaveAt = new();
 
     public DjManagementManager(
         Configuration configuration,
@@ -41,6 +42,9 @@ public sealed class DjManagementManager : IDisposable
 
     public bool IsBusy(Guid profileId) =>
         gates.TryGetValue(profileId, out var gate) && gate.CurrentCount == 0;
+
+    public DateTimeOffset? GetLastSuccessfulBookingSaveAt(Guid profileId) =>
+        lastSuccessfulBookingSaveAt.TryGetValue(profileId, out var value) ? value : null;
 
     public bool ShouldLoad(VenueConnectionConfiguration venue) =>
         venue.IsRegistered && GetSnapshot(venue).Status == DjManagementStatus.NotLoaded;
@@ -96,7 +100,8 @@ public sealed class DjManagementManager : IDisposable
             {
                 var result = await apiClient.SaveDjAsync(
                     context.BaseUri!, context.AccessToken!, djId, request, cancellationToken);
-                if (result.Success) await RefreshCoreAsync(venue, context, cancellationToken);
+                if (result.Success)
+                    await RefreshCoreAsync(venue, context, cancellationToken);
                 return result;
             },
             ApiResult<DjSummary>.Failed,
@@ -112,7 +117,8 @@ public sealed class DjManagementManager : IDisposable
             {
                 var result = await apiClient.ArchiveDjAsync(
                     context.BaseUri!, context.AccessToken!, djId, cancellationToken);
-                if (result.Success) await RefreshCoreAsync(venue, context, cancellationToken);
+                if (result.Success)
+                    await RefreshCoreAsync(venue, context, cancellationToken);
                 return result;
             },
             ApiResult<ArchiveDjResponse>.Failed,
@@ -129,7 +135,11 @@ public sealed class DjManagementManager : IDisposable
             {
                 var result = await apiClient.SaveDjBookingAsync(
                     context.BaseUri!, context.AccessToken!, bookingId, request, cancellationToken);
-                if (result.Success) await RefreshCoreAsync(venue, context, cancellationToken);
+                if (result.Success)
+                {
+                    if (await RefreshCoreAsync(venue, context, cancellationToken))
+                        lastSuccessfulBookingSaveAt[venue.ProfileId] = DateTimeOffset.UtcNow;
+                }
                 return result;
             },
             ApiResult<DjBookingSummary>.Failed,
@@ -146,18 +156,24 @@ public sealed class DjManagementManager : IDisposable
             {
                 var result = await apiClient.DeleteDjBookingAsync(
                     context.BaseUri!, context.AccessToken!, openingId, bookingId, cancellationToken);
-                if (result.Success) await RefreshCoreAsync(venue, context, cancellationToken);
+                if (result.Success)
+                    await RefreshCoreAsync(venue, context, cancellationToken);
                 return result;
             },
             ApiResult<DeleteDjBookingResponse>.Failed,
             cancellationToken);
 
-    public void RemoveProfile(Guid profileId) => snapshots.TryRemove(profileId, out _);
+    public void RemoveProfile(Guid profileId)
+    {
+        snapshots.TryRemove(profileId, out _);
+        lastSuccessfulBookingSaveAt.TryRemove(profileId, out _);
+    }
 
     public void Clear(string message = "DJ data was cleared.")
     {
         foreach (var pair in snapshots)
             snapshots[pair.Key] = DjManagementSnapshot.NotLoaded with { Message = message };
+        lastSuccessfulBookingSaveAt.Clear();
     }
 
     public void Dispose()
@@ -165,9 +181,10 @@ public sealed class DjManagementManager : IDisposable
         foreach (var gate in gates.Values) gate.Dispose();
         gates.Clear();
         snapshots.Clear();
+        lastSuccessfulBookingSaveAt.Clear();
     }
 
-    private async Task RefreshCoreAsync(
+    private async Task<bool> RefreshCoreAsync(
         VenueConnectionConfiguration venue,
         AuthorizedContext context,
         CancellationToken cancellationToken)
@@ -181,6 +198,7 @@ public sealed class DjManagementManager : IDisposable
                 "DJ data loaded.",
                 result.Value,
                 DateTimeOffset.UtcNow);
+            return true;
         }
         else
         {
@@ -192,6 +210,7 @@ public sealed class DjManagementManager : IDisposable
             {
                 Message = "DJ data changed. Refresh to load the latest state."
             };
+            return false;
         }
     }
 

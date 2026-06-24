@@ -543,6 +543,69 @@ public sealed class PartyPulseApiClient : IDisposable
             cancellationToken);
 
 
+    public Task<ApiResult<OpeningPublicationContextResponse>> GetOpeningPublicationsAsync(
+        Uri baseUri,
+        string accessToken,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<OpeningPublicationContextResponse>(
+            baseUri,
+            HttpMethod.Get,
+            "api/v1/opening-publications",
+            accessToken,
+            null,
+            ValidateOpeningPublicationContextResponse,
+            cancellationToken);
+
+    public Task<ApiResult<SaveOpeningPublicationTemplateResponse>> SaveOpeningPublicationTemplateAsync(
+        Uri baseUri,
+        string accessToken,
+        string publicationCode,
+        SaveOpeningPublicationTemplateRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<SaveOpeningPublicationTemplateResponse>(
+            baseUri,
+            HttpMethod.Put,
+            $"api/v1/opening-publications/templates/{Uri.EscapeDataString(publicationCode)}",
+            accessToken,
+            request,
+            static payload => !string.IsNullOrWhiteSpace(payload.PublicationCode) && payload.UpdatedAt != default,
+            cancellationToken);
+
+    public Task<ApiResult<GenerateOpeningPublicationsResponse>> GenerateOpeningPublicationsAsync(
+        Uri baseUri,
+        string accessToken,
+        long openingId,
+        GenerateOpeningPublicationsRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<GenerateOpeningPublicationsResponse>(
+            baseUri,
+            HttpMethod.Post,
+            $"api/v1/opening-publications/openings/{openingId}/generate",
+            accessToken,
+            request,
+            static payload => payload.OpeningId > 0 &&
+                              !string.IsNullOrWhiteSpace(payload.ChannelCode) &&
+                              payload.Texts is not null,
+            cancellationToken);
+
+    public Task<ApiResult<SaveOpeningPublicationTextResponse>> SaveOpeningPublicationTextAsync(
+        Uri baseUri,
+        string accessToken,
+        long openingId,
+        string publicationCode,
+        SaveOpeningPublicationTextRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<SaveOpeningPublicationTextResponse>(
+            baseUri,
+            HttpMethod.Put,
+            $"api/v1/opening-publications/openings/{openingId}/texts/{Uri.EscapeDataString(publicationCode)}",
+            accessToken,
+            request,
+            static payload => payload.OpeningId > 0 &&
+                              !string.IsNullOrWhiteSpace(payload.PublicationCode) &&
+                              payload.UpdatedAt != default,
+            cancellationToken);
+
     public Task<ApiResult<DjViewResponse>> GetDjsAsync(
         Uri baseUri,
         string accessToken,
@@ -1081,6 +1144,27 @@ public sealed class PartyPulseApiClient : IDisposable
         opening.AddressWard > 0 &&
         opening.AddressPlot > 0 &&
         !string.IsNullOrWhiteSpace(opening.SourceType);
+
+    private static bool ValidateOpeningPublicationContextResponse(OpeningPublicationContextResponse payload) =>
+        payload.Capabilities is not null &&
+        payload.Templates is not null &&
+        payload.Openings is not null &&
+        payload.Templates.All(static template =>
+            !string.IsNullOrWhiteSpace(template.PublicationCode) &&
+            !string.IsNullOrWhiteSpace(template.ChannelCode) &&
+            !string.IsNullOrWhiteSpace(template.DisplayName) &&
+            template.MaxLines > 0 &&
+            template.MaxLineLength > 0) &&
+        payload.Openings.All(static opening =>
+            opening.OpeningId > 0 &&
+            opening.ClosesAt > opening.OpensAt &&
+            opening.Texts is not null &&
+            opening.Texts.All(text =>
+                text.OpeningId == opening.OpeningId &&
+                !string.IsNullOrWhiteSpace(text.PublicationCode) &&
+                !string.IsNullOrWhiteSpace(text.ChannelCode) &&
+                text.MaxLines > 0 &&
+                text.MaxLineLength > 0));
 
     private static bool ValidateGreeterContextResponse(GreeterContextResponse payload) =>
         payload.Capabilities is not null &&

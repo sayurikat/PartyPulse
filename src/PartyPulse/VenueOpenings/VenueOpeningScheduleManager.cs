@@ -21,6 +21,7 @@ public sealed class VenueOpeningScheduleManager : IDisposable
     private readonly ConcurrentDictionary<Guid, VenueOpeningScheduleSnapshot> snapshots = new();
     private readonly ConcurrentDictionary<Guid, VenueOpeningHistorySnapshot> historySnapshots = new();
     private readonly ConcurrentDictionary<Guid, SemaphoreSlim> gates = new();
+    private readonly ConcurrentDictionary<Guid, DateTimeOffset> lastSuccessfulOpeningSaveAt = new();
 
     public VenueOpeningScheduleManager(
         Configuration configuration,
@@ -48,6 +49,9 @@ public sealed class VenueOpeningScheduleManager : IDisposable
 
     public bool IsBusy(Guid profileId) =>
         gates.TryGetValue(profileId, out var gate) && gate.CurrentCount == 0;
+
+    public DateTimeOffset? GetLastSuccessfulOpeningSaveAt(Guid profileId) =>
+        lastSuccessfulOpeningSaveAt.TryGetValue(profileId, out var value) ? value : null;
 
     public bool ShouldLoad(VenueConnectionConfiguration venue) =>
         venue.IsRegistered && GetSnapshot(venue).Status == VenueOpeningScheduleStatus.NotLoaded;
@@ -184,7 +188,10 @@ public sealed class VenueOpeningScheduleManager : IDisposable
                 var result = await apiClient.SaveVenueOpeningAsync(
                     context.BaseUri!, context.AccessToken!, openingId, request, cancellationToken);
                 if (result.Success)
-                    await RefreshCoreAsync(venue, context, cancellationToken);
+                {
+                    if (await RefreshCoreAsync(venue, context, cancellationToken))
+                        lastSuccessfulOpeningSaveAt[venue.ProfileId] = DateTimeOffset.UtcNow;
+                }
                 return result;
             },
             ApiResult<VenueOpeningScheduleItem>.Failed,
@@ -228,6 +235,7 @@ public sealed class VenueOpeningScheduleManager : IDisposable
     {
         snapshots.TryRemove(profileId, out _);
         historySnapshots.TryRemove(profileId, out _);
+        lastSuccessfulOpeningSaveAt.TryRemove(profileId, out _);
     }
 
     public void Clear(string message = "Opening schedule was cleared.")
@@ -236,6 +244,7 @@ public sealed class VenueOpeningScheduleManager : IDisposable
             snapshots[pair.Key] = VenueOpeningScheduleSnapshot.NotLoaded with { Message = message };
         foreach (var pair in historySnapshots)
             historySnapshots[pair.Key] = VenueOpeningHistorySnapshot.NotLoaded with { Message = message };
+        lastSuccessfulOpeningSaveAt.Clear();
     }
 
     public void Dispose()
@@ -245,9 +254,10 @@ public sealed class VenueOpeningScheduleManager : IDisposable
         gates.Clear();
         snapshots.Clear();
         historySnapshots.Clear();
+        lastSuccessfulOpeningSaveAt.Clear();
     }
 
-    private async Task RefreshCoreAsync(
+    private async Task<bool> RefreshCoreAsync(
         VenueConnectionConfiguration venue,
         AuthorizedContext context,
         CancellationToken cancellationToken)
@@ -268,6 +278,7 @@ public sealed class VenueOpeningScheduleManager : IDisposable
                     Message = "Opening history changed. Refresh previous openings to reload it."
                 };
             }
+            return true;
         }
         else
         {
@@ -279,6 +290,7 @@ public sealed class VenueOpeningScheduleManager : IDisposable
             {
                 Message = "Venue openings changed. Refresh to load the latest schedule."
             };
+            return false;
         }
     }
 

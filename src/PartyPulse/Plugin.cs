@@ -15,6 +15,8 @@ using PartyPulse.Greeter;
 using PartyPulse.Integrations;
 using PartyPulse.Integrations.Dropbox;
 using PartyPulse.Notifications;
+using PartyPulse.OpeningPublications;
+using PartyPulse.PartyFinder;
 using PartyPulse.Models;
 using PartyPulse.SelfService;
 using PartyPulse.Services;
@@ -41,6 +43,8 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService] internal static IObjectTable ObjectTable { get; private set; } = null!;
     [PluginService] internal static ITextureProvider TextureProvider { get; private set; } = null!;
     [PluginService] internal static IFramework Framework { get; private set; } = null!;
+    [PluginService] internal static ICondition Condition { get; private set; } = null!;
+    [PluginService] internal static IGameGui GameGui { get; private set; } = null!;
     [PluginService] internal static IPluginLog Log { get; private set; } = null!;
 
     private readonly CancellationTokenSource lifetimeCancellation = new();
@@ -119,6 +123,19 @@ public sealed class Plugin : IDalamudPlugin
             Authentication,
             apiClient,
             IdentityProvider,
+            Log);
+        OpeningPublications = new OpeningPublicationManagementManager(
+            Configuration,
+            Authentication,
+            apiClient,
+            IdentityProvider,
+            Log);
+        PartyFinderAutomation = new PartyFinderAutomationService(
+            Configuration,
+            OpeningPublications,
+            Condition,
+            GameGui,
+            PlayerState,
             Log);
         NearbyVipPlayers = new NearbyVipPlayerTracker(ObjectTable, TargetManager);
         VipArrivalNearby = new VipArrivalNearbyTracker(ObjectTable);
@@ -200,6 +217,10 @@ public sealed class Plugin : IDalamudPlugin
 
     public DjManagementManager Djs { get; }
 
+    public OpeningPublicationManagementManager OpeningPublications { get; }
+
+    public PartyFinderAutomationService PartyFinderAutomation { get; }
+
     public NearbyVipPlayerTracker NearbyVipPlayers { get; }
 
     public VipArrivalNearbyTracker VipArrivalNearby { get; }
@@ -241,6 +262,8 @@ public sealed class Plugin : IDalamudPlugin
         notificationToastWindow.Dispose();
         Notifications.Dispose();
         Finance.Dispose();
+        PartyFinderAutomation.Stop("PartyPulse is unloading.");
+        OpeningPublications.Dispose();
         Djs.Dispose();
         TimedMacros.Dispose();
         VenueOpenings.Dispose();
@@ -409,6 +432,9 @@ public sealed class Plugin : IDalamudPlugin
         VenueOpenings.RemoveProfile(venue.ProfileId);
         TimedMacros.RemoveProfile(venue.ProfileId);
         Djs.RemoveProfile(venue.ProfileId);
+        OpeningPublications.RemoveProfile(venue.ProfileId);
+        if (PartyFinderAutomation.ProfileId == venue.ProfileId)
+            PartyFinderAutomation.Stop("Party Finder refresher stopped because venue authorization changed.");
         NearbyVipPlayers.ClearProfile(venue.ProfileId);
         VipArrivalNearby.Clear();
         GreeterNearby.Clear();
@@ -805,6 +831,46 @@ public sealed class Plugin : IDalamudPlugin
             DeleteDjBookingAndReportAsync(venue, openingId, bookingId),
             $"delete DJ booking {bookingId} for {venue.VenueCode}");
 
+    public void EnsureOpeningPublicationsLoaded(VenueConnectionConfiguration venue)
+    {
+        if (!OpeningPublications.ShouldLoad(venue))
+            return;
+
+        Observe(
+            OpeningPublications.LoadAsync(venue, false, LifetimeToken),
+            $"load opening publications for {venue.VenueCode}");
+    }
+
+    public void RefreshOpeningPublications(VenueConnectionConfiguration venue) =>
+        Observe(
+            OpeningPublications.LoadAsync(venue, true, LifetimeToken),
+            $"refresh opening publications for {venue.VenueCode}");
+
+    public void SaveOpeningPublicationTemplate(
+        VenueConnectionConfiguration venue,
+        string publicationCode,
+        string? templateText) =>
+        Observe(
+            SaveOpeningPublicationTemplateAndReportAsync(venue, publicationCode, templateText),
+            $"save opening publication template {publicationCode} for {venue.VenueCode}");
+
+    public void GenerateOpeningPublications(
+        VenueConnectionConfiguration venue,
+        long openingId,
+        string channelCode) =>
+        Observe(
+            GenerateOpeningPublicationsAndReportAsync(venue, openingId, channelCode),
+            $"generate {channelCode} publications for opening {openingId}");
+
+    public void SaveOpeningPublicationText(
+        VenueConnectionConfiguration venue,
+        long openingId,
+        string publicationCode,
+        string? publicationText) =>
+        Observe(
+            SaveOpeningPublicationTextAndReportAsync(venue, openingId, publicationCode, publicationText),
+            $"save publication {publicationCode} for opening {openingId}");
+
     public void EnsureTimedMacrosLoaded(VenueConnectionConfiguration venue)
     {
         if (!TimedMacros.ShouldLoad(venue))
@@ -949,6 +1015,17 @@ public sealed class Plugin : IDalamudPlugin
     private void OnFrameworkUpdate(IFramework framework)
     {
         notificationToastWindow.Tick();
+        if (PartyFinderAutomation.IsRunning)
+        {
+            var partyFinderVenue = Configuration.VenueConnections.FirstOrDefault(
+                venue => venue.ProfileId == PartyFinderAutomation.ProfileId);
+            if (partyFinderVenue is not null)
+                EnsureOpeningPublicationsLoaded(partyFinderVenue);
+        }
+        var partyFinderWasRunning = PartyFinderAutomation.IsRunning;
+        PartyFinderAutomation.Tick();
+        if (partyFinderWasRunning && !PartyFinderAutomation.IsRunning)
+            ChatGui.Print(PartyFinderAutomation.StatusMessage, "PartyPulse");
 
         if (!IdentityProvider.TryGetCurrent(out var identity, out _))
         {
@@ -965,6 +1042,8 @@ public sealed class Plugin : IDalamudPlugin
                 VenueOpenings.Clear("Character logged out or changed.");
                 TimedMacros.Clear("Character logged out or changed.");
                 Djs.Clear("Character logged out or changed.");
+                OpeningPublications.Clear("Character logged out or changed.");
+                PartyFinderAutomation.Stop("Party Finder refresher stopped because the character logged out or changed.");
                 NearbyVipPlayers.Clear();
                 VipArrivalNearby.Clear();
                 GreeterNearby.Clear();
@@ -988,6 +1067,8 @@ public sealed class Plugin : IDalamudPlugin
             VenueOpenings.Clear("Character changed; opening schedule was cleared.");
             TimedMacros.Clear("Character changed; timed macro data was cleared.");
             Djs.Clear("Character changed; DJ data was cleared.");
+            OpeningPublications.Clear("Character changed; opening-publication data was cleared.");
+            PartyFinderAutomation.Stop("Party Finder refresher stopped because the character changed.");
             NearbyVipPlayers.Clear();
             VipArrivalNearby.Clear();
             GreeterNearby.Clear();
@@ -1134,6 +1215,9 @@ public sealed class Plugin : IDalamudPlugin
         VenueOpenings.RemoveProfile(venue.ProfileId);
         TimedMacros.RemoveProfile(venue.ProfileId);
         Djs.RemoveProfile(venue.ProfileId);
+        OpeningPublications.RemoveProfile(venue.ProfileId);
+        if (PartyFinderAutomation.ProfileId == venue.ProfileId)
+            PartyFinderAutomation.Stop("Party Finder refresher stopped because venue authorization changed.");
         NearbyVipPlayers.ClearProfile(venue.ProfileId);
         VipArrivalNearby.Clear();
         GreeterNearby.Clear();
@@ -1646,6 +1730,7 @@ public sealed class Plugin : IDalamudPlugin
             GreeterNearby.Clear();
             await Greeter.LoadAsync(venue, true, LifetimeToken);
             await TimedMacros.LoadAsync(venue, true, LifetimeToken);
+            await OpeningPublications.LoadAsync(venue, true, LifetimeToken);
             ChatGui.Print(
                 $"Started opening #{result.Value.OpeningId} until {result.Value.ClosesAt.ToLocalTime():g} at {result.Value.AddressDisplay}.",
                 "PartyPulse");
@@ -1666,11 +1751,68 @@ public sealed class Plugin : IDalamudPlugin
             GreeterNearby.Clear();
             await Greeter.LoadAsync(venue, true, LifetimeToken);
             await TimedMacros.LoadAsync(venue, true, LifetimeToken);
+            await OpeningPublications.LoadAsync(venue, true, LifetimeToken);
             ChatGui.Print($"Closed venue opening #{openingId}.", "PartyPulse");
             return;
         }
 
         ReportVipFailure(result.Failure, "The venue opening could not be closed.");
+    }
+
+    private async Task SaveOpeningPublicationTemplateAndReportAsync(
+        VenueConnectionConfiguration venue,
+        string publicationCode,
+        string? templateText)
+    {
+        var result = await OpeningPublications.SaveTemplateAsync(
+            venue,
+            publicationCode,
+            new SaveOpeningPublicationTemplateRequest(templateText),
+            LifetimeToken);
+        if (result.Success)
+        {
+            ChatGui.Print("Opening-publication template saved.", "PartyPulse");
+            return;
+        }
+
+        ReportVipFailure(result.Failure, "The opening-publication template could not be saved.");
+    }
+
+    private async Task GenerateOpeningPublicationsAndReportAsync(
+        VenueConnectionConfiguration venue,
+        long openingId,
+        string channelCode)
+    {
+        var result = await OpeningPublications.GenerateAsync(
+            venue, openingId, channelCode, LifetimeToken);
+        if (result.Success)
+        {
+            ChatGui.Print($"Generated {channelCode} text for opening #{openingId}.", "PartyPulse");
+            return;
+        }
+
+        ReportVipFailure(result.Failure, "Opening-publication text could not be generated.");
+    }
+
+    private async Task SaveOpeningPublicationTextAndReportAsync(
+        VenueConnectionConfiguration venue,
+        long openingId,
+        string publicationCode,
+        string? publicationText)
+    {
+        var result = await OpeningPublications.SaveTextAsync(
+            venue,
+            openingId,
+            publicationCode,
+            new SaveOpeningPublicationTextRequest(publicationText),
+            LifetimeToken);
+        if (result.Success)
+        {
+            ChatGui.Print("Opening-specific publication text saved.", "PartyPulse");
+            return;
+        }
+
+        ReportVipFailure(result.Failure, "Opening-specific publication text could not be saved.");
     }
 
     private async Task SaveVenueOpeningAndReportAsync(
@@ -1690,6 +1832,7 @@ public sealed class Plugin : IDalamudPlugin
             await VipArrivals.LoadAsync(venue, true, LifetimeToken);
             await Greeter.LoadAsync(venue, true, LifetimeToken);
             await TimedMacros.LoadAsync(venue, true, LifetimeToken);
+            await OpeningPublications.LoadAsync(venue, true, LifetimeToken);
             ChatGui.Print(
                 $"{(openingId is null ? "Scheduled" : "Updated")} opening #{result.Value.OpeningId} for {result.Value.OpensAt.ToLocalTime():g}.",
                 "PartyPulse");
@@ -1711,6 +1854,7 @@ public sealed class Plugin : IDalamudPlugin
             await VipArrivals.LoadAsync(venue, true, LifetimeToken);
             await Greeter.LoadAsync(venue, true, LifetimeToken);
             await TimedMacros.LoadAsync(venue, true, LifetimeToken);
+            await OpeningPublications.LoadAsync(venue, true, LifetimeToken);
             ChatGui.Print($"Cancelled venue opening #{openingId}.", "PartyPulse");
             return;
         }
@@ -1730,6 +1874,7 @@ public sealed class Plugin : IDalamudPlugin
             await VipArrivals.LoadAsync(venue, true, LifetimeToken);
             await Greeter.LoadAsync(venue, true, LifetimeToken);
             await TimedMacros.LoadAsync(venue, true, LifetimeToken);
+            await OpeningPublications.LoadAsync(venue, true, LifetimeToken);
             ChatGui.Print($"Closed venue opening #{openingId}.", "PartyPulse");
             return;
         }
@@ -1778,6 +1923,7 @@ public sealed class Plugin : IDalamudPlugin
         {
             await Greeter.LoadAsync(venue, true, LifetimeToken);
             await TimedMacros.LoadAsync(venue, true, LifetimeToken);
+            await OpeningPublications.LoadAsync(venue, true, LifetimeToken);
             ChatGui.Print(
                 $"{(bookingId is null ? "Scheduled" : "Updated")} {result.Value.DjName} for {result.Value.StartsAt.ToLocalTime():g}.",
                 "PartyPulse");
@@ -1797,6 +1943,7 @@ public sealed class Plugin : IDalamudPlugin
         {
             await Greeter.LoadAsync(venue, true, LifetimeToken);
             await TimedMacros.LoadAsync(venue, true, LifetimeToken);
+            await OpeningPublications.LoadAsync(venue, true, LifetimeToken);
             ChatGui.Print("DJ booking removed. Historical status changes were preserved.", "PartyPulse");
             return;
         }
