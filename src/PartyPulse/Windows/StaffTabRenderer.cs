@@ -614,9 +614,8 @@ public sealed class StaffTabRenderer(Plugin plugin)
                 DrawClockOutActions(venue, view, entry, busy);
             }
 
-            if (entry.PaidAt is null &&
-                entry.FinancialTransactionId is null &&
-                entry.Status != "cancelled")
+            if (entry.Status != "cancelled" &&
+                (entry.FinancialTransactionId is null || entry.PaidAt is not null))
             {
                 ImGui.SameLine();
                 ImGui.BeginDisabled(busy);
@@ -717,10 +716,19 @@ public sealed class StaffTabRenderer(Plugin plugin)
                 ImGui.EndCombo();
             }
 
+            if (selected.RequiresCourtSettlement)
+            {
+                ImGui.TextWrapped(
+                    $"{selected.DisplayName} has unsettled Court items " +
+                    $"(sales {selected.UnsettledCourtGil:N0} gil, " +
+                    $"corrections {selected.UnsettledAdjustmentGil:+#,0;-#,0;0} gil). " +
+                    "Use Court Services to create one combined Court/salary settlement instead.");
+            }
+
             if (plugin.TargetProvider.TryGetCurrentTarget(out var target, out var targetError))
             {
                 ImGui.TextUnformatted($"Verified trade target: {target!.DisplayName}");
-                ImGui.BeginDisabled(busy);
+                ImGui.BeginDisabled(busy || selected.RequiresCourtSettlement);
                 if (ImGui.Button("Create payout and execute Dropbox"))
                 {
                     plugin.CreateStaffPayout(
@@ -810,9 +818,9 @@ public sealed class StaffTabRenderer(Plugin plugin)
         }
 
         ImGui.TextWrapped(
-            $"Cancel time entry #{pendingCancelEntryId}? " +
-            "Locked entries are immutable; cancellation preserves the audit record " +
-            "and allows a replacement entry.");
+            $"Cancel time entry #{pendingCancelEntryId}? Locked and paid entries remain in the audit history. " +
+            "If salary was already paid, an audited correction is added to the staff member's next Court settlement, " +
+            "allowing a corrected replacement entry without silently rewriting the confirmed payout.");
         ImGui.InputText("Reason", ref cancelReason, 255);
         ImGui.BeginDisabled(busy);
         if (ImGui.Button("Confirm cancellation"))

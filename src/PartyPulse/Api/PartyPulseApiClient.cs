@@ -1612,7 +1612,8 @@ public sealed class PartyPulseApiClient : IDisposable
             staff.JobDefinitionId > 0 &&
             staff.EffectiveHourlyRateGil >= 0 &&
             staff.CustomFixedAmountGil >= 0 &&
-            staff.UnpaidSalaryGil >= 0) &&
+            staff.UnpaidSalaryGil >= 0 &&
+            staff.UnsettledCourtGil >= 0) &&
         payload.TimeEntries.All(static entry =>
             entry.TimeEntryId > 0 &&
             entry.StaffMemberId > 0 &&

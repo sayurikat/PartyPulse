@@ -102,6 +102,7 @@ public sealed record CourtTransactionSummary(
     string CollectorMode,
     long? StaffMemberId,
     string? StaffDisplayName,
+    int? StaffUserId,
     long? AccountantAccountId,
     int? CollectorUserId,
     string? CollectorDisplayName,
@@ -112,6 +113,7 @@ public sealed record CourtTransactionSummary(
     string? CollectorWorldName,
     long GrossCourtGil,
     long SalaryGil,
+    long AdjustmentGil,
     long RequestedPrepayGil,
     long StandingBalanceBeforeGil,
     long LedgerDeltaGil,
@@ -136,6 +138,7 @@ public sealed record CourtManagementViewResponse(
     DateTimeOffset ServerNow,
     long? CurrentStaffMemberId,
     long PersonalUnsettledCourtGil,
+    long PersonalAdjustmentGil,
     long PersonalUnpaidSalaryGil,
     IReadOnlyList<CourtOfferSummary> Offers,
     IReadOnlyList<CourtSaleSummary> Sales,
@@ -162,8 +165,8 @@ public sealed record CancelCourtSaleRequest(string? Reason);
 
 public sealed record CreateCourtStaffSettlementRequest(
     string CollectorMode,
-    string CollectorCharacterName,
-    string CollectorWorldName,
+    string StaffCharacterName,
+    string StaffWorldName,
     string? Note);
 
 public sealed record CreateCourtAccountantPrepayRequest(
@@ -202,12 +205,15 @@ public sealed record SellCourtServiceResponse(
 public sealed record CourtSaleCancellationResponse(
     long SaleId,
     DateTimeOffset VoidedAt,
-    long? ReleasedPerkRedemptionId);
+    long? ReleasedPerkRedemptionId,
+    long? AdjustmentId,
+    long AdjustmentGil);
 
 public sealed record CourtFinancialTransactionResponse(
     long TransactionId,
     long GrossCourtGil,
     long SalaryGil,
+    long AdjustmentGil,
     long NetGil,
     string TradeDirection,
     long TradeAmountGil,

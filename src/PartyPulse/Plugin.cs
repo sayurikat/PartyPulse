@@ -1122,25 +1122,25 @@ public sealed class Plugin : IDalamudPlugin
         Observe(ReportApiResultAsync(Court.SellAsync(venue, request, LifetimeToken), "Court Service sale recorded."), "sell Court Service");
 
     public void CancelCourtSale(VenueConnectionConfiguration venue, long saleId, string? reason) =>
-        Observe(ReportApiResultAsync(Court.CancelSaleAsync(venue, saleId, new CancelCourtSaleRequest(reason), LifetimeToken), $"Court Service sale #{saleId} cancelled."), "cancel Court Service sale");
+        Observe(CancelCourtSaleAndReportAsync(venue, saleId, reason), "cancel Court Service sale");
 
     public void CreateCourtStaffSettlement(VenueConnectionConfiguration venue, CreateCourtStaffSettlementRequest request) =>
-        Observe(ReportCourtTransactionAsync(Court.CreateStaffSettlementAsync(venue, request, LifetimeToken)), "create Court staff settlement");
+        Observe(ReportCourtTransactionAsync(venue, Court.CreateStaffSettlementAsync(venue, request, LifetimeToken)), "create Court staff settlement");
 
     public void CreateCourtAccountantPrepay(VenueConnectionConfiguration venue, CreateCourtAccountantPrepayRequest request) =>
-        Observe(ReportCourtTransactionAsync(Court.CreateAccountantPrepayAsync(venue, request, LifetimeToken)), "prepay Court Accountant");
+        Observe(ReportCourtTransactionAsync(venue, Court.CreateAccountantPrepayAsync(venue, request, LifetimeToken)), "prepay Court Accountant");
 
     public void CreateCourtAccountantFinalization(VenueConnectionConfiguration venue, CreateCourtAccountantFinalizationRequest request) =>
-        Observe(ReportCourtTransactionAsync(Court.CreateAccountantFinalizationAsync(venue, request, LifetimeToken)), "finalize Court Accountant balance");
+        Observe(ReportCourtTransactionAsync(venue, Court.CreateAccountantFinalizationAsync(venue, request, LifetimeToken)), "finalize Court Accountant balance");
 
     public void ExecuteCourtTransactionTrade(VenueConnectionConfiguration venue, CourtTransactionSummary transaction) =>
         Observe(ExecuteCourtTransactionTradeAsync(venue, transaction), $"execute Court transaction {transaction.TransactionId}");
 
     public void ConfirmCourtTransaction(VenueConnectionConfiguration venue, long transactionId) =>
-        Observe(ReportApiResultAsync(Court.ConfirmTransactionAsync(venue, transactionId, new ConfirmCourtTransactionRequest(null), LifetimeToken), $"Court financial transaction #{transactionId} confirmed."), "confirm Court transaction");
+        Observe(ConfirmCourtTransactionAndReportAsync(venue, transactionId), "confirm Court transaction");
 
     public void CancelCourtTransaction(VenueConnectionConfiguration venue, long transactionId, string? reason) =>
-        Observe(ReportApiResultAsync(Court.CancelTransactionAsync(venue, transactionId, new CancelCourtTransactionRequest(reason), LifetimeToken), $"Court financial transaction #{transactionId} cancelled and its source rows released."), "cancel Court transaction");
+        Observe(CancelCourtTransactionAndReportAsync(venue, transactionId, reason), "cancel Court transaction");
 
     public void EnsureStaffLoaded(VenueConnectionConfiguration venue)
     {
@@ -1164,10 +1164,10 @@ public sealed class Plugin : IDalamudPlugin
         Observe(ReportApiResultAsync(Staff.SaveTimeEntryAsync(venue, timeEntryId, request, LifetimeToken), timeEntryId is null ? "Clock-in recorded." : "Clock-out recorded and salary locked."), "save Staff time entry");
 
     public void CancelStaffTimeEntry(VenueConnectionConfiguration venue, long timeEntryId, string? reason) =>
-        Observe(ReportApiResultAsync(Staff.CancelTimeEntryAsync(venue, timeEntryId, new CancelStaffTimeEntryRequest(reason), LifetimeToken), $"Time entry #{timeEntryId} cancelled."), "cancel Staff time entry");
+        Observe(CancelStaffTimeEntryAndReportAsync(venue, timeEntryId, reason), "cancel Staff time entry");
 
     public void CreateStaffPayout(VenueConnectionConfiguration venue, CreateStaffPayoutRequest request) =>
-        Observe(ReportStaffPayoutAsync(Staff.CreatePayoutAsync(venue, request, LifetimeToken)), "create Staff payout");
+        Observe(ReportStaffPayoutAsync(venue, Staff.CreatePayoutAsync(venue, request, LifetimeToken)), "create Staff payout");
 
     public void EnsureBarLoaded(VenueConnectionConfiguration venue)
     {
@@ -2930,7 +2930,96 @@ public sealed class Plugin : IDalamudPlugin
             ChatGui.PrintError(result.Failure?.Message ?? "The operation failed.", "PartyPulse");
     }
 
-    private async Task ReportCourtTransactionAsync(Task<ApiResult<CourtFinancialTransactionResponse>> operation)
+    private async Task CancelCourtSaleAndReportAsync(
+        VenueConnectionConfiguration venue,
+        long saleId,
+        string? reason)
+    {
+        var result = await Court.CancelSaleAsync(
+            venue,
+            saleId,
+            new CancelCourtSaleRequest(reason),
+            LifetimeToken);
+        if (!result.Success || result.Value is null)
+        {
+            ChatGui.PrintError(result.Failure?.Message ?? "The Court Service sale could not be cancelled.", "PartyPulse");
+            return;
+        }
+
+        var correction = result.Value.AdjustmentGil == 0
+            ? string.Empty
+            : $" A {result.Value.AdjustmentGil:+#,0;-#,0;0} gil correction was added to the next combined settlement.";
+        ChatGui.Print($"Court Service sale #{saleId} cancelled.{correction}", "PartyPulse");
+        await Staff.LoadAsync(venue, true, LifetimeToken);
+    }
+
+    private async Task CancelStaffTimeEntryAndReportAsync(
+        VenueConnectionConfiguration venue,
+        long timeEntryId,
+        string? reason)
+    {
+        var result = await Staff.CancelTimeEntryAsync(
+            venue,
+            timeEntryId,
+            new CancelStaffTimeEntryRequest(reason),
+            LifetimeToken);
+        if (!result.Success || result.Value is null)
+        {
+            ChatGui.PrintError(result.Failure?.Message ?? "The Staff time entry could not be cancelled.", "PartyPulse");
+            return;
+        }
+
+        var correction = result.Value.AdjustmentGil == 0
+            ? string.Empty
+            : $" A {result.Value.AdjustmentGil:+#,0;-#,0;0} gil correction was added to the next combined settlement.";
+        ChatGui.Print($"Time entry #{timeEntryId} cancelled.{correction}", "PartyPulse");
+        await Court.LoadAsync(venue, true, LifetimeToken);
+    }
+
+    private async Task ConfirmCourtTransactionAndReportAsync(
+        VenueConnectionConfiguration venue,
+        long transactionId)
+    {
+        var result = await Court.ConfirmTransactionAsync(
+            venue,
+            transactionId,
+            new ConfirmCourtTransactionRequest(null),
+            LifetimeToken);
+        if (!result.Success)
+        {
+            ChatGui.PrintError(result.Failure?.Message ?? "The Court transaction could not be confirmed.", "PartyPulse");
+            return;
+        }
+
+        ChatGui.Print($"Court financial transaction #{transactionId} confirmed.", "PartyPulse");
+        await Staff.LoadAsync(venue, true, LifetimeToken);
+    }
+
+    private async Task CancelCourtTransactionAndReportAsync(
+        VenueConnectionConfiguration venue,
+        long transactionId,
+        string? reason)
+    {
+        var result = await Court.CancelTransactionAsync(
+            venue,
+            transactionId,
+            new CancelCourtTransactionRequest(reason),
+            LifetimeToken);
+        if (!result.Success)
+        {
+            ChatGui.PrintError(result.Failure?.Message ?? "The Court transaction could not be cancelled.", "PartyPulse");
+            return;
+        }
+
+        ChatGui.Print(
+            $"Court financial transaction #{transactionId} cancelled and its source rows released.",
+            "PartyPulse");
+        await Staff.LoadAsync(venue, true, LifetimeToken);
+    }
+
+    private async Task ReportCourtTransactionAsync(
+        VenueConnectionConfiguration venue,
+        Task<ApiResult<CourtFinancialTransactionResponse>> operation)
     {
         var result = await operation;
         if (!result.Success || result.Value is null)
@@ -2939,7 +3028,12 @@ public sealed class Plugin : IDalamudPlugin
             return;
         }
         var value = result.Value;
-        ChatGui.Print($"Court transaction #{value.TransactionId}: court {value.GrossCourtGil:N0}, salary {value.SalaryGil:N0}, trade {value.TradeAmountGil:N0} gil.", "PartyPulse");
+        ChatGui.Print(
+            $"Court transaction #{value.TransactionId}: court {value.GrossCourtGil:N0}, " +
+            $"corrections {value.AdjustmentGil:+#,0;-#,0;0}, salary {value.SalaryGil:N0}, " +
+            $"trade {value.TradeAmountGil:N0} gil.",
+            "PartyPulse");
+        await Staff.LoadAsync(venue, true, LifetimeToken);
         if (value.CanExecuteNow && value.TradeAmountGil > 0 && value.TradeTargetCharacterName is not null && value.TradeTargetWorldName is not null)
         {
             var ready = await settlementTradeService.CheckReadyAsync(
@@ -2964,7 +3058,9 @@ public sealed class Plugin : IDalamudPlugin
         }
     }
 
-    private async Task ReportStaffPayoutAsync(Task<ApiResult<StaffPayoutResponse>> operation)
+    private async Task ReportStaffPayoutAsync(
+        VenueConnectionConfiguration venue,
+        Task<ApiResult<StaffPayoutResponse>> operation)
     {
         var result = await operation;
         if (!result.Success || result.Value is null)
@@ -2974,6 +3070,7 @@ public sealed class Plugin : IDalamudPlugin
         }
         var value = result.Value;
         ChatGui.Print($"Staff payout transaction #{value.TransactionId}: {value.SalaryGil:N0} gil.", "PartyPulse");
+        await Court.LoadAsync(venue, true, LifetimeToken);
         if (value.CanExecuteNow && value.TradeAmountGil > 0 && value.TradeTargetCharacterName is not null && value.TradeTargetWorldName is not null)
         {
             var ready = await settlementTradeService.CheckReadyAsync(

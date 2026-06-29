@@ -44,7 +44,10 @@ public sealed record StaffMemberSummary(
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
     DateTimeOffset? ArchivedAt,
-    long UnpaidSalaryGil);
+    long UnpaidSalaryGil,
+    long UnsettledCourtGil,
+    long UnsettledAdjustmentGil,
+    bool RequiresCourtSettlement);
 
 public sealed record StaffCharacterSummary(
     int CharacterId,
@@ -126,12 +129,15 @@ public sealed record StaffTimeEntryOperationResponse(
 
 public sealed record StaffTimeEntryCancellationResponse(
     long TimeEntryId,
-    DateTimeOffset CancelledAt);
+    DateTimeOffset CancelledAt,
+    long? AdjustmentId,
+    long AdjustmentGil);
 
 public sealed record StaffPayoutResponse(
     long TransactionId,
     long GrossCourtGil,
     long SalaryGil,
+    long AdjustmentGil,
     long NetGil,
     string TradeDirection,
     long TradeAmountGil,

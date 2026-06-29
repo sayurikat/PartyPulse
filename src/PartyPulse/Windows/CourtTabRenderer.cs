@@ -67,14 +67,24 @@ public sealed class CourtTabRenderer(Plugin plugin)
         }
 
         var view = snapshot.View;
+        var personalNetGil =
+            (decimal)view.PersonalUnsettledCourtGil +
+            view.PersonalAdjustmentGil -
+            view.PersonalUnpaidSalaryGil;
         ImGui.SameLine();
         ImGui.TextDisabled(
-            $"Unsettled Court gil: {view.PersonalUnsettledCourtGil:N0} | " +
-            $"unpaid salary: {view.PersonalUnpaidSalaryGil:N0}");
+            $"Unsettled Court sales: {view.PersonalUnsettledCourtGil:N0} | " +
+            $"corrections: {view.PersonalAdjustmentGil:+#,0;-#,0;0} | " +
+            $"unpaid salary: {view.PersonalUnpaidSalaryGil:N0} | " +
+            $"net: {personalNetGil:+#,0;-#,0;0} gil");
 
         if (view.Capabilities.CanSell)
         {
             DrawSale(venue, view, busy);
+        }
+
+        if (view.Capabilities.CanFinance || view.Capabilities.CanAccount)
+        {
             DrawSettlement(venue, view, busy);
         }
 
@@ -309,16 +319,32 @@ public sealed class CourtTabRenderer(Plugin plugin)
         CourtManagementViewResponse view,
         bool busy)
     {
-        if (!ImGui.CollapsingHeader("Settle Court sales and salary"))
+        if (!ImGui.CollapsingHeader(
+                "Create Court settlement for target",
+                ImGuiTreeNodeFlags.DefaultOpen))
         {
             return;
         }
 
-        var modes = new[] { "Finance manager", "Court Accountant" };
-        ImGui.Combo("Settle with", ref collectorMode, modes, modes.Length);
+        var canFinance = view.Capabilities.CanFinance;
+        var canAccount = view.Capabilities.CanAccount;
+        if (canFinance && canAccount)
+        {
+            var modes = new[] { "Venue finance", "My Court Accountant balance" };
+            ImGui.Combo("Settle as", ref collectorMode, modes, modes.Length);
+        }
+        else
+        {
+            collectorMode = canAccount ? 1 : 0;
+            ImGui.TextUnformatted(
+                canAccount
+                    ? "Settle as: My Court Accountant balance"
+                    : "Settle as: Venue finance");
+        }
+
         ImGui.TextDisabled(
-            "Court revenue and unpaid salary are netted into one trade. " +
-            "A zero net requires confirmation but no trade.");
+            "The accountant or finance user creates and confirms the settlement. " +
+            "Court sales, correction entries, and unpaid salary are netted into one trade.");
 
         if (!plugin.TargetProvider.TryGetCurrentTarget(out var target, out var targetError))
         {
@@ -326,11 +352,9 @@ public sealed class CourtTabRenderer(Plugin plugin)
             return;
         }
 
-        ImGui.TextUnformatted($"Target collector: {target!.DisplayName}");
-        ImGui.BeginDisabled(
-            busy ||
-            (view.PersonalUnsettledCourtGil == 0 && view.PersonalUnpaidSalaryGil == 0));
-        if (ImGui.Button("Create combined settlement"))
+        ImGui.TextUnformatted($"Court worker target: {target!.DisplayName}");
+        ImGui.BeginDisabled(busy);
+        if (ImGui.Button("Create settlement for target"))
         {
             plugin.CreateCourtStaffSettlement(
                 venue,
@@ -568,7 +592,9 @@ public sealed class CourtTabRenderer(Plugin plugin)
             ImGui.PushID($"court-tx-{transaction.TransactionId}");
             ImGui.TextUnformatted(
                 $"#{transaction.TransactionId} {transaction.TransactionType} — " +
-                $"court {transaction.GrossCourtGil:N0}, salary {transaction.SalaryGil:N0}, " +
+                $"court {transaction.GrossCourtGil:N0}, " +
+                $"corrections {transaction.AdjustmentGil:+#,0;-#,0;0}, " +
+                $"salary {transaction.SalaryGil:N0}, " +
                 $"trade {transaction.TradeAmountGil:N0} gil — {transaction.Status}");
 
             if (transaction.Status == "pending")
@@ -660,10 +686,9 @@ public sealed class CourtTabRenderer(Plugin plugin)
                 $"{sale.SellerDisplayName} — {price} — {status}");
 
             var canCancel =
-                view.Capabilities.CanManage &&
+                (view.Capabilities.CanManage || view.Capabilities.CanFinance) &&
                 sale.VoidedAt is null &&
-                (sale.SettledAt is null || sale.TotalPriceGil == 0) &&
-                sale.FinancialTransactionId is null;
+                (sale.FinancialTransactionId is null || sale.SettledAt is not null);
             if (canCancel)
             {
                 ImGui.SameLine();
@@ -708,8 +733,9 @@ public sealed class CourtTabRenderer(Plugin plugin)
         }
 
         ImGui.TextWrapped(
-            $"Cancel Court sale #{pendingCancelSaleId}? " +
-            "A consumed VIP Perk will be released.");
+            $"Cancel Court sale #{pendingCancelSaleId}? A consumed VIP Perk will be released. " +
+            "If the gil was already settled, an audited correction is added to the seller's next Court settlement; " +
+            "the confirmed historical transaction is not rewritten.");
         ImGui.InputText("Reason", ref cancelReason, 255);
         ImGui.BeginDisabled(busy);
         if (ImGui.Button("Confirm cancellation"))
