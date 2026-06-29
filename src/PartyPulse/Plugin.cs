@@ -1060,6 +1060,13 @@ public sealed class Plugin : IDalamudPlugin
             UpdatePhotoshootPackageAndReportAsync(venue, packageId, request),
             $"update photoshoot package {packageId}");
 
+    public void UpdatePhotoshootSettings(
+        VenueConnectionConfiguration venue,
+        UpdatePhotoshootSettingsRequest request) =>
+        Observe(
+            UpdatePhotoshootSettingsAndReportAsync(venue, request),
+            $"update photoshoot settings for {venue.VenueCode}");
+
     public void SellPhotoshoot(VenueConnectionConfiguration venue, SellPhotoshootRequest request) =>
         Observe(SellPhotoshootAndReportAsync(venue, request), $"sell photoshoot for {venue.VenueCode}");
 
@@ -1489,6 +1496,8 @@ public sealed class Plugin : IDalamudPlugin
         var result = await Vip.CreatePackageAsync(venue, request, LifetimeToken);
         if (result.Success && result.Value is not null)
         {
+            await VipPerks.LoadAsync(venue, true, LifetimeToken);
+            await RefreshPhotoshootsIfLoadedAsync(venue);
             ChatGui.Print($"Created VIP package '{request.Name}'.", "PartyPulse");
             return;
         }
@@ -1504,6 +1513,8 @@ public sealed class Plugin : IDalamudPlugin
         var result = await Vip.UpdatePackageAsync(venue, packageId, request, LifetimeToken);
         if (result.Success)
         {
+            await VipPerks.LoadAsync(venue, true, LifetimeToken);
+            await RefreshPhotoshootsIfLoadedAsync(venue);
             ChatGui.Print($"Updated VIP package '{request.Name}'.", "PartyPulse");
             return;
         }
@@ -1524,6 +1535,9 @@ public sealed class Plugin : IDalamudPlugin
             ChatGui.Print(
                 $"Sold VIP to {request.CharacterName} @ {request.WorldName} ({period}).",
                 "PartyPulse");
+
+            await VipPerks.LoadAsync(venue, true, LifetimeToken);
+            await RefreshPhotoshootsIfLoadedAsync(venue);
 
             if (result.Value.WasNewVip && result.Value.OpeningId is { } openingId)
             {
@@ -1562,6 +1576,8 @@ public sealed class Plugin : IDalamudPlugin
             LifetimeToken);
         if (result.Success)
         {
+            await VipPerks.LoadAsync(venue, true, LifetimeToken);
+            await RefreshPhotoshootsIfLoadedAsync(venue);
             ChatGui.Print(
                 $"Linked {request.CharacterName} @ {request.WorldName} to the VIP player.",
                 "PartyPulse");
@@ -1617,6 +1633,8 @@ public sealed class Plugin : IDalamudPlugin
             LifetimeToken);
         if (result.Success)
         {
+            await VipPerks.LoadAsync(venue, true, LifetimeToken);
+            await RefreshPhotoshootsIfLoadedAsync(venue);
             ChatGui.Print("Unlinked the character from the VIP player.", "PartyPulse");
             return;
         }
@@ -1636,6 +1654,8 @@ public sealed class Plugin : IDalamudPlugin
             LifetimeToken);
         if (result.Success)
         {
+            await VipPerks.LoadAsync(venue, true, LifetimeToken);
+            await RefreshPhotoshootsIfLoadedAsync(venue);
             ChatGui.Print(
                 $"Cancelled VIP subscription #{subscriptionId}. Refunds must be handled separately.",
                 "PartyPulse");
@@ -2395,6 +2415,22 @@ public sealed class Plugin : IDalamudPlugin
         ChatGui.Print($"Updated photoshoot package '{request.Name}'.", "PartyPulse");
     }
 
+    private async Task UpdatePhotoshootSettingsAndReportAsync(
+        VenueConnectionConfiguration venue,
+        UpdatePhotoshootSettingsRequest request)
+    {
+        var result = await Photoshoots.UpdateSettingsAsync(venue, request, LifetimeToken);
+        if (!result.Success || result.Value is null)
+        {
+            ReportVipFailure(result.Failure, "The photoshoot seller percentage could not be updated.");
+            return;
+        }
+
+        ChatGui.Print(
+            $"Photoshoot sellers now keep {result.Value.SellerPercentage:0.##}% of collected gil.",
+            "PartyPulse");
+    }
+
     private async Task RefreshPhotoshootsIfLoadedAsync(VenueConnectionConfiguration venue)
     {
         if (Photoshoots.GetSnapshot(venue).Status == PhotoshootManagementStatus.NotLoaded)
@@ -2430,7 +2466,10 @@ public sealed class Plugin : IDalamudPlugin
         var cost = result.Value.BaseCostType == "vip_perk"
             ? $"VIP perk {result.Value.PricePerkName}" + (result.Value.TotalGil > 0 ? $" plus {result.Value.TotalGil:N0} gil" : string.Empty)
             : $"{result.Value.TotalGil:N0} gil";
-        ChatGui.Print($"Recorded photoshoot sale #{result.Value.SaleId} to {result.Value.BuyerCharacterName} for {cost}.", "PartyPulse");
+        ChatGui.Print(
+            $"Recorded photoshoot sale #{result.Value.SaleId} to {result.Value.BuyerCharacterName} for {cost}. " +
+            $"Seller keeps {result.Value.SellerShareGil:N0} gil; {result.Value.VenueShareGil:N0} gil is owed to the venue.",
+            "PartyPulse");
     }
 
     private async Task CreatePhotoshootSettlementAndReportAsync(VenueConnectionConfiguration venue, CreatePhotoshootSettlementRequest request)

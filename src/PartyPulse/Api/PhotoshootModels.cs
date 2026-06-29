@@ -7,7 +7,8 @@ public sealed record PhotoshootCapabilities(
     bool CanView,
     bool CanSell,
     bool CanManagePackages,
-    bool CanManageSettlements);
+    bool CanManageSettlements,
+    bool CanManageCommission);
 
 public sealed record PhotoshootPackageSummary(
     int PackageId,
@@ -35,6 +36,9 @@ public sealed record PhotoshootSaleSummary(
     int? BasePriceGil,
     int AdditionalCharacterPriceGil,
     long TotalGil,
+    decimal SellerPercentage,
+    long SellerShareGil,
+    long VenueShareGil,
     int? PricePerkId,
     string? PricePerkName,
     long? PerkRedemptionId,
@@ -78,6 +82,9 @@ public sealed record PhotoshootVipPerkAvailabilitySummary(
 
 public sealed record PhotoshootManagementViewResponse(
     PhotoshootCapabilities Capabilities,
+    decimal SellerPercentage,
+    long PersonalGrossGil,
+    long PersonalSellerShareGil,
     long PersonalUnpaidGil,
     long PersonalPendingGil,
     long PersonalAvailableGil,
@@ -101,7 +108,11 @@ public sealed record UpdatePhotoshootPackageRequest(
     int AdditionalCharacterPriceGil,
     bool Archived);
 
+public sealed record UpdatePhotoshootSettingsRequest(decimal SellerPercentage);
+
 public sealed record PhotoshootPackageOperationResponse(int PackageId);
+
+public sealed record UpdatePhotoshootSettingsResponse(decimal SellerPercentage);
 
 public sealed record SellPhotoshootRequest(
     string TargetCharacterName,
@@ -119,6 +130,9 @@ public sealed record SellPhotoshootResponse(
     int AdditionalCharacters,
     string BaseCostType,
     long TotalGil,
+    decimal SellerPercentage,
+    long SellerShareGil,
+    long VenueShareGil,
     int? PricePerkId,
     string? PricePerkName,
     long? PerkRedemptionId,

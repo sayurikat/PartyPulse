@@ -973,11 +973,24 @@ public sealed class PartyPulseApiClient : IDisposable
             baseUri, HttpMethod.Put, $"api/v1/photoshoots/packages/{packageId}", accessToken, request,
             static payload => payload.PackageId > 0, cancellationToken);
 
+    public Task<ApiResult<UpdatePhotoshootSettingsResponse>> UpdatePhotoshootSettingsAsync(
+        Uri baseUri, string accessToken, UpdatePhotoshootSettingsRequest request, CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<UpdatePhotoshootSettingsResponse>(
+            baseUri, HttpMethod.Put, "api/v1/photoshoots/settings", accessToken, request,
+            static payload => payload.SellerPercentage is >= 0m and <= 100m, cancellationToken);
+
     public Task<ApiResult<SellPhotoshootResponse>> SellPhotoshootAsync(
         Uri baseUri, string accessToken, SellPhotoshootRequest request, CancellationToken cancellationToken) =>
         SendAuthorizedAsync<SellPhotoshootResponse>(
             baseUri, HttpMethod.Post, "api/v1/photoshoots/sales", accessToken, request,
-            static payload => payload.SaleId > 0 && payload.PackageId > 0 && payload.TotalGil >= 0 && payload.SoldAt != default,
+            static payload => payload.SaleId > 0 &&
+                              payload.PackageId > 0 &&
+                              payload.TotalGil >= 0 &&
+                              payload.SellerPercentage is >= 0m and <= 100m &&
+                              payload.SellerShareGil >= 0 &&
+                              payload.VenueShareGil >= 0 &&
+                              payload.SellerShareGil + payload.VenueShareGil == payload.TotalGil &&
+                              payload.SoldAt != default,
             cancellationToken);
 
     public Task<ApiResult<FinanceViewResponse>> GetFinanceAsync(
@@ -1122,11 +1135,15 @@ public sealed class PartyPulseApiClient : IDisposable
         payload.Redemptions.All(static value => value.RedemptionId > 0 && value.PerkId > 0);
 
     private static bool ValidatePhotoshootViewResponse(PhotoshootManagementViewResponse payload) =>
-        payload.Capabilities is not null && payload.PersonalUnpaidGil >= 0 &&
-        payload.PersonalPendingGil >= 0 && payload.PersonalAvailableGil >= 0 &&
+        payload.Capabilities is not null && payload.SellerPercentage is >= 0m and <= 100m &&
+        payload.PersonalGrossGil >= 0 && payload.PersonalSellerShareGil >= 0 &&
+        payload.PersonalUnpaidGil >= 0 && payload.PersonalPendingGil >= 0 && payload.PersonalAvailableGil >= 0 &&
         payload.Packages is not null && payload.Sales is not null && payload.VipStatuses is not null && payload.VipPerkAvailability is not null &&
         payload.Packages.All(static value => value.PackageId > 0 && value.IncludedCharacters > 0 && !string.IsNullOrWhiteSpace(value.Name)) &&
-        payload.Sales.All(static value => value.SaleId > 0 && value.PackageId > 0 && value.TotalGil >= 0) &&
+        payload.Sales.All(static value =>
+            value.SaleId > 0 && value.PackageId > 0 && value.TotalGil >= 0 &&
+            value.SellerPercentage is >= 0m and <= 100m && value.SellerShareGil >= 0 &&
+            value.VenueShareGil >= 0 && value.SellerShareGil + value.VenueShareGil == value.TotalGil) &&
         payload.VipStatuses.All(static value => value.CharacterId > 0 && value.SubscriptionId > 0 && value.VipPackageId > 0) &&
         payload.VipPerkAvailability.All(static value => value.CharacterId > 0 && value.PerkId > 0);
 

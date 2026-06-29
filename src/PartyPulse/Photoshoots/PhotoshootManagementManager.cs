@@ -118,6 +118,19 @@ public sealed class PhotoshootManagementManager : IDisposable
                 cancellationToken),
             cancellationToken);
 
+    public Task<ApiResult<UpdatePhotoshootSettingsResponse>> UpdateSettingsAsync(
+        VenueConnectionConfiguration venue,
+        UpdatePhotoshootSettingsRequest request,
+        CancellationToken cancellationToken) =>
+        MutateAsync(
+            venue,
+            (baseUri, accessToken) => apiClient.UpdatePhotoshootSettingsAsync(
+                baseUri,
+                accessToken,
+                request,
+                cancellationToken),
+            cancellationToken);
+
     public Task<ApiResult<SellPhotoshootResponse>> SellAsync(
         VenueConnectionConfiguration venue,
         SellPhotoshootRequest request,

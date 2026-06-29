@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Utility;
 using PartyPulse.Api;
@@ -11,6 +12,9 @@ namespace PartyPulse.Windows;
 
 public sealed class PhotoshootsTabRenderer(Plugin plugin)
 {
+    private static readonly Vector4 AvailableColor = new(0.35f, 0.85f, 0.45f, 1f);
+    private static readonly Vector4 UnavailableColor = new(0.65f, 0.18f, 0.18f, 1f);
+
     private Guid activeProfileId;
     private int selectedPackageId;
     private int additionalCharacters;
@@ -28,12 +32,19 @@ public sealed class PhotoshootsTabRenderer(Plugin plugin)
     private int selectedPricePerkId;
     private bool packageArchived;
 
+    private decimal loadedSellerPercentage = -1m;
+    private float sellerPercentage;
+
     private string settlementTargetName = string.Empty;
     private string settlementTargetWorld = string.Empty;
 
     public void Draw(VenueConnectionConfiguration venue)
     {
-        if (!ImGui.BeginTabItem("Photoshoots")) return;
+        if (!ImGui.BeginTabItem("Photoshoots"))
+        {
+            return;
+        }
+
         ResetForVenue(venue);
         plugin.EnsurePhotoshootsLoaded(venue);
         plugin.EnsureVipPerksLoaded(venue);
@@ -41,7 +52,10 @@ public sealed class PhotoshootsTabRenderer(Plugin plugin)
         var snapshot = plugin.Photoshoots.GetSnapshot(venue);
         var busy = plugin.Photoshoots.IsBusy(venue.ProfileId) || plugin.Finance.IsBusy(venue.ProfileId);
         ImGui.BeginDisabled(busy);
-        if (ImGui.Button("Refresh photoshoots")) plugin.RefreshPhotoshoots(venue);
+        if (ImGui.Button("Refresh photoshoots"))
+        {
+            plugin.RefreshPhotoshoots(venue);
+        }
         ImGui.EndDisabled();
 
         if (snapshot.Status != PhotoshootManagementStatus.Ready || snapshot.View is null)
@@ -52,13 +66,25 @@ public sealed class PhotoshootsTabRenderer(Plugin plugin)
         }
 
         var view = snapshot.View;
+        SyncCommissionEditor(view);
+
         if (view.Capabilities.CanSell)
         {
             ImGui.SameLine();
-            ImGui.TextUnformatted($"My unsettled photoshoots: {view.PersonalAvailableGil:N0} gil");
-            if (view.PersonalPendingGil > 0) { ImGui.SameLine(); ImGui.TextDisabled($"Pending: {view.PersonalPendingGil:N0} gil"); }
+            ImGui.TextUnformatted($"Seller keeps {view.SellerPercentage:0.##}%");
+            ImGui.TextDisabled(
+                $"Unsettled collected: {view.PersonalGrossGil:N0} gil | " +
+                $"Your retained share: {view.PersonalSellerShareGil:N0} gil | " +
+                $"Available for venue: {view.PersonalAvailableGil:N0} gil" +
+                (view.PersonalPendingGil > 0 ? $" | Pending: {view.PersonalPendingGil:N0} gil" : string.Empty));
             DrawSeller(venue, view, busy);
             DrawSettlement(venue, view, busy);
+        }
+
+        if (view.Capabilities.CanManageCommission)
+        {
+            ImGui.Separator();
+            DrawCommissionSettings(venue, busy);
         }
 
         if (view.Capabilities.CanManagePackages)
@@ -73,7 +99,10 @@ public sealed class PhotoshootsTabRenderer(Plugin plugin)
         ImGui.EndTabItem();
     }
 
-    private void DrawSeller(VenueConnectionConfiguration venue, PhotoshootManagementViewResponse view, bool busy)
+    private void DrawSeller(
+        VenueConnectionConfiguration venue,
+        PhotoshootManagementViewResponse view,
+        bool busy)
     {
         ImGui.Spacing();
         ImGui.TextUnformatted("Sell to targeted player");
@@ -90,44 +119,86 @@ public sealed class PhotoshootsTabRenderer(Plugin plugin)
         var vipAvailability = view.VipPerkAvailability.Where(value =>
             string.Equals(value.CharacterName, target.CharacterName, StringComparison.OrdinalIgnoreCase) &&
             string.Equals(value.WorldName, target.WorldName, StringComparison.OrdinalIgnoreCase)).ToArray();
+
         if (vipStatus is not null)
-            ImGui.TextDisabled($"VIP: {vipStatus.VipPackageName}" + (vipStatus.EndsAt is { } end ? $" until {VenueTimeZone.Format(venue, end, "g")}" : " (lifetime)"));
+        {
+            ImGui.TextColored(
+                AvailableColor,
+                $"VIP: {vipStatus.VipPackageName}" +
+                (vipStatus.EndsAt is { } end
+                    ? $" until {VenueTimeZone.Format(venue, end, "g")}"
+                    : " (lifetime)"));
+        }
         else
-            ImGui.TextDisabled("No active VIP package was found for this character.");
+        {
+            ImGui.TextColored(UnavailableColor, "No active VIP package was found for this character.");
+        }
 
         ImGui.TextUnformatted("Choose package");
-        foreach (var package in view.Packages.Where(value => value.ArchivedAt is null).OrderBy(value => value.Name))
+        foreach (var package in view.Packages
+                     .Where(value => value.ArchivedAt is null)
+                     .OrderBy(value => value.Name))
         {
             var selected = selectedPackageId == package.PackageId;
-            ImGui.PushID(package.PackageId);
             var availability = package.PricePerkId is { } perkId
                 ? vipAvailability.FirstOrDefault(value => value.PerkId == perkId)
                 : null;
-            var baseLabel = package.PricePerkId is null
-                ? $"{package.BasePriceGil.GetValueOrDefault():N0} gil"
-                : availability?.Available == true
-                    ? $"VIP perk: {package.PricePerkName} (available)"
-                    : availability?.NextResetAt is { } next
-                        ? $"VIP perk: {package.PricePerkName} (next {VenueTimeZone.Format(venue, next, "g")})"
-                        : $"VIP perk: {package.PricePerkName} (not available)";
-            if (ImGui.Selectable($"{package.Name} — {package.IncludedCharacters} character(s) — {baseLabel}##package", selected))
+
+            ImGui.PushID(package.PackageId);
+            if (ImGui.RadioButton("##SelectPackage", selected))
+            {
                 selectedPackageId = package.PackageId;
+            }
+            ImGui.SameLine();
+            ImGui.TextUnformatted($"{package.Name} — {package.IncludedCharacters} character(s)");
+            ImGui.SameLine();
+
+            if (package.PricePerkId is null)
+            {
+                ImGui.TextUnformatted($"— {package.BasePriceGil.GetValueOrDefault():N0} gil");
+            }
+            else if (availability?.Available == true)
+            {
+                ImGui.TextColored(AvailableColor, $"— VIP perk: {package.PricePerkName} (available)");
+            }
+            else
+            {
+                var unavailable = availability?.NextResetAt is { } next
+                    ? $"— VIP perk: {package.PricePerkName} (next {VenueTimeZone.Format(venue, next, "g")})"
+                    : $"— VIP perk: {package.PricePerkName} (not available)";
+                ImGui.TextColored(UnavailableColor, unavailable);
+            }
+
             ImGui.PopID();
         }
 
-        var selectedPackage = view.Packages.FirstOrDefault(value => value.PackageId == selectedPackageId && value.ArchivedAt is null);
-        if (selectedPackage is null) return;
+        var selectedPackage = view.Packages.FirstOrDefault(value =>
+            value.PackageId == selectedPackageId && value.ArchivedAt is null);
+        if (selectedPackage is null)
+        {
+            return;
+        }
+
         ImGui.InputInt("Additional characters", ref additionalCharacters);
         additionalCharacters = Math.Clamp(additionalCharacters, 0, 100);
         var totalGil = (long)selectedPackage.BasePriceGil.GetValueOrDefault() +
                        (long)additionalCharacters * selectedPackage.AdditionalCharacterPriceGil;
+        var sellerShare = CalculateSellerShare(totalGil, view.SellerPercentage);
+        var venueShare = totalGil - sellerShare;
         var perkState = selectedPackage.PricePerkId is { } selectedPerkId
             ? vipAvailability.FirstOrDefault(value => value.PerkId == selectedPerkId)
             : null;
         var canSell = selectedPackage.PricePerkId is null || perkState?.Available == true;
+
         ImGui.TextUnformatted(selectedPackage.PricePerkId is null
             ? $"Total: {totalGil:N0} gil"
             : $"Total: {selectedPackage.PricePerkName} + {totalGil:N0} gil");
+        if (totalGil > 0)
+        {
+            ImGui.TextDisabled(
+                $"Seller retains {sellerShare:N0} gil; {venueShare:N0} gil will be included in venue settlement.");
+        }
+
         ImGui.BeginDisabled(busy || !canSell);
         if (ImGui.Button("Record photoshoot sale"))
         {
@@ -140,25 +211,56 @@ public sealed class PhotoshootsTabRenderer(Plugin plugin)
         ImGui.EndDisabled();
     }
 
-    private void DrawSaleConfirmation(VenueConnectionConfiguration venue, PhotoshootManagementViewResponse view)
+    private void DrawSaleConfirmation(
+        VenueConnectionConfiguration venue,
+        PhotoshootManagementViewResponse view)
     {
-        if (!ImGui.BeginPopupModal("Confirm photoshoot sale###PartyPulsePhotoshootSale", ImGuiWindowFlags.AlwaysAutoResize)) return;
+        if (!ImGui.BeginPopupModal(
+                "Confirm photoshoot sale###PartyPulsePhotoshootSale",
+                ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            return;
+        }
+
         var package = view.Packages.FirstOrDefault(value => value.PackageId == pendingPackageId);
-        if (package is null) { ImGui.TextUnformatted("Package is no longer available."); }
+        if (package is null)
+        {
+            ImGui.TextUnformatted("Package is no longer available.");
+        }
         else
         {
-            var total = (long)package.BasePriceGil.GetValueOrDefault() + (long)pendingAdditionalCharacters * package.AdditionalCharacterPriceGil;
-            var cost = package.PricePerkId is null ? $"{total:N0} gil" : $"{package.PricePerkName} plus {total:N0} gil";
-            ImGui.TextWrapped($"Record {package.Name} for {pendingBuyerName} @ {pendingBuyerWorld} at {cost}?");
-            ImGui.TextWrapped("VIP perk availability and pricing will be checked again by the server before the sale is committed.");
+            var total = (long)package.BasePriceGil.GetValueOrDefault() +
+                        (long)pendingAdditionalCharacters * package.AdditionalCharacterPriceGil;
+            var sellerShare = CalculateSellerShare(total, view.SellerPercentage);
+            var venueShare = total - sellerShare;
+            var cost = package.PricePerkId is null
+                ? $"{total:N0} gil"
+                : $"{package.PricePerkName} plus {total:N0} gil";
+            ImGui.TextWrapped(
+                $"Record {package.Name} for {pendingBuyerName} @ {pendingBuyerWorld} at {cost}?");
+            ImGui.TextWrapped(
+                $"At the current {view.SellerPercentage:0.##}% seller rate, the seller keeps " +
+                $"{sellerShare:N0} gil and {venueShare:N0} gil is owed to the venue.");
+            ImGui.TextWrapped(
+                "VIP perk availability, commission, and pricing will be checked again by the server before the sale is committed.");
             if (ImGui.Button("Confirm sale"))
             {
-                plugin.SellPhotoshoot(venue, new SellPhotoshootRequest(pendingBuyerName, pendingBuyerWorld, pendingPackageId, pendingAdditionalCharacters));
+                plugin.SellPhotoshoot(
+                    venue,
+                    new SellPhotoshootRequest(
+                        pendingBuyerName,
+                        pendingBuyerWorld,
+                        pendingPackageId,
+                        pendingAdditionalCharacters));
                 ImGui.CloseCurrentPopup();
             }
             ImGui.SameLine();
         }
-        if (ImGui.Button("Cancel")) ImGui.CloseCurrentPopup();
+
+        if (ImGui.Button("Cancel"))
+        {
+            ImGui.CloseCurrentPopup();
+        }
         ImGui.EndPopup();
     }
 
@@ -173,7 +275,7 @@ public sealed class PhotoshootsTabRenderer(Plugin plugin)
         }
 
         ImGui.Spacing();
-        ImGui.TextUnformatted($"Available to settle: {view.PersonalAvailableGil:N0} gil");
+        ImGui.TextUnformatted($"Available to settle with venue: {view.PersonalAvailableGil:N0} gil");
 
         var hasTarget = plugin.TargetProvider.TryGetCurrentTarget(out var target, out var targetReason);
         ImGui.BeginDisabled(busy || !hasTarget);
@@ -201,6 +303,8 @@ public sealed class PhotoshootsTabRenderer(Plugin plugin)
             $"Initiate a trade with {settlementTargetName} @ {settlementTargetWorld} for " +
             $"{view.PersonalAvailableGil:N0} gil?");
         ImGui.TextWrapped(
+            "This is the venue share after the seller percentage has already been retained on each sale.");
+        ImGui.TextWrapped(
             "The targeted character must belong to an active venue user with finance.settlements.manage or venue.owner.");
         ImGui.TextWrapped(
             "Confirming checks Dropbox, creates a pending server transaction, and starts the trade queue. " +
@@ -222,17 +326,60 @@ public sealed class PhotoshootsTabRenderer(Plugin plugin)
         ImGui.EndPopup();
     }
 
-    private void DrawPackageManagement(VenueConnectionConfiguration venue, PhotoshootManagementViewResponse view, bool busy)
+    private void DrawCommissionSettings(VenueConnectionConfiguration venue, bool busy)
     {
-        if (!ImGui.CollapsingHeader("Photoshoot package definitions", ImGuiTreeNodeFlags.DefaultOpen)) return;
-        if (ImGui.Button("New package")) ResetEditor();
-        foreach (var package in view.Packages.OrderBy(value => value.ArchivedAt is not null).ThenBy(value => value.Name))
+        if (!ImGui.CollapsingHeader("Photoshoot seller percentage"))
+        {
+            return;
+        }
+
+        ImGui.TextDisabled(
+            "Venue owner setting. The percentage is snapshotted when each sale is recorded and only applies to gil collected.");
+        ImGui.SetNextItemWidth(180 * ImGuiHelpers.GlobalScale);
+        ImGui.InputFloat("Seller keeps (%)", ref sellerPercentage, 0.25f, 1f, "%.2f");
+        sellerPercentage = Math.Clamp(sellerPercentage, 0f, 100f);
+
+        ImGui.BeginDisabled(busy);
+        if (ImGui.Button("Save seller percentage"))
+        {
+            var normalized = decimal.Round((decimal)sellerPercentage, 2, MidpointRounding.AwayFromZero);
+            plugin.UpdatePhotoshootSettings(venue, new UpdatePhotoshootSettingsRequest(normalized));
+        }
+        ImGui.EndDisabled();
+    }
+
+    private void DrawPackageManagement(
+        VenueConnectionConfiguration venue,
+        PhotoshootManagementViewResponse view,
+        bool busy)
+    {
+        if (!ImGui.CollapsingHeader("Photoshoot package definitions", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            return;
+        }
+
+        if (ImGui.Button("New package"))
+        {
+            ResetEditor();
+        }
+
+        foreach (var package in view.Packages
+                     .OrderBy(value => value.ArchivedAt is not null)
+                     .ThenBy(value => value.Name))
         {
             ImGui.PushID(package.PackageId);
-            var price = package.PricePerkId is null ? $"{package.BasePriceGil:N0} gil" : $"perk: {package.PricePerkName}";
-            ImGui.TextUnformatted($"{package.Name} — {package.IncludedCharacters} included — {price} — +{package.AdditionalCharacterPriceGil:N0}/extra{(package.ArchivedAt is null ? string.Empty : " — archived")}");
+            var price = package.PricePerkId is null
+                ? $"{package.BasePriceGil:N0} gil"
+                : $"perk: {package.PricePerkName}";
+            ImGui.TextUnformatted(
+                $"{package.Name} — {package.IncludedCharacters} included — {price} — " +
+                $"+{package.AdditionalCharacterPriceGil:N0}/extra" +
+                (package.ArchivedAt is null ? string.Empty : " — archived"));
             ImGui.SameLine();
-            if (ImGui.SmallButton("Edit")) LoadEditor(package);
+            if (ImGui.SmallButton("Edit"))
+            {
+                LoadEditor(package);
+            }
             ImGui.PopID();
         }
 
@@ -242,13 +389,19 @@ public sealed class PhotoshootsTabRenderer(Plugin plugin)
         ImGui.Checkbox("Use VIP perk for base price", ref priceWithPerk);
         if (priceWithPerk)
         {
-            var perks = plugin.VipPerks.GetSnapshot(venue).View?.Perks.Where(value => value.ArchivedAt is null).OrderBy(value => value.Name).ToArray() ?? Array.Empty<VipPerkSummary>();
+            var perks = plugin.VipPerks.GetSnapshot(venue).View?.Perks
+                .Where(value => value.ArchivedAt is null)
+                .OrderBy(value => value.Name)
+                .ToArray() ?? Array.Empty<VipPerkSummary>();
             var preview = perks.FirstOrDefault(value => value.PerkId == selectedPricePerkId)?.Name ?? "Select perk";
             if (ImGui.BeginCombo("Price perk", preview))
             {
                 foreach (var perk in perks)
                 {
-                    if (ImGui.Selectable(perk.Name, selectedPricePerkId == perk.PerkId)) selectedPricePerkId = perk.PerkId;
+                    if (ImGui.Selectable(perk.Name, selectedPricePerkId == perk.PerkId))
+                    {
+                        selectedPricePerkId = perk.PerkId;
+                    }
                 }
                 ImGui.EndCombo();
             }
@@ -269,24 +422,63 @@ public sealed class PhotoshootsTabRenderer(Plugin plugin)
                     extraPriceGil >= 0 &&
                     (priceWithPerk ? selectedPricePerkId > 0 : basePriceGil >= 0);
         ImGui.BeginDisabled(busy || !valid);
-        if (ImGui.Button(editingPackageId == 0 ? "Create photoshoot package" : "Save photoshoot package"))
+        if (ImGui.Button(editingPackageId == 0
+                ? "Create photoshoot package"
+                : "Save photoshoot package"))
         {
             if (editingPackageId == 0)
-                plugin.CreatePhotoshootPackage(venue, new CreatePhotoshootPackageRequest(packageName.Trim(), includedCharacters, priceWithPerk ? null : basePriceGil, priceWithPerk ? selectedPricePerkId : null, extraPriceGil));
+            {
+                plugin.CreatePhotoshootPackage(
+                    venue,
+                    new CreatePhotoshootPackageRequest(
+                        packageName.Trim(),
+                        includedCharacters,
+                        priceWithPerk ? null : basePriceGil,
+                        priceWithPerk ? selectedPricePerkId : null,
+                        extraPriceGil));
+            }
             else
-                plugin.UpdatePhotoshootPackage(venue, editingPackageId, new UpdatePhotoshootPackageRequest(packageName.Trim(), includedCharacters, priceWithPerk ? null : basePriceGil, priceWithPerk ? selectedPricePerkId : null, extraPriceGil, packageArchived));
+            {
+                plugin.UpdatePhotoshootPackage(
+                    venue,
+                    editingPackageId,
+                    new UpdatePhotoshootPackageRequest(
+                        packageName.Trim(),
+                        includedCharacters,
+                        priceWithPerk ? null : basePriceGil,
+                        priceWithPerk ? selectedPricePerkId : null,
+                        extraPriceGil,
+                        packageArchived));
+            }
         }
         ImGui.EndDisabled();
     }
 
-    private static void DrawRecentSales(VenueConnectionConfiguration venue, PhotoshootManagementViewResponse view)
+    private static void DrawRecentSales(
+        VenueConnectionConfiguration venue,
+        PhotoshootManagementViewResponse view)
     {
-        if (!ImGui.CollapsingHeader("Recent photoshoot sales")) return;
+        if (!ImGui.CollapsingHeader("Recent photoshoot sales"))
+        {
+            return;
+        }
+
         foreach (var sale in view.Sales.Take(100))
         {
-            var cost = sale.BaseCostType == "vip_perk" ? $"{sale.PricePerkName} + {sale.TotalGil:N0} gil" : $"{sale.TotalGil:N0} gil";
-            var status = sale.VoidedAt is not null ? "voided" : sale.PaidToVenueAt is not null ? "settled" : sale.PendingSettlementId is not null ? "pending settlement" : "unsettled";
-            ImGui.BulletText($"{sale.BuyerCharacterName} @ {sale.BuyerWorldName} — {sale.PackageName} — {cost} — {status} — {VenueTimeZone.Format(venue, sale.SoldAt, "g")}");
+            var cost = sale.BaseCostType == "vip_perk"
+                ? $"{sale.PricePerkName} + {sale.TotalGil:N0} gil"
+                : $"{sale.TotalGil:N0} gil";
+            var status = sale.VoidedAt is not null
+                ? "voided"
+                : sale.PaidToVenueAt is not null
+                    ? "settled"
+                    : sale.PendingSettlementId is not null
+                        ? "pending settlement"
+                        : "unsettled";
+            ImGui.BulletText(
+                $"{sale.BuyerCharacterName} @ {sale.BuyerWorldName} — {sale.PackageName} — {cost} — " +
+                $"seller {sale.SellerShareGil:N0} / venue {sale.VenueShareGil:N0} — {status} — " +
+                VenueTimeZone.Format(venue, sale.SoldAt, "g"));
         }
     }
 
@@ -306,8 +498,27 @@ public sealed class PhotoshootsTabRenderer(Plugin plugin)
         pendingAdditionalCharacters = 0;
         settlementTargetName = string.Empty;
         settlementTargetWorld = string.Empty;
+        loadedSellerPercentage = -1m;
+        sellerPercentage = 0f;
         ResetEditor();
     }
+
+    private void SyncCommissionEditor(PhotoshootManagementViewResponse view)
+    {
+        if (loadedSellerPercentage == view.SellerPercentage)
+        {
+            return;
+        }
+
+        loadedSellerPercentage = view.SellerPercentage;
+        sellerPercentage = (float)view.SellerPercentage;
+    }
+
+    private static long CalculateSellerShare(long totalGil, decimal percentage) =>
+        decimal.ToInt64(decimal.Round(
+            totalGil * percentage / 100m,
+            0,
+            MidpointRounding.AwayFromZero));
 
     private void ResetEditor()
     {
