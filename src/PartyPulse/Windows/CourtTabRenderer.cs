@@ -1,16 +1,27 @@
 using System;
 using System.Linq;
+using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using PartyPulse.Api;
 using PartyPulse.Court;
 using PartyPulse.Models;
+using PartyPulse.Services;
 
 namespace PartyPulse.Windows;
 
 public sealed class CourtTabRenderer(Plugin plugin)
 {
+    private const string CancelSalePopupName =
+        "Cancel Court sale###PartyPulseCourtCancel";
+    private const string CancelTransactionPopupName =
+        "Cancel Court transaction###PartyPulseCourtCancelTransaction";
+
+    private static readonly Vector4 AvailableColor = new(0.35f, 0.85f, 0.45f, 1f);
+    private static readonly Vector4 UnavailableColor = new(0.65f, 0.18f, 0.18f, 1f);
+
     private Guid activeProfileId;
     private long selectedOfferId;
+    private int saleQuantity = 1;
     private long editingOfferId;
     private string offerName = string.Empty;
     private int durationMinutes = 30;
@@ -22,7 +33,9 @@ public sealed class CourtTabRenderer(Plugin plugin)
     private int prepayGil;
     private long selectedAccountId;
     private long pendingCancelSaleId;
+    private bool openCancelSalePopup;
     private long pendingCancelTransactionId;
+    private bool openCancelTransactionPopup;
     private string cancelReason = string.Empty;
 
     public void Draw(VenueConnectionConfiguration venue)
@@ -82,6 +95,7 @@ public sealed class CourtTabRenderer(Plugin plugin)
         ImGui.Separator();
         DrawSales(venue, view, busy);
 
+        OpenQueuedPopups();
         DrawSaleCancellationPopup(venue, busy);
         DrawTransactionCancellationPopup(venue, busy);
         ImGui.EndTabItem();
@@ -141,17 +155,153 @@ public sealed class CourtTabRenderer(Plugin plugin)
         }
 
         ImGui.TextUnformatted($"Target: {target!.DisplayName}");
-        ImGui.BeginDisabled(busy);
+        DrawTargetVipStatus(venue, view, selected, target.CharacterName, target.WorldName);
+
+        if (selected.PriceType == "perk")
+        {
+            saleQuantity = 1;
+            ImGui.TextDisabled("Quantity: 1 (VIP Perk redemptions are one service per redemption).");
+        }
+        else
+        {
+            ImGui.InputInt("Quantity", ref saleQuantity);
+            saleQuantity = Math.Clamp(saleQuantity, 1, 100);
+        }
+
+        var totalDuration = selected.DurationMinutes * saleQuantity;
+        var unitPrice = selected.PriceGil.GetValueOrDefault();
+        var priceTooLarge = unitPrice > 0 && unitPrice > long.MaxValue / saleQuantity;
+        var totalPrice = priceTooLarge ? 0 : unitPrice * saleQuantity;
+        if (selected.PriceType == "perk")
+        {
+            ImGui.TextUnformatted($"Booking: 1 × {selected.DurationMinutes} min = {totalDuration:N0} min");
+        }
+        else if (priceTooLarge)
+        {
+            ImGui.TextColored(UnavailableColor, "The calculated sale price is too large.");
+        }
+        else
+        {
+            ImGui.TextUnformatted(
+                $"Booking: {saleQuantity} × {selected.DurationMinutes} min = {totalDuration:N0} min; " +
+                $"{saleQuantity} × {unitPrice:N0} = {totalPrice:N0} gil");
+        }
+
+        var perkAvailability = selected.PricePerkId is { } perkId
+            ? view.VipPerkAvailability.FirstOrDefault(value =>
+                value.PerkId == perkId &&
+                value.CharacterName.Equals(target.CharacterName, StringComparison.OrdinalIgnoreCase) &&
+                value.WorldName.Equals(target.WorldName, StringComparison.OrdinalIgnoreCase))
+            : null;
+        var canSell = selected.PriceType != "perk" || perkAvailability?.Available == true;
+
+        ImGui.BeginDisabled(busy || !canSell || priceTooLarge);
         if (ImGui.Button("Confirm sale"))
         {
             plugin.SellCourtService(
                 venue,
                 new SellCourtServiceRequest(
                     selected.OfferId,
+                    saleQuantity,
                     target.CharacterName,
                     target.WorldName));
         }
         ImGui.EndDisabled();
+
+        DrawTargetSalesLast24Hours(venue, view, target.CharacterName, target.WorldName);
+    }
+
+    private static void DrawTargetVipStatus(
+        VenueConnectionConfiguration venue,
+        CourtManagementViewResponse view,
+        CourtOfferSummary selected,
+        string characterName,
+        string worldName)
+    {
+        var vipStatus = view.VipStatuses.FirstOrDefault(value =>
+            value.CharacterName.Equals(characterName, StringComparison.OrdinalIgnoreCase) &&
+            value.WorldName.Equals(worldName, StringComparison.OrdinalIgnoreCase));
+        if (vipStatus is not null)
+        {
+            ImGui.TextColored(
+                AvailableColor,
+                $"VIP: {vipStatus.VipPackageName}" +
+                (vipStatus.EndsAt is { } end
+                    ? $" until {VenueTimeZone.Format(venue, end, "g")}"
+                    : " (lifetime)"));
+        }
+        else
+        {
+            ImGui.TextColored(
+                UnavailableColor,
+                "No active VIP package was found for this character.");
+        }
+
+        if (selected.PricePerkId is not { } perkId)
+        {
+            return;
+        }
+
+        var availability = view.VipPerkAvailability.FirstOrDefault(value =>
+            value.PerkId == perkId &&
+            value.CharacterName.Equals(characterName, StringComparison.OrdinalIgnoreCase) &&
+            value.WorldName.Equals(worldName, StringComparison.OrdinalIgnoreCase));
+        if (availability?.Available == true)
+        {
+            ImGui.TextColored(
+                AvailableColor,
+                $"{selected.PricePerkName ?? "VIP Perk"}: available");
+            return;
+        }
+
+        var unavailable = availability?.NextResetAt is { } next
+            ? $"{selected.PricePerkName ?? "VIP Perk"}: next available {VenueTimeZone.Format(venue, next, "g")}"
+            : $"{selected.PricePerkName ?? "VIP Perk"}: not available";
+        ImGui.TextColored(UnavailableColor, unavailable);
+    }
+
+    private static void DrawTargetSalesLast24Hours(
+        VenueConnectionConfiguration venue,
+        CourtManagementViewResponse view,
+        string characterName,
+        string worldName)
+    {
+        var cutoff = view.ServerNow.AddHours(-24);
+        var recent = view.Sales
+            .Where(sale =>
+                sale.IsOwnSale &&
+                sale.VoidedAt is null &&
+                sale.SoldAt >= cutoff &&
+                sale.BuyerCharacterName.Equals(characterName, StringComparison.OrdinalIgnoreCase) &&
+                sale.BuyerWorldName.Equals(worldName, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(sale => sale.SoldAt)
+            .ThenByDescending(sale => sale.SaleId)
+            .ToArray();
+
+        ImGui.Spacing();
+        ImGui.TextUnformatted("Your sales to this target in the last 24 hours");
+        if (recent.Length == 0)
+        {
+            ImGui.TextDisabled("No Court Service sales registered by you to this target.");
+            return;
+        }
+
+        var totalMinutes = recent.Sum(sale => (long)sale.TotalDurationMinutes);
+        var totalGil = recent.Sum(sale => sale.TotalPriceGil);
+        ImGui.TextDisabled(
+            $"{recent.Length} sale(s), {totalMinutes:N0} total minutes" +
+            (totalGil > 0 ? $", {totalGil:N0} total gil" : string.Empty));
+
+        foreach (var sale in recent)
+        {
+            var price = sale.PriceType == "perk"
+                ? sale.PricePerkName ?? "VIP Perk"
+                : $"{sale.TotalPriceGil:N0} gil";
+            ImGui.BulletText(
+                $"{VenueTimeZone.Format(venue, sale.SoldAt, "g")} — " +
+                $"{sale.Quantity} × {sale.UnitDurationMinutes} min = " +
+                $"{sale.TotalDurationMinutes:N0} min — {sale.OfferName} — {price}");
+        }
     }
 
     private void DrawSettlement(
@@ -320,7 +470,8 @@ public sealed class CourtTabRenderer(Plugin plugin)
         {
             ImGui.TextUnformatted(
                 $"{account.AccountantDisplayName}: standing {account.StandingBalanceGil:N0} gil; " +
-                $"unpaid salary {account.UnpaidSalaryGil:N0} gil");
+                $"unpaid salary {account.UnpaidSalaryGil:N0} gil" +
+                (account.CanReceiveSettlements ? string.Empty : " (legacy balance only)"));
         }
 
         if (view.AccountantAccounts.Count == 0)
@@ -367,7 +518,7 @@ public sealed class CourtTabRenderer(Plugin plugin)
             ImGui.InputInt("Prepay gil", ref prepayGil);
             prepayGil = Math.Max(0, prepayGil);
             ImGui.TextDisabled($"Prepay amount: {prepayGil:N0} gil.");
-            ImGui.BeginDisabled(busy);
+            ImGui.BeginDisabled(busy || !selected.CanReceiveSettlements);
             if (ImGui.Button("Prepay accountant + unpaid salary"))
             {
                 plugin.CreateCourtAccountantPrepay(
@@ -473,8 +624,7 @@ public sealed class CourtTabRenderer(Plugin plugin)
             {
                 pendingCancelTransactionId = transaction.TransactionId;
                 cancelReason = string.Empty;
-                ImGui.OpenPopup(
-                    "Cancel Court transaction###PartyPulseCourtCancelTransaction");
+                openCancelTransactionPopup = true;
             }
             ImGui.EndDisabled();
         }
@@ -502,15 +652,17 @@ public sealed class CourtTabRenderer(Plugin plugin)
                         : "unsettled";
             var price = sale.PriceType == "perk"
                 ? sale.PricePerkName ?? "VIP Perk"
-                : $"{sale.PriceGil:N0} gil";
+                : $"{sale.TotalPriceGil:N0} gil";
             ImGui.TextUnformatted(
-                $"#{sale.SaleId} {sale.OfferName} → {sale.BuyerCharacterName} @ " +
-                $"{sale.BuyerWorldName} by {sale.SellerDisplayName} — {price} — {status}");
+                $"#{sale.SaleId} {sale.Quantity} × {sale.UnitDurationMinutes} min " +
+                $"({sale.TotalDurationMinutes:N0} min) {sale.OfferName} → " +
+                $"{sale.BuyerCharacterName} @ {sale.BuyerWorldName} by " +
+                $"{sale.SellerDisplayName} — {price} — {status}");
 
             var canCancel =
                 view.Capabilities.CanManage &&
                 sale.VoidedAt is null &&
-                (sale.SettledAt is null || sale.PriceGil == 0) &&
+                (sale.SettledAt is null || sale.TotalPriceGil == 0) &&
                 sale.FinancialTransactionId is null;
             if (canCancel)
             {
@@ -520,7 +672,7 @@ public sealed class CourtTabRenderer(Plugin plugin)
                 {
                     pendingCancelSaleId = sale.SaleId;
                     cancelReason = string.Empty;
-                    ImGui.OpenPopup("Cancel Court sale###PartyPulseCourtCancel");
+                    openCancelSalePopup = true;
                 }
                 ImGui.EndDisabled();
             }
@@ -529,12 +681,27 @@ public sealed class CourtTabRenderer(Plugin plugin)
         }
     }
 
+    private void OpenQueuedPopups()
+    {
+        if (openCancelSalePopup)
+        {
+            openCancelSalePopup = false;
+            ImGui.OpenPopup(CancelSalePopupName);
+        }
+
+        if (openCancelTransactionPopup)
+        {
+            openCancelTransactionPopup = false;
+            ImGui.OpenPopup(CancelTransactionPopupName);
+        }
+    }
+
     private void DrawSaleCancellationPopup(
         VenueConnectionConfiguration venue,
         bool busy)
     {
         if (!ImGui.BeginPopupModal(
-                "Cancel Court sale###PartyPulseCourtCancel",
+                CancelSalePopupName,
                 ImGuiWindowFlags.AlwaysAutoResize))
         {
             return;
@@ -568,7 +735,7 @@ public sealed class CourtTabRenderer(Plugin plugin)
         bool busy)
     {
         if (!ImGui.BeginPopupModal(
-                "Cancel Court transaction###PartyPulseCourtCancelTransaction",
+                CancelTransactionPopupName,
                 ImGuiWindowFlags.AlwaysAutoResize))
         {
             return;
@@ -636,11 +803,14 @@ public sealed class CourtTabRenderer(Plugin plugin)
 
         activeProfileId = venue.ProfileId;
         selectedOfferId = 0;
+        saleQuantity = 1;
         selectedAccountId = 0;
         collectorMode = 0;
         prepayGil = 0;
         pendingCancelSaleId = 0;
+        openCancelSalePopup = false;
         pendingCancelTransactionId = 0;
+        openCancelTransactionPopup = false;
         cancelReason = string.Empty;
         ClearOffer();
     }

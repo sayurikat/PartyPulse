@@ -1493,6 +1493,11 @@ public sealed class PartyPulseApiClient : IDisposable
             static payload =>
                 payload.SaleId > 0 &&
                 payload.OfferId > 0 &&
+                payload.Quantity is >= 1 and <= 100 &&
+                payload.UnitDurationMinutes > 0 &&
+                payload.TotalDurationMinutes >= payload.UnitDurationMinutes &&
+                payload.UnitPriceGil >= 0 &&
+                payload.TotalPriceGil >= 0 &&
                 !string.IsNullOrWhiteSpace(payload.OfferName),
             cancellationToken);
 
@@ -1620,6 +1625,8 @@ public sealed class PartyPulseApiClient : IDisposable
         payload.Sales is not null &&
         payload.AccountantAccounts is not null &&
         payload.Transactions is not null &&
+        payload.VipStatuses is not null &&
+        payload.VipPerkAvailability is not null &&
         payload.PersonalUnsettledCourtGil >= 0 &&
         payload.PersonalUnpaidSalaryGil >= 0 &&
         payload.Offers.All(static offer =>
@@ -1630,7 +1637,11 @@ public sealed class PartyPulseApiClient : IDisposable
             sale.SaleId > 0 &&
             sale.OfferId > 0 &&
             !string.IsNullOrWhiteSpace(sale.OfferName) &&
-            sale.PriceGil >= 0) &&
+            sale.Quantity is >= 1 and <= 100 &&
+            sale.UnitDurationMinutes > 0 &&
+            sale.TotalDurationMinutes >= sale.UnitDurationMinutes &&
+            sale.UnitPriceGil >= 0 &&
+            sale.TotalPriceGil >= 0) &&
         payload.Transactions.All(static transaction =>
             transaction.TransactionId > 0 &&
             !string.IsNullOrWhiteSpace(transaction.TransactionType) &&

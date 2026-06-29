@@ -25,9 +25,12 @@ public sealed record CourtSaleSummary(
     long SaleId,
     long OfferId,
     string OfferName,
-    int DurationMinutes,
+    int Quantity,
+    int UnitDurationMinutes,
+    int TotalDurationMinutes,
     string PriceType,
-    long PriceGil,
+    long UnitPriceGil,
+    long TotalPriceGil,
     int? PricePerkId,
     string? PricePerkName,
     long? PerkRedemptionId,
@@ -41,7 +44,39 @@ public sealed record CourtSaleSummary(
     DateTimeOffset? SettledAt,
     long? FinancialTransactionId,
     DateTimeOffset? VoidedAt,
-    string? VoidReason);
+    string? VoidReason,
+    bool IsOwnSale);
+
+public sealed record CourtVipStatusSummary(
+    int VipPlayerId,
+    int CharacterId,
+    string CharacterName,
+    string WorldName,
+    long SubscriptionId,
+    int VipPackageId,
+    string VipPackageName,
+    DateTimeOffset StartsAt,
+    DateTimeOffset? EndsAt);
+
+public sealed record CourtVipPerkAvailabilitySummary(
+    int VipPlayerId,
+    int CharacterId,
+    string CharacterName,
+    string WorldName,
+    long SubscriptionId,
+    int VipPackageId,
+    string VipPackageName,
+    int PackagePerkId,
+    int PerkId,
+    string PerkName,
+    string? RenewalUnit,
+    int? RenewalInterval,
+    DateTimeOffset PeriodStart,
+    DateTimeOffset? PeriodEnd,
+    DateTimeOffset? NextResetAt,
+    bool Available,
+    long? RedemptionId,
+    DateTimeOffset? LastRedeemedAt);
 
 public sealed record CourtAccountantSummary(
     long AccountantAccountId,
@@ -50,7 +85,8 @@ public sealed record CourtAccountantSummary(
     long? StaffMemberId,
     string? StaffDisplayName,
     long StandingBalanceGil,
-    long UnpaidSalaryGil);
+    long UnpaidSalaryGil,
+    bool CanReceiveSettlements);
 
 public sealed record CourtTransactionItemSummary(
     long TransactionId,
@@ -104,7 +140,9 @@ public sealed record CourtManagementViewResponse(
     IReadOnlyList<CourtOfferSummary> Offers,
     IReadOnlyList<CourtSaleSummary> Sales,
     IReadOnlyList<CourtAccountantSummary> AccountantAccounts,
-    IReadOnlyList<CourtTransactionSummary> Transactions);
+    IReadOnlyList<CourtTransactionSummary> Transactions,
+    IReadOnlyList<CourtVipStatusSummary> VipStatuses,
+    IReadOnlyList<CourtVipPerkAvailabilitySummary> VipPerkAvailability);
 
 public sealed record SaveCourtOfferRequest(
     string Name,
@@ -116,6 +154,7 @@ public sealed record SaveCourtOfferRequest(
 
 public sealed record SellCourtServiceRequest(
     long OfferId,
+    int Quantity,
     string TargetCharacterName,
     string TargetWorldName);
 
@@ -148,9 +187,12 @@ public sealed record SellCourtServiceResponse(
     long SaleId,
     long OfferId,
     string OfferName,
-    int DurationMinutes,
+    int Quantity,
+    int UnitDurationMinutes,
+    int TotalDurationMinutes,
     string PriceType,
-    long PriceGil,
+    long UnitPriceGil,
+    long TotalPriceGil,
     int? PricePerkId,
     string? PricePerkName,
     long? PerkRedemptionId,
