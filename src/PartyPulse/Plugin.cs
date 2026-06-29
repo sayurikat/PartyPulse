@@ -1136,6 +1136,9 @@ public sealed class Plugin : IDalamudPlugin
     public void CompleteGambaGame(VenueConnectionConfiguration venue, long gameId, CompleteGambaGameRequest request) =>
         Observe(CompleteGambaGameAndReportAsync(venue, gameId, request), "complete Gamba Shot");
 
+    public void CancelGambaGame(VenueConnectionConfiguration venue, long gameId, string? reason) =>
+        Observe(CancelGambaGameAndReportAsync(venue, gameId, new CancelGambaGameRequest(reason)), "cancel Gamba Shot session");
+
     public void CreateBarSettlement(VenueConnectionConfiguration venue, CreateBarSettlementRequest request) =>
         Observe(CreateBarSettlementAndReportAsync(venue, request), "create bar settlement");
 
@@ -2652,11 +2655,48 @@ public sealed class Plugin : IDalamudPlugin
         var result = await Bar.CompleteGambaGameAsync(venue, gameId, request, LifetimeToken);
         if (!result.Success || result.Value is null)
         {
+            if (string.Equals(result.Failure?.Code, "REQUEST_TIMEOUT", StringComparison.OrdinalIgnoreCase))
+            {
+                var refresh = await Bar.LoadAsync(venue, true, LifetimeToken);
+                var completed = refresh.Value?.GambaGameHistory.FirstOrDefault(game =>
+                    game.GameId == gameId &&
+                    string.Equals(game.Status, "won", StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(game.WinnerCharacterName, request.WinnerCharacterName, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(game.WinnerWorldName, request.WinnerWorldName, StringComparison.OrdinalIgnoreCase));
+                if (completed is not null)
+                {
+                    await TimedMacros.LoadAsync(venue, true, LifetimeToken);
+                    ChatGui.Print(
+                        $"Gamba Shot #{gameId} was confirmed despite the request timeout: {completed.WinnerCharacterName} @ {completed.WinnerWorldName} won {completed.FinalJackpotGil.GetValueOrDefault(completed.CurrentJackpotGil):N0} gil.",
+                        "PartyPulse");
+                    return;
+                }
+            }
+
             ReportVipFailure(result.Failure, "The Gamba Shot winner could not be confirmed.");
             return;
         }
         await TimedMacros.LoadAsync(venue, true, LifetimeToken);
         ChatGui.Print($"Gamba Shot #{gameId} won by {result.Value.WinnerCharacterName} @ {result.Value.WinnerWorldName} for {result.Value.FinalJackpotGil:N0} gil.", "PartyPulse");
+    }
+
+    private async Task CancelGambaGameAndReportAsync(
+        VenueConnectionConfiguration venue,
+        long gameId,
+        CancelGambaGameRequest request)
+    {
+        var result = await Bar.CancelGambaGameAsync(venue, gameId, request, LifetimeToken);
+        if (!result.Success || result.Value is null)
+        {
+            ReportVipFailure(result.Failure, "The Gamba Shot session could not be cancelled.");
+            return;
+        }
+
+        await Finance.LoadAsync(venue, true, LifetimeToken);
+        await TimedMacros.LoadAsync(venue, true, LifetimeToken);
+        ChatGui.Print(
+            $"Cancelled Gamba Shot #{gameId} and cancelled {result.Value.CancelledTicketSaleCount:N0} ticket sale(s).",
+            "PartyPulse");
     }
 
     private async Task CreateBarSettlementAndReportAsync(VenueConnectionConfiguration venue, CreateBarSettlementRequest request)

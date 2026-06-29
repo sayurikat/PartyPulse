@@ -134,6 +134,10 @@ public sealed class BarManagementManager : IDisposable
         VenueConnectionConfiguration venue, long gameId, CompleteGambaGameRequest request, CancellationToken cancellationToken) =>
         MutateAsync(venue, (baseUri, accessToken) => apiClient.CompleteGambaGameAsync(baseUri, accessToken, gameId, request, cancellationToken), cancellationToken);
 
+    public Task<ApiResult<CancelGambaGameResponse>> CancelGambaGameAsync(
+        VenueConnectionConfiguration venue, long gameId, CancelGambaGameRequest request, CancellationToken cancellationToken) =>
+        MutateAsync(venue, (baseUri, accessToken) => apiClient.CancelGambaGameAsync(baseUri, accessToken, gameId, request, cancellationToken), cancellationToken);
+
     public void RemoveProfile(Guid profileId) => snapshots.TryRemove(profileId, out _);
 
     public void Dispose()

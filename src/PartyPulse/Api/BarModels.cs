@@ -8,7 +8,8 @@ public sealed record BarCapabilities(
     bool CanSell,
     bool CanManage,
     bool CanManageSettlements,
-    bool CanManageGame);
+    bool CanManageGame,
+    bool CanCancelGame);
 
 public sealed record BarSettingsSummary(
     decimal BuyoutSellerPercentage,
@@ -61,6 +62,8 @@ public sealed record BarGambaGameSummary(
     DateTimeOffset? WonAt,
     string? WinnerCharacterName,
     string? WinnerWorldName,
+    DateTimeOffset? CancelledAt,
+    string? CancelReason,
     int TicketQuantity,
     long GrossSalesGil,
     long HouseShareGil,
@@ -135,6 +138,8 @@ public sealed record CompleteGambaGameRequest(
     string WinnerCharacterName,
     string WinnerWorldName);
 
+public sealed record CancelGambaGameRequest(string? Reason);
+
 public sealed record SetBarSalePaymentStatusRequest(bool Settled);
 public sealed record CancelBarSaleRequest(string? Reason);
 
@@ -144,5 +149,6 @@ public sealed record SellBarBuyoutResponse(long SaleId, DateTimeOffset StartsAt,
 public sealed record StartGambaGameResponse(long GameId, long CurrentJackpotGil, DateTimeOffset StartedAt);
 public sealed record SellGambaTicketsResponse(long SaleId, long GameId, int Quantity, int GrossGil, int HouseShareGil, int JackpotContributionGil, long CurrentJackpotGil, DateTimeOffset SoldAt);
 public sealed record CompleteGambaGameResponse(long GameId, string WinnerCharacterName, string WinnerWorldName, long FinalJackpotGil, DateTimeOffset WonAt);
+public sealed record CancelGambaGameResponse(long GameId, DateTimeOffset CancelledAt, int CancelledTicketSaleCount);
 public sealed record BarSalePaymentStatusResponse(long SaleId, bool Settled, DateTimeOffset? PaidToVenueAt);
 public sealed record BarSaleCancellationResponse(long SaleId, DateTimeOffset VoidedAt);

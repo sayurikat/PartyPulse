@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Linq;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
@@ -32,6 +33,11 @@ public sealed class BarTabRenderer(Plugin plugin)
     private long pendingPackageId;
     private long? pendingCancelBuyoutId;
     private long? pendingCancelTicketId;
+    private long? pendingCancelGameId;
+    private bool openCancelBuyoutPopup;
+    private bool openCancelTicketPopup;
+    private bool openCancelGamePopup;
+    private bool cancelGameAcknowledged;
     private long? pendingWinnerGameId;
     private string pendingWinnerName = string.Empty;
     private string pendingWinnerWorld = string.Empty;
@@ -172,6 +178,7 @@ public sealed class BarTabRenderer(Plugin plugin)
                 ImGui.SetNextItemWidth(180 * ImGuiHelpers.GlobalScale);
                 ImGui.InputInt("Starting jackpot", ref startingJackpotGil, 100_000, 1_000_000);
                 startingJackpotGil = Math.Max(0, startingJackpotGil);
+                ImGui.TextDisabled($"Entered jackpot: {FormatNumber(startingJackpotGil)} gil");
                 ImGui.BeginDisabled(busy);
                 if (ImGui.Button("Start Gamba Shot"))
                     ImGui.OpenPopup("Start Gamba Shot###PartyPulseStartGamba");
@@ -238,6 +245,14 @@ public sealed class BarTabRenderer(Plugin plugin)
                 ImGui.TextDisabled(winnerReason);
             }
         }
+
+        if (view.Capabilities.CanCancelGame)
+        {
+            ImGui.BeginDisabled(busy);
+            if (ImGui.Button("Cancel this Gamba session"))
+                RequestCancelGame(game.GameId);
+            ImGui.EndDisabled();
+        }
     }
 
     private void DrawSettlement(VenueConnectionConfiguration venue, BarManagementViewResponse view, bool busy)
@@ -277,12 +292,18 @@ public sealed class BarTabRenderer(Plugin plugin)
             ImGui.SetNextItemWidth(180 * ImGuiHelpers.GlobalScale);
             ImGui.InputFloat("Bartender keeps buyout (%)", ref buyoutSellerPercentage, 0.25f, 1f, "%.2f");
             buyoutSellerPercentage = Math.Clamp(buyoutSellerPercentage, 0f, 100f);
+            ImGui.SameLine();
+            ImGui.TextDisabled($"Saved: {FormatPercentage(view.Settings.BuyoutSellerPercentage)}%");
             ImGui.SetNextItemWidth(180 * ImGuiHelpers.GlobalScale);
             ImGui.InputInt("Gamba ticket price", ref gambaTicketPriceGil, 1_000, 10_000);
             gambaTicketPriceGil = Math.Max(1, gambaTicketPriceGil);
+            ImGui.SameLine();
+            ImGui.TextDisabled($"Saved: {FormatNumber(view.Settings.GambaTicketPriceGil)} gil");
             ImGui.SetNextItemWidth(180 * ImGuiHelpers.GlobalScale);
             ImGui.InputFloat("House keeps Gamba (%)", ref gambaHousePercentage, 0.25f, 1f, "%.2f");
             gambaHousePercentage = Math.Clamp(gambaHousePercentage, 0f, 100f);
+            ImGui.SameLine();
+            ImGui.TextDisabled($"Saved: {FormatPercentage(view.Settings.GambaHousePercentage)}%");
             ImGui.BeginDisabled(busy);
             if (ImGui.Button("Save bar settings"))
                 plugin.UpdateBarSettings(venue, new UpdateBarSettingsRequest((decimal)buyoutSellerPercentage, gambaTicketPriceGil, (decimal)gambaHousePercentage));
@@ -390,7 +411,7 @@ public sealed class BarTabRenderer(Plugin plugin)
                     if (ImGui.SmallButton("Cancel sale"))
                     {
                         pendingCancelBuyoutId = sale.SaleId;
-                        ImGui.OpenPopup("Cancel bar sale###PartyPulseCancelBarSale");
+                        openCancelBuyoutPopup = true;
                     }
                     ImGui.EndDisabled();
                 }
@@ -416,7 +437,7 @@ public sealed class BarTabRenderer(Plugin plugin)
                     if (ImGui.SmallButton("Cancel sale"))
                     {
                         pendingCancelTicketId = sale.SaleId;
-                        ImGui.OpenPopup("Cancel Gamba sale###PartyPulseCancelGambaSale");
+                        openCancelTicketPopup = true;
                     }
                     ImGui.EndDisabled();
                 }
@@ -429,12 +450,30 @@ public sealed class BarTabRenderer(Plugin plugin)
         {
             foreach (var game in view.GambaGameHistory.OrderByDescending(value => value.StartedAt).Take(50))
             {
-                var winner = game.WinnerCharacterName is null
-                    ? "No winner recorded"
-                    : $"{game.WinnerCharacterName} @ {game.WinnerWorldName}";
-                ImGui.TextUnformatted($"Game #{game.GameId} — {game.FinalJackpotGil.GetValueOrDefault(game.CurrentJackpotGil):N0} gil — {winner}");
+                ImGui.PushID($"gamba-game-{game.GameId}");
+                var cancelled = string.Equals(game.Status, "cancelled", StringComparison.OrdinalIgnoreCase);
+                var resultText = cancelled
+                    ? "Cancelled"
+                    : game.WinnerCharacterName is null
+                        ? "No winner recorded"
+                        : $"{game.WinnerCharacterName} @ {game.WinnerWorldName}";
+                ImGui.TextUnformatted($"Game #{game.GameId} — {game.FinalJackpotGil.GetValueOrDefault(game.CurrentJackpotGil):N0} gil — {resultText}");
                 ImGui.TextDisabled($"Started {VenueTimeZone.Format(venue, game.StartedAt, "g")}; {game.TicketQuantity:N0} ticket(s); gross {game.GrossSalesGil:N0} gil");
+                if (game.CancelledAt is { } cancelledAt)
+                {
+                    ImGui.TextColored(WarningColor, $"Cancelled {VenueTimeZone.Format(venue, cancelledAt, "g")}");
+                    if (!string.IsNullOrWhiteSpace(game.CancelReason))
+                        ImGui.TextDisabled(game.CancelReason);
+                }
+                else if (view.Capabilities.CanCancelGame)
+                {
+                    ImGui.BeginDisabled(busy);
+                    if (ImGui.SmallButton("Cancel session"))
+                        RequestCancelGame(game.GameId);
+                    ImGui.EndDisabled();
+                }
                 ImGui.Separator();
+                ImGui.PopID();
             }
         }
     }
@@ -467,6 +506,22 @@ public sealed class BarTabRenderer(Plugin plugin)
 
     private void DrawPopups(VenueConnectionConfiguration venue, BarManagementViewResponse view, bool busy)
     {
+        if (openCancelBuyoutPopup)
+        {
+            ImGui.OpenPopup("Cancel bar sale###PartyPulseCancelBarSale");
+            openCancelBuyoutPopup = false;
+        }
+        if (openCancelTicketPopup)
+        {
+            ImGui.OpenPopup("Cancel Gamba sale###PartyPulseCancelGambaSale");
+            openCancelTicketPopup = false;
+        }
+        if (openCancelGamePopup)
+        {
+            ImGui.OpenPopup("Cancel Gamba session###PartyPulseCancelGambaSession");
+            openCancelGamePopup = false;
+        }
+
         if (ImGui.BeginPopupModal("Confirm bar buyout###PartyPulseBarBuyout", ImGuiWindowFlags.AlwaysAutoResize))
         {
             var package = view.BuyoutPackages.FirstOrDefault(value => value.PackageId == pendingPackageId);
@@ -550,6 +605,36 @@ public sealed class BarTabRenderer(Plugin plugin)
             ImGui.EndPopup();
         }
 
+
+        if (ImGui.BeginPopupModal("Cancel Gamba session###PartyPulseCancelGambaSession", ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            var game = view.ActiveGame?.GameId == pendingCancelGameId
+                ? view.ActiveGame
+                : view.GambaGameHistory.FirstOrDefault(value => value.GameId == pendingCancelGameId);
+            ImGui.TextWrapped(game is null
+                ? "The selected Gamba Shot session is no longer available."
+                : $"Cancel Gamba Shot #{game.GameId} and cancel every non-cancelled ticket sale in that session?");
+            ImGui.TextWrapped("This owner-only correction cannot be undone. A pending settlement containing one of these sales must be resolved first.");
+            ImGui.Checkbox("I understand this cancels the entire session and all of its ticket sales", ref cancelGameAcknowledged);
+            ImGui.BeginDisabled(busy || game is null || !cancelGameAcknowledged || pendingCancelGameId is null);
+            if (ImGui.Button("Cancel entire session"))
+            {
+                plugin.CancelGambaGame(venue, pendingCancelGameId!.Value, "Gamba Shot session cancelled by venue owner.");
+                pendingCancelGameId = null;
+                cancelGameAcknowledged = false;
+                ImGui.CloseCurrentPopup();
+            }
+            ImGui.EndDisabled();
+            ImGui.SameLine();
+            if (ImGui.Button("Keep session"))
+            {
+                pendingCancelGameId = null;
+                cancelGameAcknowledged = false;
+                ImGui.CloseCurrentPopup();
+            }
+            ImGui.EndPopup();
+        }
+
         if (ImGui.BeginPopupModal("Cancel bar sale###PartyPulseCancelBarSale", ImGuiWindowFlags.AlwaysAutoResize))
         {
             ImGui.TextWrapped("Cancel this buyout sale? The active buyout ends immediately and the sale is excluded from settlement.");
@@ -562,7 +647,11 @@ public sealed class BarTabRenderer(Plugin plugin)
             }
             ImGui.EndDisabled();
             ImGui.SameLine();
-            if (ImGui.Button("Keep sale")) ImGui.CloseCurrentPopup();
+            if (ImGui.Button("Keep sale"))
+            {
+                pendingCancelBuyoutId = null;
+                ImGui.CloseCurrentPopup();
+            }
             ImGui.EndPopup();
         }
 
@@ -578,10 +667,20 @@ public sealed class BarTabRenderer(Plugin plugin)
             }
             ImGui.EndDisabled();
             ImGui.SameLine();
-            if (ImGui.Button("Keep sale")) ImGui.CloseCurrentPopup();
+            if (ImGui.Button("Keep sale"))
+            {
+                pendingCancelTicketId = null;
+                ImGui.CloseCurrentPopup();
+            }
             ImGui.EndPopup();
         }
     }
+
+    private static string FormatNumber(long value) =>
+        value.ToString("N0", CultureInfo.InvariantCulture);
+
+    private static string FormatPercentage(decimal value) =>
+        value.ToString("N2", CultureInfo.InvariantCulture);
 
     private static void DrawSaleState(DateTimeOffset? paidAt, long? pendingSettlementId, DateTimeOffset? voidedAt)
     {
@@ -593,6 +692,13 @@ public sealed class BarTabRenderer(Plugin plugin)
             ImGui.TextColored(AvailableColor, "Settled");
         else
             ImGui.TextColored(WarningColor, "Unpaid");
+    }
+
+    private void RequestCancelGame(long gameId)
+    {
+        pendingCancelGameId = gameId;
+        cancelGameAcknowledged = false;
+        openCancelGamePopup = true;
     }
 
     private void ResetForVenue(VenueConnectionConfiguration venue)
@@ -607,6 +713,13 @@ public sealed class BarTabRenderer(Plugin plugin)
         gambaHousePercentage = 0f;
         settingsInitialized = false;
         settingsUpdatedAt = null;
+        pendingCancelBuyoutId = null;
+        pendingCancelTicketId = null;
+        pendingCancelGameId = null;
+        openCancelBuyoutPopup = false;
+        openCancelTicketPopup = false;
+        openCancelGamePopup = false;
+        cancelGameAcknowledged = false;
         ClearPackageDraft();
     }
 

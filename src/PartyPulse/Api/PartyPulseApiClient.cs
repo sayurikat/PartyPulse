@@ -763,7 +763,7 @@ public sealed class PartyPulseApiClient : IDisposable
             accessToken,
             request,
             static payload =>
-                payload.OpeningId > 0 &&
+                (payload.OpeningId is null || payload.OpeningId > 0) &&
                 payload.TimedMacroId > 0 &&
                 payload.LastExecutedAt != default &&
                 payload.LastExecutedByUserId > 0 &&
@@ -1103,6 +1103,13 @@ public sealed class PartyPulseApiClient : IDisposable
                               !string.IsNullOrWhiteSpace(payload.WinnerWorldName) && payload.WonAt != default,
             cancellationToken);
 
+    public Task<ApiResult<CancelGambaGameResponse>> CancelGambaGameAsync(
+        Uri baseUri, string accessToken, long gameId, CancelGambaGameRequest request, CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<CancelGambaGameResponse>(
+            baseUri, HttpMethod.Post, $"api/v1/bar/gamba-games/{gameId}/cancel", accessToken, request,
+            static payload => payload.GameId > 0 && payload.CancelledAt != default && payload.CancelledTicketSaleCount >= 0,
+            cancellationToken);
+
     public Task<ApiResult<FinanceViewResponse>> GetFinanceAsync(
         Uri baseUri,
         string accessToken,
@@ -1392,7 +1399,7 @@ public sealed class PartyPulseApiClient : IDisposable
           payload.CurrentOpening.AddressWard is >= 1 and <= 30 &&
           payload.CurrentOpening.AddressPlot is >= 1 and <= 60)) &&
         (payload.CurrentOpening is not null ||
-         payload.Macros.All(static macro => macro.NextDueAt is null)) &&
+         payload.Macros.All(static macro => !macro.RequiresActiveOpening || macro.NextDueAt is null)) &&
         payload.Macros.All(static macro =>
             macro.TimedMacroId > 0 &&
             !string.IsNullOrWhiteSpace(macro.InstanceCode) &&
