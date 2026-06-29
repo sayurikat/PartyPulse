@@ -1023,6 +1023,86 @@ public sealed class PartyPulseApiClient : IDisposable
             static payload => payload.SaleId > 0 && payload.VoidedAt != default,
             cancellationToken);
 
+    public Task<ApiResult<BarManagementViewResponse>> GetBarAsync(
+        Uri baseUri, string accessToken, CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<BarManagementViewResponse>(
+            baseUri, HttpMethod.Get, "api/v1/bar", accessToken, null,
+            ValidateBarViewResponse, cancellationToken);
+
+    public Task<ApiResult<BarBuyoutPackageOperationResponse>> CreateBarBuyoutPackageAsync(
+        Uri baseUri, string accessToken, CreateBarBuyoutPackageRequest request, CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<BarBuyoutPackageOperationResponse>(
+            baseUri, HttpMethod.Post, "api/v1/bar/buyout-packages", accessToken, request,
+            static payload => payload.PackageId > 0, cancellationToken);
+
+    public Task<ApiResult<BarBuyoutPackageOperationResponse>> UpdateBarBuyoutPackageAsync(
+        Uri baseUri, string accessToken, long packageId, UpdateBarBuyoutPackageRequest request, CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<BarBuyoutPackageOperationResponse>(
+            baseUri, HttpMethod.Put, $"api/v1/bar/buyout-packages/{packageId}", accessToken, request,
+            static payload => payload.PackageId > 0, cancellationToken);
+
+    public Task<ApiResult<UpdateBarSettingsResponse>> UpdateBarSettingsAsync(
+        Uri baseUri, string accessToken, UpdateBarSettingsRequest request, CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<UpdateBarSettingsResponse>(
+            baseUri, HttpMethod.Put, "api/v1/bar/settings", accessToken, request,
+            static payload => payload.BuyoutSellerPercentage is >= 0m and <= 100m &&
+                              payload.GambaTicketPriceGil > 0 &&
+                              payload.GambaHousePercentage is >= 0m and <= 100m,
+            cancellationToken);
+
+    public Task<ApiResult<SellBarBuyoutResponse>> SellBarBuyoutAsync(
+        Uri baseUri, string accessToken, SellBarBuyoutRequest request, CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<SellBarBuyoutResponse>(
+            baseUri, HttpMethod.Post, "api/v1/bar/buyouts", accessToken, request,
+            static payload => payload.SaleId > 0 && payload.EndsAt > payload.StartsAt, cancellationToken);
+
+    public Task<ApiResult<BarSalePaymentStatusResponse>> SetBarBuyoutPaymentStatusAsync(
+        Uri baseUri, string accessToken, long saleId, SetBarSalePaymentStatusRequest request, CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<BarSalePaymentStatusResponse>(
+            baseUri, HttpMethod.Put, $"api/v1/bar/buyouts/{saleId}/payment-status", accessToken, request,
+            static payload => payload.SaleId > 0, cancellationToken);
+
+    public Task<ApiResult<BarSaleCancellationResponse>> CancelBarBuyoutAsync(
+        Uri baseUri, string accessToken, long saleId, CancelBarSaleRequest request, CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<BarSaleCancellationResponse>(
+            baseUri, HttpMethod.Post, $"api/v1/bar/buyouts/{saleId}/cancel", accessToken, request,
+            static payload => payload.SaleId > 0 && payload.VoidedAt != default, cancellationToken);
+
+    public Task<ApiResult<StartGambaGameResponse>> StartGambaGameAsync(
+        Uri baseUri, string accessToken, StartGambaGameRequest request, CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<StartGambaGameResponse>(
+            baseUri, HttpMethod.Post, "api/v1/bar/gamba-games", accessToken, request,
+            static payload => payload.GameId > 0 && payload.CurrentJackpotGil >= 0 && payload.StartedAt != default, cancellationToken);
+
+    public Task<ApiResult<SellGambaTicketsResponse>> SellGambaTicketsAsync(
+        Uri baseUri, string accessToken, SellGambaTicketsRequest request, CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<SellGambaTicketsResponse>(
+            baseUri, HttpMethod.Post, "api/v1/bar/gamba-tickets", accessToken, request,
+            static payload => payload.SaleId > 0 && payload.GameId > 0 && payload.Quantity > 0 &&
+                              payload.GrossGil >= 0 && payload.HouseShareGil >= 0 &&
+                              payload.JackpotContributionGil >= 0 && payload.SoldAt != default, cancellationToken);
+
+    public Task<ApiResult<BarSalePaymentStatusResponse>> SetGambaTicketPaymentStatusAsync(
+        Uri baseUri, string accessToken, long saleId, SetBarSalePaymentStatusRequest request, CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<BarSalePaymentStatusResponse>(
+            baseUri, HttpMethod.Put, $"api/v1/bar/gamba-tickets/{saleId}/payment-status", accessToken, request,
+            static payload => payload.SaleId > 0, cancellationToken);
+
+    public Task<ApiResult<BarSaleCancellationResponse>> CancelGambaTicketSaleAsync(
+        Uri baseUri, string accessToken, long saleId, CancelBarSaleRequest request, CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<BarSaleCancellationResponse>(
+            baseUri, HttpMethod.Post, $"api/v1/bar/gamba-tickets/{saleId}/cancel", accessToken, request,
+            static payload => payload.SaleId > 0 && payload.VoidedAt != default, cancellationToken);
+
+    public Task<ApiResult<CompleteGambaGameResponse>> CompleteGambaGameAsync(
+        Uri baseUri, string accessToken, long gameId, CompleteGambaGameRequest request, CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<CompleteGambaGameResponse>(
+            baseUri, HttpMethod.Post, $"api/v1/bar/gamba-games/{gameId}/complete", accessToken, request,
+            static payload => payload.GameId > 0 && payload.FinalJackpotGil >= 0 &&
+                              !string.IsNullOrWhiteSpace(payload.WinnerCharacterName) &&
+                              !string.IsNullOrWhiteSpace(payload.WinnerWorldName) && payload.WonAt != default,
+            cancellationToken);
+
     public Task<ApiResult<FinanceViewResponse>> GetFinanceAsync(
         Uri baseUri,
         string accessToken,
@@ -1066,6 +1146,27 @@ public sealed class PartyPulseApiClient : IDisposable
             baseUri,
             HttpMethod.Post,
             "api/v1/finance/settlements/photoshoots",
+            accessToken,
+            request,
+            static payload => payload.SettlementId > 0 &&
+                              payload.AmountGil > 0 &&
+                              payload.TargetUserId > 0 &&
+                              payload.TargetCharacterId > 0 &&
+                              !string.IsNullOrWhiteSpace(payload.TargetCharacterName) &&
+                              !string.IsNullOrWhiteSpace(payload.TargetWorldName) &&
+                              !string.IsNullOrWhiteSpace(payload.TargetUserDisplayName) &&
+                              payload.CreatedAt != default,
+            cancellationToken);
+
+    public Task<ApiResult<CreateBarSettlementResponse>> CreateBarSettlementAsync(
+        Uri baseUri,
+        string accessToken,
+        CreateBarSettlementRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<CreateBarSettlementResponse>(
+            baseUri,
+            HttpMethod.Post,
+            "api/v1/finance/settlements/bar",
             accessToken,
             request,
             static payload => payload.SettlementId > 0 &&
@@ -1163,6 +1264,22 @@ public sealed class PartyPulseApiClient : IDisposable
         payload.PackageAssignments.All(static value => value.PackagePerkId > 0 && value.PackageId > 0 && value.PerkId > 0) &&
         payload.Availability.All(static value => value.CharacterId > 0 && value.SubscriptionId > 0 && value.PerkId > 0) &&
         payload.Redemptions.All(static value => value.RedemptionId > 0 && value.PerkId > 0);
+
+    private static bool ValidateBarViewResponse(BarManagementViewResponse payload) =>
+        payload.Capabilities is not null &&
+        payload.Settings is not null &&
+        payload.Settings.BuyoutSellerPercentage is >= 0m and <= 100m &&
+        payload.Settings.GambaTicketPriceGil > 0 &&
+        payload.Settings.GambaHousePercentage is >= 0m and <= 100m &&
+        payload.PersonalUnpaidGil >= 0 &&
+        payload.PersonalPendingGil >= 0 &&
+        payload.PersonalAvailableGil >= 0 &&
+        payload.PersonalAvailableGil <= payload.PersonalUnpaidGil &&
+        payload.SuggestedStartingJackpotGil >= 0 &&
+        payload.BuyoutPackages is not null &&
+        payload.BuyoutSales is not null &&
+        payload.GambaTicketSales is not null &&
+        payload.GambaGameHistory is not null;
 
     private static bool ValidatePhotoshootViewResponse(PhotoshootManagementViewResponse payload) =>
         payload.Capabilities is not null && payload.SellerPercentage is >= 0m and <= 100m &&

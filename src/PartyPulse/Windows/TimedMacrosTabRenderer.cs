@@ -83,7 +83,7 @@ public sealed class TimedMacrosTabRenderer(Plugin plugin)
         {
             ImGui.TextColored(
                 new Vector4(1f, 0.72f, 0.25f, 1f),
-                "Timers are paused because there is no active opening.");
+                "Opening-bound timers are paused because there is no active opening. Global timers remain available.");
             return;
         }
 
@@ -94,7 +94,7 @@ public sealed class TimedMacrosTabRenderer(Plugin plugin)
         {
             ImGui.TextColored(
                 new Vector4(1f, 0.72f, 0.25f, 1f),
-                "Timers are paused because you are not at this opening's address.");
+                "Opening-bound timers are paused because you are not at this opening's address. Global timers remain available.");
             ImGui.TextWrapped(locationMessage);
         }
     }
@@ -146,7 +146,9 @@ public sealed class TimedMacrosTabRenderer(Plugin plugin)
             ImGui.TextUnformatted(FormatInterval(macro.IntervalMinutes));
 
             ImGui.TableSetColumnIndex(2);
-            ImGui.TextUnformatted(macro.LastExecutedAt is { } lastExecuted ? VenueTimeZone.Format(venue, lastExecuted, "t") : "Not this opening");
+            ImGui.TextUnformatted(macro.LastExecutedAt is { } lastExecuted
+                ? VenueTimeZone.Format(venue, lastExecuted, "t")
+                : macro.RequiresActiveOpening ? "Not this opening" : "Never");
 
             ImGui.TableSetColumnIndex(3);
             DrawCountdown(macro, opening, atAddress, now);
@@ -155,15 +157,15 @@ public sealed class TimedMacrosTabRenderer(Plugin plugin)
             ImGui.TextUnformatted(macro.ExecutionCount.ToString("N0"));
 
             ImGui.TableSetColumnIndex(5);
+            var scopeAvailable = !macro.RequiresActiveOpening || (opening is not null && atAddress);
             var canExecute =
                 macro.CanExecute &&
                 macro.Enabled &&
                 macro.IsConfigured &&
-                opening is not null &&
-                atAddress;
+                scopeAvailable;
             ImGui.BeginDisabled(isBusy || !canExecute);
             if (ImGui.SmallButton("Execute"))
-                plugin.RunTimedMacro(venue, macro, opening!);
+                plugin.RunTimedMacro(venue, macro, macro.RequiresActiveOpening ? opening : null);
             ImGui.EndDisabled();
             if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled) && !canExecute)
             {
@@ -173,9 +175,11 @@ public sealed class TimedMacrosTabRenderer(Plugin plugin)
                         ? "This timed macro is disabled."
                         : !macro.IsConfigured
                             ? "This timed macro has not been configured."
-                            : opening is null
+                            : macro.RequiresActiveOpening && opening is null
                                 ? "There is no active opening."
-                                : "You must be at the opening address.";
+                                : macro.RequiresActiveOpening
+                                    ? "You must be at the opening address."
+                                    : "This macro is not currently available.";
                 ImGui.SetTooltip(reason);
             }
             else if (ImGui.IsItemHovered())
@@ -410,7 +414,7 @@ public sealed class TimedMacrosTabRenderer(Plugin plugin)
         bool atAddress,
         DateTimeOffset now)
     {
-        if (opening is null || !atAddress)
+        if (macro.RequiresActiveOpening && (opening is null || !atAddress))
         {
             ImGui.TextDisabled("Paused");
             return;

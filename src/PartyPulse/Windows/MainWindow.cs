@@ -18,6 +18,7 @@ public sealed class MainWindow : Window, IDisposable
     private readonly Plugin plugin;
     private readonly VipTabRenderer vipTab;
     private readonly PhotoshootsTabRenderer photoshootsTab;
+    private readonly BarTabRenderer barTab;
     private readonly VenueOpeningsTabRenderer venueOpeningsTab;
     private readonly DjsTabRenderer djsTab;
     private readonly TimedMacrosTabRenderer timedMacrosTab;
@@ -45,6 +46,7 @@ public sealed class MainWindow : Window, IDisposable
         this.plugin = plugin;
         vipTab = new VipTabRenderer(plugin);
         photoshootsTab = new PhotoshootsTabRenderer(plugin);
+        barTab = new BarTabRenderer(plugin);
         venueOpeningsTab = new VenueOpeningsTabRenderer(plugin);
         djsTab = new DjsTabRenderer(plugin);
         timedMacrosTab = new TimedMacrosTabRenderer(plugin);
@@ -232,6 +234,7 @@ public sealed class MainWindow : Window, IDisposable
             partyFinderTab.Draw(selectedVenue);
             vipTab.Draw(selectedVenue);
             photoshootsTab.Draw(selectedVenue);
+            barTab.Draw(selectedVenue);
             greeterTab.Draw(selectedVenue);
             if (financeTab.Draw(
                     selectedVenue,
@@ -244,7 +247,6 @@ public sealed class MainWindow : Window, IDisposable
         }
 
         DrawPlaceholderTab("Staff", "Clock-in state, staff tools, macros, timers, and Party Finder controls will live here.");
-        DrawPlaceholderTab("Bar", "Bar sales, gambashots, jackpots, and buyout tracking will live here.");
         DrawPlaceholderTab("Games", "Venue-wide game state, rolls, host controls, and timers will live here.");
 
         ImGui.EndTabBar();

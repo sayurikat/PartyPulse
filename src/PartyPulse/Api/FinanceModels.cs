@@ -61,6 +61,10 @@ public sealed record CreatePhotoshootSettlementRequest(
     string TargetCharacterName,
     string TargetWorldName);
 
+public sealed record CreateBarSettlementRequest(
+    string TargetCharacterName,
+    string TargetWorldName);
+
 public sealed record CreateVipSettlementResponse(
     long SettlementId,
     long AmountGil,
@@ -72,6 +76,16 @@ public sealed record CreateVipSettlementResponse(
     DateTimeOffset CreatedAt);
 
 public sealed record CreatePhotoshootSettlementResponse(
+    long SettlementId,
+    long AmountGil,
+    int TargetUserId,
+    int TargetCharacterId,
+    string TargetCharacterName,
+    string TargetWorldName,
+    string TargetUserDisplayName,
+    DateTimeOffset CreatedAt);
+
+public sealed record CreateBarSettlementResponse(
     long SettlementId,
     long AmountGil,
     int TargetUserId,

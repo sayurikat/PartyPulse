@@ -10,6 +10,7 @@ using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 using PartyPulse.Api;
 using PartyPulse.Authentication;
+using PartyPulse.Bar;
 using PartyPulse.Finance;
 using PartyPulse.Greeter;
 using PartyPulse.Integrations;
@@ -92,6 +93,7 @@ public sealed class Plugin : IDalamudPlugin
             Log);
         VipPerks = new VipPerkManagementManager(Configuration, Authentication, apiClient, IdentityProvider);
         Photoshoots = new PhotoshootManagementManager(Configuration, Authentication, apiClient, IdentityProvider);
+        Bar = new BarManagementManager(Configuration, Authentication, apiClient, IdentityProvider);
         Vip = new VipManagementManager(
             Configuration,
             Authentication,
@@ -221,6 +223,7 @@ public sealed class Plugin : IDalamudPlugin
     public VipPerkManagementManager VipPerks { get; }
 
     public PhotoshootManagementManager Photoshoots { get; }
+    public BarManagementManager Bar { get; }
 
     public VipArrivalManagementManager VipArrivals { get; }
 
@@ -280,6 +283,7 @@ public sealed class Plugin : IDalamudPlugin
         Notifications.Dispose();
         Finance.Dispose();
         Photoshoots.Dispose();
+        Bar.Dispose();
         VipPerks.Dispose();
         PartyFinderAutomation.Stop("PartyPulse is unloading.");
         OpeningPublications.Dispose();
@@ -448,6 +452,7 @@ public sealed class Plugin : IDalamudPlugin
         Vip.RemoveProfile(venue.ProfileId);
         VipPerks.RemoveProfile(venue.ProfileId);
         Photoshoots.RemoveProfile(venue.ProfileId);
+        Bar.RemoveProfile(venue.ProfileId);
         VipArrivals.ClearProfile(venue.ProfileId);
         Greeter.ClearProfile(venue.ProfileId);
         VenueOpenings.RemoveProfile(venue.ProfileId);
@@ -994,7 +999,7 @@ public sealed class Plugin : IDalamudPlugin
     public void RunTimedMacro(
         VenueConnectionConfiguration venue,
         TimedMacroSummary macro,
-        TimedMacroOpeningSummary opening) =>
+        TimedMacroOpeningSummary? opening) =>
         Observe(
             RunTimedMacroAndReportAsync(venue, macro, opening),
             $"run timed macro {macro.TimedMacroId} for {venue.VenueCode}");
@@ -1088,6 +1093,51 @@ public sealed class Plugin : IDalamudPlugin
 
     public void CreatePhotoshootSettlement(VenueConnectionConfiguration venue, CreatePhotoshootSettlementRequest request) =>
         Observe(CreatePhotoshootSettlementAndReportAsync(venue, request), $"create photoshoot settlement for {venue.VenueCode}");
+
+    public void EnsureBarLoaded(VenueConnectionConfiguration venue)
+    {
+        if (Bar.ShouldLoad(venue))
+            Observe(Bar.LoadAsync(venue, false, LifetimeToken), $"load bar for {venue.VenueCode}");
+    }
+
+    public void RefreshBar(VenueConnectionConfiguration venue) =>
+        Observe(Bar.LoadAsync(venue, true, LifetimeToken), $"refresh bar for {venue.VenueCode}");
+
+    public void CreateBarBuyoutPackage(VenueConnectionConfiguration venue, CreateBarBuyoutPackageRequest request) =>
+        Observe(BarMutationAndReportAsync(venue, Bar.CreateBuyoutPackageAsync(venue, request, LifetimeToken), "Bar buyout package created."), "create bar buyout package");
+
+    public void UpdateBarBuyoutPackage(VenueConnectionConfiguration venue, long packageId, UpdateBarBuyoutPackageRequest request) =>
+        Observe(BarMutationAndReportAsync(venue, Bar.UpdateBuyoutPackageAsync(venue, packageId, request, LifetimeToken), "Bar buyout package updated."), "update bar buyout package");
+
+    public void UpdateBarSettings(VenueConnectionConfiguration venue, UpdateBarSettingsRequest request) =>
+        Observe(BarMutationAndReportAsync(venue, Bar.UpdateSettingsAsync(venue, request, LifetimeToken), "Bar settings updated."), "update bar settings");
+
+    public void SellBarBuyout(VenueConnectionConfiguration venue, SellBarBuyoutRequest request) =>
+        Observe(SellBarBuyoutAndReportAsync(venue, request), "record bar buyout");
+
+    public void SetBarBuyoutPaymentStatus(VenueConnectionConfiguration venue, long saleId, bool settled) =>
+        Observe(BarMutationAndReportAsync(venue, Bar.SetBuyoutPaymentStatusAsync(venue, saleId, new SetBarSalePaymentStatusRequest(settled), LifetimeToken), settled ? $"Bar buyout sale #{saleId} marked settled." : $"Bar buyout sale #{saleId} marked unpaid."), "set bar buyout payment status");
+
+    public void CancelBarBuyout(VenueConnectionConfiguration venue, long saleId, string? reason) =>
+        Observe(BarMutationAndReportAsync(venue, Bar.CancelBuyoutAsync(venue, saleId, new CancelBarSaleRequest(reason), LifetimeToken), $"Bar buyout sale #{saleId} cancelled."), "cancel bar buyout");
+
+    public void StartGambaGame(VenueConnectionConfiguration venue, int startingJackpotGil) =>
+        Observe(StartGambaGameAndReportAsync(venue, startingJackpotGil), "start Gamba Shot");
+
+    public void SellGambaTickets(VenueConnectionConfiguration venue, SellGambaTicketsRequest request) =>
+        Observe(SellGambaTicketsAndReportAsync(venue, request), "sell Gamba Shot tickets");
+
+    public void SetGambaTicketPaymentStatus(VenueConnectionConfiguration venue, long saleId, bool settled) =>
+        Observe(BarMutationAndReportAsync(venue, Bar.SetGambaTicketPaymentStatusAsync(venue, saleId, new SetBarSalePaymentStatusRequest(settled), LifetimeToken), settled ? $"Gamba ticket sale #{saleId} marked settled." : $"Gamba ticket sale #{saleId} marked unpaid."), "set Gamba ticket payment status");
+
+    public void CancelGambaTicketSale(VenueConnectionConfiguration venue, long saleId, string? reason) =>
+        Observe(BarMutationAndReportAsync(venue, Bar.CancelGambaTicketSaleAsync(venue, saleId, new CancelBarSaleRequest(reason), LifetimeToken), $"Gamba ticket sale #{saleId} cancelled."), "cancel Gamba ticket sale");
+
+    public void CompleteGambaGame(VenueConnectionConfiguration venue, long gameId, CompleteGambaGameRequest request) =>
+        Observe(CompleteGambaGameAndReportAsync(venue, gameId, request), "complete Gamba Shot");
+
+    public void CreateBarSettlement(VenueConnectionConfiguration venue, CreateBarSettlementRequest request) =>
+        Observe(CreateBarSettlementAndReportAsync(venue, request), "create bar settlement");
 
     public void EnsureFinanceLoaded(VenueConnectionConfiguration venue)
     {
@@ -1385,6 +1435,7 @@ public sealed class Plugin : IDalamudPlugin
         Vip.RemoveProfile(venue.ProfileId);
         VipPerks.RemoveProfile(venue.ProfileId);
         Photoshoots.RemoveProfile(venue.ProfileId);
+        Bar.RemoveProfile(venue.ProfileId);
         VipArrivals.ClearProfile(venue.ProfileId);
         Greeter.ClearProfile(venue.ProfileId);
         VenueOpenings.RemoveProfile(venue.ProfileId);
@@ -2272,7 +2323,7 @@ public sealed class Plugin : IDalamudPlugin
     private async Task RunTimedMacroAndReportAsync(
         VenueConnectionConfiguration venue,
         TimedMacroSummary macro,
-        TimedMacroOpeningSummary opening)
+        TimedMacroOpeningSummary? opening)
     {
         var refresh = await TimedMacros.LoadAsync(venue, true, LifetimeToken);
         if (!refresh.Success || refresh.Value is null)
@@ -2284,11 +2335,6 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         var currentOpening = refresh.Value.CurrentOpening;
-        if (currentOpening is null || currentOpening.OpeningId != opening.OpeningId)
-        {
-            ChatGui.PrintError("The venue opening changed. Refresh the timed-macro data and try again.", "PartyPulse");
-            return;
-        }
 
         var currentMacro = refresh.Value.Macros.FirstOrDefault(value =>
             value.TimedMacroId == macro.TimedMacroId);
@@ -2304,15 +2350,24 @@ public sealed class Plugin : IDalamudPlugin
             return;
         }
 
-        if (!LocationProvider.IsAtAddress(
-                currentOpening.AddressWorldName,
-                currentOpening.AddressCityName,
-                currentOpening.AddressWard,
-                currentOpening.AddressPlot,
-                out var locationMessage))
+        if (currentMacro.RequiresActiveOpening)
         {
-            ChatGui.PrintError($"Timed macros only run at the active opening address. {locationMessage}", "PartyPulse");
-            return;
+            if (currentOpening is null || opening is null || currentOpening.OpeningId != opening.OpeningId)
+            {
+                ChatGui.PrintError("The venue opening changed. Refresh the timed-macro data and try again.", "PartyPulse");
+                return;
+            }
+
+            if (!LocationProvider.IsAtAddress(
+                    currentOpening.AddressWorldName,
+                    currentOpening.AddressCityName,
+                    currentOpening.AddressWard,
+                    currentOpening.AddressPlot,
+                    out var locationMessage))
+            {
+                ChatGui.PrintError($"This timed macro only runs at the active opening address. {locationMessage}", "PartyPulse");
+                return;
+            }
         }
 
         var execution = await gameMacroExecutionService.ExecuteUntargetedAsync(
@@ -2328,7 +2383,7 @@ public sealed class Plugin : IDalamudPlugin
         var result = await TimedMacros.RecordExecutionAsync(
             venue,
             currentMacro.TimedMacroId,
-            new RecordTimedMacroExecutionRequest(currentOpening.OpeningId, clientExecutionId),
+            new RecordTimedMacroExecutionRequest(currentMacro.RequiresActiveOpening ? currentOpening!.OpeningId : null, clientExecutionId),
             LifetimeToken);
         if (!result.Success || result.Value is null)
         {
@@ -2535,6 +2590,98 @@ public sealed class Plugin : IDalamudPlugin
                 ? $"Photoshoot sale #{saleId} was cancelled and VIP perk redemption #{redemptionId} was restored."
                 : $"Photoshoot sale #{saleId} was cancelled.",
             "PartyPulse");
+    }
+
+    private async Task BarMutationAndReportAsync<T>(
+        VenueConnectionConfiguration venue,
+        Task<ApiResult<T>> operation,
+        string successMessage)
+    {
+        var result = await operation;
+        if (!result.Success)
+        {
+            ReportVipFailure(result.Failure, "The bar operation could not be completed.");
+            return;
+        }
+
+        await Finance.LoadAsync(venue, true, LifetimeToken);
+        await TimedMacros.LoadAsync(venue, true, LifetimeToken);
+        ChatGui.Print(successMessage, "PartyPulse");
+    }
+
+    private async Task SellBarBuyoutAndReportAsync(VenueConnectionConfiguration venue, SellBarBuyoutRequest request)
+    {
+        var result = await Bar.SellBuyoutAsync(venue, request, LifetimeToken);
+        if (!result.Success || result.Value is null)
+        {
+            ReportVipFailure(result.Failure, "The bar buyout could not be recorded.");
+            return;
+        }
+        await Finance.LoadAsync(venue, true, LifetimeToken);
+        await TimedMacros.LoadAsync(venue, true, LifetimeToken);
+        ChatGui.Print($"Recorded bar buyout #{result.Value.SaleId} until {VenueTimeZone.Format(venue, result.Value.EndsAt, "t")}.", "PartyPulse");
+    }
+
+    private async Task StartGambaGameAndReportAsync(VenueConnectionConfiguration venue, int startingJackpotGil)
+    {
+        var result = await Bar.StartGambaGameAsync(venue, new StartGambaGameRequest(startingJackpotGil), LifetimeToken);
+        if (!result.Success || result.Value is null)
+        {
+            ReportVipFailure(result.Failure, "The Gamba Shot game could not be started.");
+            return;
+        }
+        await TimedMacros.LoadAsync(venue, true, LifetimeToken);
+        ChatGui.Print($"Started Gamba Shot #{result.Value.GameId} with {result.Value.CurrentJackpotGil:N0} gil jackpot.", "PartyPulse");
+    }
+
+    private async Task SellGambaTicketsAndReportAsync(VenueConnectionConfiguration venue, SellGambaTicketsRequest request)
+    {
+        var result = await Bar.SellGambaTicketsAsync(venue, request, LifetimeToken);
+        if (!result.Success || result.Value is null)
+        {
+            ReportVipFailure(result.Failure, "The Gamba Shot ticket sale could not be recorded.");
+            return;
+        }
+        await Finance.LoadAsync(venue, true, LifetimeToken);
+        await TimedMacros.LoadAsync(venue, true, LifetimeToken);
+        ChatGui.Print($"Recorded {result.Value.Quantity:N0} Gamba Shot ticket(s) for {result.Value.GrossGil:N0} gil. Jackpot is now {result.Value.CurrentJackpotGil:N0} gil.", "PartyPulse");
+    }
+
+    private async Task CompleteGambaGameAndReportAsync(VenueConnectionConfiguration venue, long gameId, CompleteGambaGameRequest request)
+    {
+        var result = await Bar.CompleteGambaGameAsync(venue, gameId, request, LifetimeToken);
+        if (!result.Success || result.Value is null)
+        {
+            ReportVipFailure(result.Failure, "The Gamba Shot winner could not be confirmed.");
+            return;
+        }
+        await TimedMacros.LoadAsync(venue, true, LifetimeToken);
+        ChatGui.Print($"Gamba Shot #{gameId} won by {result.Value.WinnerCharacterName} @ {result.Value.WinnerWorldName} for {result.Value.FinalJackpotGil:N0} gil.", "PartyPulse");
+    }
+
+    private async Task CreateBarSettlementAndReportAsync(VenueConnectionConfiguration venue, CreateBarSettlementRequest request)
+    {
+        var readiness = await settlementTradeService.CheckReadyAsync(request.TargetCharacterName, request.TargetWorldName, LifetimeToken);
+        if (!readiness.Success)
+        {
+            ReportPluginIntegrationFailure(readiness.Failure, "The bar settlement was not created because Dropbox is unavailable.");
+            return;
+        }
+        var result = await Finance.CreateBarSettlementAsync(venue, request, LifetimeToken);
+        if (!result.Success || result.Value is null)
+        {
+            ReportVipFailure(result.Failure, "The bar settlement could not be created.");
+            return;
+        }
+        var trade = await settlementTradeService.InitiateTradeAsync(result.Value.TargetCharacterName, result.Value.TargetWorldName, result.Value.AmountGil, LifetimeToken);
+        await Bar.LoadAsync(venue, true, LifetimeToken);
+        Notifications.PollSoon();
+        if (!trade.Success)
+        {
+            ReportPluginIntegrationFailure(trade.Failure, $"Settlement #{result.Value.SettlementId} was created, but Dropbox did not start the trade.");
+            return;
+        }
+        ChatGui.Print($"Created bar settlement #{result.Value.SettlementId} for {result.Value.AmountGil:N0} gil.", "PartyPulse");
     }
 
     private async Task CreatePhotoshootSettlementAndReportAsync(VenueConnectionConfiguration venue, CreatePhotoshootSettlementRequest request)

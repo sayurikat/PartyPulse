@@ -10,6 +10,8 @@ public static class TimedMacroTypeCodes
     public const string DjRegularAdvertisement = "dj.advertisement.regular";
     public const string DjResidentAdvertisement = "dj.advertisement.resident";
     public const string DjSchedule = "dj.schedule";
+    public const string BarBuyout = "bar.buyout";
+    public const string BarGamba = "bar.gamba";
 }
 
 public sealed record TimedMacroCapabilities(
@@ -55,6 +57,7 @@ public sealed record TimedMacroSummary(
     int ExecutionCount,
     DateTimeOffset? NextDueAt,
     bool IsDue,
+    bool RequiresActiveOpening,
     bool IsTemplate,
     bool IsScheduleInstance)
 {
@@ -89,11 +92,11 @@ public sealed record ArchiveTimedMacroResponse(
     DateTimeOffset ArchivedAt);
 
 public sealed record RecordTimedMacroExecutionRequest(
-    long OpeningId,
+    long? OpeningId,
     Guid ClientExecutionId);
 
 public sealed record RecordTimedMacroExecutionResponse(
-    long OpeningId,
+    long? OpeningId,
     long TimedMacroId,
     DateTimeOffset LastExecutedAt,
     int LastExecutedByUserId,
