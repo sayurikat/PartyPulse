@@ -16,6 +16,8 @@ public sealed class StaffTabRenderer(Plugin plugin)
     private Guid activeProfileId;
     private long selectedOpeningId;
     private long selectedStaffId;
+    private long selectedCharacterLinkStaffId;
+    private long selectedPayoutStaffId;
 
     private long editingJobId;
     private string jobName = string.Empty;
@@ -39,6 +41,8 @@ public sealed class StaffTabRenderer(Plugin plugin)
 
     private long pendingCancelEntryId;
     private long pendingCancelTransactionId;
+    private bool openCancelEntryPopup;
+    private bool openCancelTransactionPopup;
     private string cancelReason = string.Empty;
 
     public void Draw(VenueConnectionConfiguration venue)
@@ -458,16 +462,17 @@ public sealed class StaffTabRenderer(Plugin plugin)
             return;
         }
 
-        EnsureSelectedStaff(staff);
-        var selected = staff.First(member => member.StaffMemberId == selectedStaffId);
+        EnsureSelectedStaff(staff, ref selectedCharacterLinkStaffId);
+        var selected = staff.First(
+            member => member.StaffMemberId == selectedCharacterLinkStaffId);
         if (ImGui.BeginCombo("Staff listing##CharacterLink", selected.DisplayName))
         {
             foreach (var member in staff)
             {
-                var isSelected = member.StaffMemberId == selectedStaffId;
+                var isSelected = member.StaffMemberId == selectedCharacterLinkStaffId;
                 if (ImGui.Selectable(member.DisplayName, isSelected))
                 {
-                    selectedStaffId = member.StaffMemberId;
+                    selectedCharacterLinkStaffId = member.StaffMemberId;
                 }
 
                 if (isSelected)
@@ -506,7 +511,7 @@ public sealed class StaffTabRenderer(Plugin plugin)
             plugin.LinkStaffCharacter(
                 venue,
                 new LinkStaffCharacterRequest(
-                    selectedStaffId,
+                    selectedCharacterLinkStaffId,
                     target.CharacterName,
                     target.WorldName));
         }
@@ -623,13 +628,19 @@ public sealed class StaffTabRenderer(Plugin plugin)
                 {
                     pendingCancelEntryId = entry.TimeEntryId;
                     cancelReason = string.Empty;
-                    ImGui.OpenPopup(
-                        "Cancel Staff time entry###PartyPulseStaffCancelEntry");
+                    openCancelEntryPopup = true;
                 }
                 ImGui.EndDisabled();
             }
 
             ImGui.PopID();
+        }
+
+        if (openCancelEntryPopup)
+        {
+            ImGui.OpenPopup(
+                "Cancel Staff time entry###PartyPulseStaffCancelEntry");
+            openCancelEntryPopup = false;
         }
     }
 
@@ -691,20 +702,21 @@ public sealed class StaffTabRenderer(Plugin plugin)
             .ToArray();
         if (staff.Length > 0)
         {
-            EnsureSelectedStaff(staff);
-            var selected = staff.First(member => member.StaffMemberId == selectedStaffId);
+            EnsureSelectedStaff(staff, ref selectedPayoutStaffId);
+            var selected = staff.First(
+                member => member.StaffMemberId == selectedPayoutStaffId);
             if (ImGui.BeginCombo(
                     "Staff payout",
                     $"{selected.DisplayName} — {selected.UnpaidSalaryGil:N0} gil"))
             {
                 foreach (var member in staff)
                 {
-                    var isSelected = member.StaffMemberId == selectedStaffId;
+                    var isSelected = member.StaffMemberId == selectedPayoutStaffId;
                     if (ImGui.Selectable(
                             $"{member.DisplayName} — {member.UnpaidSalaryGil:N0} gil",
                             isSelected))
                     {
-                        selectedStaffId = member.StaffMemberId;
+                        selectedPayoutStaffId = member.StaffMemberId;
                     }
 
                     if (isSelected)
@@ -734,7 +746,7 @@ public sealed class StaffTabRenderer(Plugin plugin)
                     plugin.CreateStaffPayout(
                         venue,
                         new CreateStaffPayoutRequest(
-                            selectedStaffId,
+                            selectedPayoutStaffId,
                             target.CharacterName,
                             target.WorldName,
                             null));
@@ -796,13 +808,19 @@ public sealed class StaffTabRenderer(Plugin plugin)
                 {
                     pendingCancelTransactionId = transaction.TransactionId;
                     cancelReason = string.Empty;
-                    ImGui.OpenPopup(
-                        "Cancel Staff payout###PartyPulseStaffCancelPayout");
+                    openCancelTransactionPopup = true;
                 }
                 ImGui.EndDisabled();
             }
 
             ImGui.PopID();
+        }
+
+        if (openCancelTransactionPopup)
+        {
+            ImGui.OpenPopup(
+                "Cancel Staff payout###PartyPulseStaffCancelPayout");
+            openCancelTransactionPopup = false;
         }
     }
 
@@ -988,6 +1006,8 @@ public sealed class StaffTabRenderer(Plugin plugin)
         activeProfileId = venue.ProfileId;
         selectedOpeningId = 0;
         selectedStaffId = 0;
+        selectedCharacterLinkStaffId = 0;
+        selectedPayoutStaffId = 0;
         editingJobId = 0;
         jobName = string.Empty;
         jobRate = 0;
@@ -999,6 +1019,8 @@ public sealed class StaffTabRenderer(Plugin plugin)
         timeError = string.Empty;
         pendingCancelEntryId = 0;
         pendingCancelTransactionId = 0;
+        openCancelEntryPopup = false;
+        openCancelTransactionPopup = false;
         cancelReason = string.Empty;
     }
 }
