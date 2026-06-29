@@ -11,6 +11,7 @@ using Dalamud.Plugin.Services;
 using PartyPulse.Api;
 using PartyPulse.Authentication;
 using PartyPulse.Bar;
+using PartyPulse.Court;
 using PartyPulse.Finance;
 using PartyPulse.Greeter;
 using PartyPulse.Integrations;
@@ -21,6 +22,7 @@ using PartyPulse.PartyFinder;
 using PartyPulse.Photoshoots;
 using PartyPulse.Models;
 using PartyPulse.SelfService;
+using PartyPulse.Staff;
 using PartyPulse.Shoutrunner;
 using PartyPulse.Services;
 using PartyPulse.VenueUsers;
@@ -93,6 +95,8 @@ public sealed class Plugin : IDalamudPlugin
             Log);
         VipPerks = new VipPerkManagementManager(Configuration, Authentication, apiClient, IdentityProvider);
         Photoshoots = new PhotoshootManagementManager(Configuration, Authentication, apiClient, IdentityProvider);
+        Court = new CourtManagementManager(Configuration, Authentication, apiClient, IdentityProvider);
+        Staff = new StaffManagementManager(Configuration, Authentication, apiClient, IdentityProvider);
         Bar = new BarManagementManager(Configuration, Authentication, apiClient, IdentityProvider);
         Vip = new VipManagementManager(
             Configuration,
@@ -223,6 +227,10 @@ public sealed class Plugin : IDalamudPlugin
     public VipPerkManagementManager VipPerks { get; }
 
     public PhotoshootManagementManager Photoshoots { get; }
+
+    public CourtManagementManager Court { get; }
+
+    public StaffManagementManager Staff { get; }
     public BarManagementManager Bar { get; }
 
     public VipArrivalManagementManager VipArrivals { get; }
@@ -283,6 +291,8 @@ public sealed class Plugin : IDalamudPlugin
         Notifications.Dispose();
         Finance.Dispose();
         Photoshoots.Dispose();
+        Court.Dispose();
+        Staff.Dispose();
         Bar.Dispose();
         VipPerks.Dispose();
         PartyFinderAutomation.Stop("PartyPulse is unloading.");
@@ -452,6 +462,8 @@ public sealed class Plugin : IDalamudPlugin
         Vip.RemoveProfile(venue.ProfileId);
         VipPerks.RemoveProfile(venue.ProfileId);
         Photoshoots.RemoveProfile(venue.ProfileId);
+        Court.RemoveProfile(venue.ProfileId);
+        Staff.RemoveProfile(venue.ProfileId);
         Bar.RemoveProfile(venue.ProfileId);
         VipArrivals.ClearProfile(venue.ProfileId);
         Greeter.ClearProfile(venue.ProfileId);
@@ -1094,6 +1106,69 @@ public sealed class Plugin : IDalamudPlugin
     public void CreatePhotoshootSettlement(VenueConnectionConfiguration venue, CreatePhotoshootSettlementRequest request) =>
         Observe(CreatePhotoshootSettlementAndReportAsync(venue, request), $"create photoshoot settlement for {venue.VenueCode}");
 
+    public void EnsureCourtLoaded(VenueConnectionConfiguration venue)
+    {
+        if (Court.ShouldLoad(venue))
+            Observe(Court.LoadAsync(venue, false, LifetimeToken), $"load Court Services for {venue.VenueCode}");
+    }
+
+    public void RefreshCourt(VenueConnectionConfiguration venue) =>
+        Observe(Court.LoadAsync(venue, true, LifetimeToken), $"refresh Court Services for {venue.VenueCode}");
+
+    public void SaveCourtOffer(VenueConnectionConfiguration venue, long? offerId, SaveCourtOfferRequest request) =>
+        Observe(ReportApiResultAsync(Court.SaveOfferAsync(venue, offerId, request, LifetimeToken), offerId is null ? "Court Service offer created." : "Court Service offer updated."), "save Court Service offer");
+
+    public void SellCourtService(VenueConnectionConfiguration venue, SellCourtServiceRequest request) =>
+        Observe(ReportApiResultAsync(Court.SellAsync(venue, request, LifetimeToken), "Court Service sale recorded."), "sell Court Service");
+
+    public void CancelCourtSale(VenueConnectionConfiguration venue, long saleId, string? reason) =>
+        Observe(ReportApiResultAsync(Court.CancelSaleAsync(venue, saleId, new CancelCourtSaleRequest(reason), LifetimeToken), $"Court Service sale #{saleId} cancelled."), "cancel Court Service sale");
+
+    public void CreateCourtStaffSettlement(VenueConnectionConfiguration venue, CreateCourtStaffSettlementRequest request) =>
+        Observe(ReportCourtTransactionAsync(Court.CreateStaffSettlementAsync(venue, request, LifetimeToken)), "create Court staff settlement");
+
+    public void CreateCourtAccountantPrepay(VenueConnectionConfiguration venue, CreateCourtAccountantPrepayRequest request) =>
+        Observe(ReportCourtTransactionAsync(Court.CreateAccountantPrepayAsync(venue, request, LifetimeToken)), "prepay Court Accountant");
+
+    public void CreateCourtAccountantFinalization(VenueConnectionConfiguration venue, CreateCourtAccountantFinalizationRequest request) =>
+        Observe(ReportCourtTransactionAsync(Court.CreateAccountantFinalizationAsync(venue, request, LifetimeToken)), "finalize Court Accountant balance");
+
+    public void ExecuteCourtTransactionTrade(VenueConnectionConfiguration venue, CourtTransactionSummary transaction) =>
+        Observe(ExecuteCourtTransactionTradeAsync(venue, transaction), $"execute Court transaction {transaction.TransactionId}");
+
+    public void ConfirmCourtTransaction(VenueConnectionConfiguration venue, long transactionId) =>
+        Observe(ReportApiResultAsync(Court.ConfirmTransactionAsync(venue, transactionId, new ConfirmCourtTransactionRequest(null), LifetimeToken), $"Court financial transaction #{transactionId} confirmed."), "confirm Court transaction");
+
+    public void CancelCourtTransaction(VenueConnectionConfiguration venue, long transactionId, string? reason) =>
+        Observe(ReportApiResultAsync(Court.CancelTransactionAsync(venue, transactionId, new CancelCourtTransactionRequest(reason), LifetimeToken), $"Court financial transaction #{transactionId} cancelled and its source rows released."), "cancel Court transaction");
+
+    public void EnsureStaffLoaded(VenueConnectionConfiguration venue)
+    {
+        if (Staff.ShouldLoad(venue))
+            Observe(Staff.LoadAsync(venue, false, LifetimeToken), $"load Staff for {venue.VenueCode}");
+    }
+
+    public void RefreshStaff(VenueConnectionConfiguration venue) =>
+        Observe(Staff.LoadAsync(venue, true, LifetimeToken), $"refresh Staff for {venue.VenueCode}");
+
+    public void SaveStaffJob(VenueConnectionConfiguration venue, long? jobId, SaveStaffJobRequest request) =>
+        Observe(ReportApiResultAsync(Staff.SaveJobAsync(venue, jobId, request, LifetimeToken), jobId is null ? "Staff job created." : "Staff job updated."), "save Staff job");
+
+    public void SaveStaffMember(VenueConnectionConfiguration venue, long? staffId, SaveStaffMemberRequest request) =>
+        Observe(ReportApiResultAsync(Staff.SaveMemberAsync(venue, staffId, request, LifetimeToken), staffId is null ? "Staff listing created." : "Staff listing updated."), "save Staff listing");
+
+    public void LinkStaffCharacter(VenueConnectionConfiguration venue, LinkStaffCharacterRequest request) =>
+        Observe(ReportApiResultAsync(Staff.LinkCharacterAsync(venue, request, LifetimeToken), request.StaffMemberId is null ? "Target character unlinked from Staff." : "Target character linked to Staff."), "link Staff character");
+
+    public void SaveStaffTimeEntry(VenueConnectionConfiguration venue, long? timeEntryId, SaveStaffTimeEntryRequest request) =>
+        Observe(ReportApiResultAsync(Staff.SaveTimeEntryAsync(venue, timeEntryId, request, LifetimeToken), timeEntryId is null ? "Clock-in recorded." : "Clock-out recorded and salary locked."), "save Staff time entry");
+
+    public void CancelStaffTimeEntry(VenueConnectionConfiguration venue, long timeEntryId, string? reason) =>
+        Observe(ReportApiResultAsync(Staff.CancelTimeEntryAsync(venue, timeEntryId, new CancelStaffTimeEntryRequest(reason), LifetimeToken), $"Time entry #{timeEntryId} cancelled."), "cancel Staff time entry");
+
+    public void CreateStaffPayout(VenueConnectionConfiguration venue, CreateStaffPayoutRequest request) =>
+        Observe(ReportStaffPayoutAsync(Staff.CreatePayoutAsync(venue, request, LifetimeToken)), "create Staff payout");
+
     public void EnsureBarLoaded(VenueConnectionConfiguration venue)
     {
         if (Bar.ShouldLoad(venue))
@@ -1438,6 +1513,8 @@ public sealed class Plugin : IDalamudPlugin
         Vip.RemoveProfile(venue.ProfileId);
         VipPerks.RemoveProfile(venue.ProfileId);
         Photoshoots.RemoveProfile(venue.ProfileId);
+        Court.RemoveProfile(venue.ProfileId);
+        Staff.RemoveProfile(venue.ProfileId);
         Bar.RemoveProfile(venue.ProfileId);
         VipArrivals.ClearProfile(venue.ProfileId);
         Greeter.ClearProfile(venue.ProfileId);
@@ -2842,6 +2919,106 @@ public sealed class Plugin : IDalamudPlugin
                 result.Failure?.Code,
                 result.Failure?.Message);
         }
+    }
+
+    private static async Task ReportApiResultAsync<T>(Task<ApiResult<T>> operation, string successMessage)
+    {
+        var result = await operation;
+        if (result.Success)
+            ChatGui.Print(successMessage, "PartyPulse");
+        else
+            ChatGui.PrintError(result.Failure?.Message ?? "The operation failed.", "PartyPulse");
+    }
+
+    private async Task ReportCourtTransactionAsync(Task<ApiResult<CourtFinancialTransactionResponse>> operation)
+    {
+        var result = await operation;
+        if (!result.Success || result.Value is null)
+        {
+            ChatGui.PrintError(result.Failure?.Message ?? "The Court financial transaction could not be created.", "PartyPulse");
+            return;
+        }
+        var value = result.Value;
+        ChatGui.Print($"Court transaction #{value.TransactionId}: court {value.GrossCourtGil:N0}, salary {value.SalaryGil:N0}, trade {value.TradeAmountGil:N0} gil.", "PartyPulse");
+        if (value.CanExecuteNow && value.TradeAmountGil > 0 && value.TradeTargetCharacterName is not null && value.TradeTargetWorldName is not null)
+        {
+            var ready = await settlementTradeService.CheckReadyAsync(
+                value.TradeTargetCharacterName,
+                value.TradeTargetWorldName,
+                LifetimeToken);
+            if (!ready.Success)
+            {
+                ReportPluginIntegrationFailure(ready.Failure, "Dropbox is not ready for the Court trade.");
+                return;
+            }
+
+            var integration = await settlementTradeService.InitiateTradeAsync(
+                value.TradeTargetCharacterName,
+                value.TradeTargetWorldName,
+                value.TradeAmountGil,
+                LifetimeToken);
+            if (!integration.Success)
+                ReportPluginIntegrationFailure(integration.Failure, "Dropbox could not start the Court trade.");
+            else
+                ChatGui.Print("Dropbox was instructed to begin the Court trade. Confirm Trade Success after the trade completes.", "PartyPulse");
+        }
+    }
+
+    private async Task ReportStaffPayoutAsync(Task<ApiResult<StaffPayoutResponse>> operation)
+    {
+        var result = await operation;
+        if (!result.Success || result.Value is null)
+        {
+            ChatGui.PrintError(result.Failure?.Message ?? "The Staff payout could not be created.", "PartyPulse");
+            return;
+        }
+        var value = result.Value;
+        ChatGui.Print($"Staff payout transaction #{value.TransactionId}: {value.SalaryGil:N0} gil.", "PartyPulse");
+        if (value.CanExecuteNow && value.TradeAmountGil > 0 && value.TradeTargetCharacterName is not null && value.TradeTargetWorldName is not null)
+        {
+            var ready = await settlementTradeService.CheckReadyAsync(
+                value.TradeTargetCharacterName,
+                value.TradeTargetWorldName,
+                LifetimeToken);
+            if (!ready.Success)
+            {
+                ReportPluginIntegrationFailure(ready.Failure, "Dropbox is not ready for the Staff payout trade.");
+                return;
+            }
+
+            var integration = await settlementTradeService.InitiateTradeAsync(
+                value.TradeTargetCharacterName,
+                value.TradeTargetWorldName,
+                value.TradeAmountGil,
+                LifetimeToken);
+            if (!integration.Success)
+                ReportPluginIntegrationFailure(integration.Failure, "Dropbox could not start the Staff payout trade.");
+            else
+                ChatGui.Print("Dropbox was instructed to begin the Staff payout. Confirm Trade Success after the trade completes.", "PartyPulse");
+        }
+    }
+
+    private async Task ExecuteCourtTransactionTradeAsync(VenueConnectionConfiguration venue, CourtTransactionSummary transaction)
+    {
+        if (!transaction.CanExecuteTrade || transaction.TradeAmountGil <= 0 || transaction.TradeTargetCharacterName is null || transaction.TradeTargetWorldName is null)
+        {
+            ChatGui.PrintError("This Court transaction is not executable by the current user.", "PartyPulse");
+            return;
+        }
+        var ready = await settlementTradeService.CheckReadyAsync(transaction.TradeTargetCharacterName, transaction.TradeTargetWorldName, LifetimeToken);
+        if (!ready.Success)
+        {
+            ReportPluginIntegrationFailure(ready.Failure, "Dropbox is not ready for this Court trade.");
+            return;
+        }
+        var result = await settlementTradeService.InitiateTradeAsync(transaction.TradeTargetCharacterName, transaction.TradeTargetWorldName, transaction.TradeAmountGil, LifetimeToken);
+        if (!result.Success)
+        {
+            ReportPluginIntegrationFailure(result.Failure, "Dropbox could not start the Court trade.");
+            return;
+        }
+        ChatGui.Print($"Dropbox started Court transaction #{transaction.TransactionId}. Confirm Trade Success after the trade completes.", "PartyPulse");
+        await Court.LoadAsync(venue, true, LifetimeToken);
     }
 
     private static void ReportVipFailure(ApiFailure? failure, string fallback) =>

@@ -7,6 +7,7 @@ using PartyPulse.Api;
 using PartyPulse.Models;
 using PartyPulse.Photoshoots;
 using PartyPulse.Services;
+using PartyPulse.TimedMacros;
 
 namespace PartyPulse.Windows;
 
@@ -63,6 +64,7 @@ public sealed class PhotoshootsTabRenderer(Plugin plugin)
         ResetForVenue(venue);
         plugin.EnsurePhotoshootsLoaded(venue);
         plugin.EnsureVipPerksLoaded(venue);
+        plugin.EnsureTimedMacrosLoaded(venue);
 
         var snapshot = plugin.Photoshoots.GetSnapshot(venue);
         var busy = plugin.Photoshoots.IsBusy(venue.ProfileId) || plugin.Finance.IsBusy(venue.ProfileId);
@@ -82,6 +84,7 @@ public sealed class PhotoshootsTabRenderer(Plugin plugin)
 
         var view = snapshot.View;
         SyncCommissionEditor(view);
+        DrawPhotoshootTimedMacro(venue);
 
         if (view.Capabilities.CanSell)
         {
@@ -116,6 +119,58 @@ public sealed class PhotoshootsTabRenderer(Plugin plugin)
         DrawSaleConfirmation(venue, view);
         ImGui.EndTabItem();
     }
+
+
+    private void DrawPhotoshootTimedMacro(VenueConnectionConfiguration venue)
+    {
+        var snapshot = plugin.TimedMacros.GetSnapshot(venue);
+        var view = snapshot.View;
+        var macro = view?.Macros.FirstOrDefault(value =>
+            string.Equals(value.TypeCode, TimedMacroTypeCodes.PhotoshootAdvertisement, StringComparison.OrdinalIgnoreCase) &&
+            value.CanExecute);
+        if (view is null || macro is null)
+            return;
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+        ImGui.TextUnformatted("Photoshoot advertisement");
+        var opening = view.CurrentOpening;
+        var locationMessage = string.Empty;
+        var atAddress = opening is not null && plugin.LocationProvider.IsAtAddress(
+            opening.AddressWorldName, opening.AddressCityName, opening.AddressWard, opening.AddressPlot, out locationMessage);
+        var now = snapshot.EstimatedServerNow;
+        var stateText = opening is null
+            ? "Paused: no active opening"
+            : !atAddress
+                ? "Paused: not at opening address"
+                : macro.NextDueAt is not { } dueAt || dueAt <= now
+                    ? "Due now"
+                    : $"Next in {FormatTimedMacroRemaining(dueAt - now)}";
+        if (stateText == "Due now")
+        {
+            ImGui.TextColored(new Vector4(1f, 0.72f, 0.25f, 1f), stateText);
+            ImGui.SameLine();
+            ImGui.TextDisabled($"· every {macro.IntervalMinutes} minutes · shared across users");
+        }
+        else
+            ImGui.TextDisabled($"{stateText} · every {macro.IntervalMinutes} minutes · shared across users");
+        ImGui.SameLine();
+        var canExecute = opening is not null && atAddress && macro.Enabled && macro.IsConfigured;
+        ImGui.BeginDisabled(plugin.TimedMacros.IsBusy(venue.ProfileId) || plugin.IsGameMacroBusy || !canExecute);
+        if (ImGui.SmallButton("Execute photoshoot ad"))
+            plugin.RunTimedMacro(venue, macro, opening!);
+        ImGui.EndDisabled();
+        if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled) && !canExecute)
+            ImGui.SetTooltip(opening is null ? "There is no active opening." : !atAddress ? locationMessage : !macro.Enabled ? "The photoshoot advertisement macro is disabled." : "The photoshoot advertisement macro has not been configured.");
+        else if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Running early is allowed and resets the shared timer.");
+    }
+
+    private static string FormatTimedMacroRemaining(TimeSpan remaining) =>
+        remaining.TotalHours >= 1
+            ? $"{(int)remaining.TotalHours:00}:{remaining.Minutes:00}:{remaining.Seconds:00}"
+            : $"{remaining.Minutes:00}:{remaining.Seconds:00}";
 
     private void DrawSeller(
         VenueConnectionConfiguration venue,

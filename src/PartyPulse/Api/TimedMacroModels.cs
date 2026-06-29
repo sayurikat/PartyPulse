@@ -6,6 +6,7 @@ namespace PartyPulse.Api;
 public static class TimedMacroTypeCodes
 {
     public const string VipAdvertisement = "vip.advertisement";
+    public const string PhotoshootAdvertisement = "photoshoot.advertisement";
     public const string Custom = "custom";
     public const string DjRegularAdvertisement = "dj.advertisement.regular";
     public const string DjResidentAdvertisement = "dj.advertisement.resident";

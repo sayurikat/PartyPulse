@@ -1288,6 +1288,373 @@ public sealed class PartyPulseApiClient : IDisposable
         payload.GambaTicketSales is not null &&
         payload.GambaGameHistory is not null;
 
+    public Task<ApiResult<StaffManagementViewResponse>> GetStaffAsync(
+        Uri baseUri,
+        string accessToken,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<StaffManagementViewResponse>(
+            baseUri,
+            HttpMethod.Get,
+            "api/v1/staff",
+            accessToken,
+            null,
+            ValidateStaffViewResponse,
+            cancellationToken);
+
+    public Task<ApiResult<StaffJobOperationResponse>> CreateStaffJobAsync(
+        Uri baseUri,
+        string accessToken,
+        SaveStaffJobRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<StaffJobOperationResponse>(
+            baseUri,
+            HttpMethod.Post,
+            "api/v1/staff/jobs",
+            accessToken,
+            request,
+            static payload => payload.JobDefinitionId > 0,
+            cancellationToken);
+
+    public Task<ApiResult<StaffJobOperationResponse>> UpdateStaffJobAsync(
+        Uri baseUri,
+        string accessToken,
+        long jobDefinitionId,
+        SaveStaffJobRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<StaffJobOperationResponse>(
+            baseUri,
+            HttpMethod.Put,
+            $"api/v1/staff/jobs/{jobDefinitionId}",
+            accessToken,
+            request,
+            static payload => payload.JobDefinitionId > 0,
+            cancellationToken);
+
+    public Task<ApiResult<StaffMemberOperationResponse>> CreateStaffMemberAsync(
+        Uri baseUri,
+        string accessToken,
+        SaveStaffMemberRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<StaffMemberOperationResponse>(
+            baseUri,
+            HttpMethod.Post,
+            "api/v1/staff/members",
+            accessToken,
+            request,
+            static payload => payload.StaffMemberId > 0,
+            cancellationToken);
+
+    public Task<ApiResult<StaffMemberOperationResponse>> UpdateStaffMemberAsync(
+        Uri baseUri,
+        string accessToken,
+        long staffMemberId,
+        SaveStaffMemberRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<StaffMemberOperationResponse>(
+            baseUri,
+            HttpMethod.Put,
+            $"api/v1/staff/members/{staffMemberId}",
+            accessToken,
+            request,
+            static payload => payload.StaffMemberId > 0,
+            cancellationToken);
+
+    public Task<ApiResult<StaffCharacterLinkResponse>> LinkStaffCharacterAsync(
+        Uri baseUri,
+        string accessToken,
+        LinkStaffCharacterRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<StaffCharacterLinkResponse>(
+            baseUri,
+            HttpMethod.Put,
+            "api/v1/staff/character-link",
+            accessToken,
+            request,
+            static payload => payload.CharacterId > 0,
+            cancellationToken);
+
+    public Task<ApiResult<StaffTimeEntryOperationResponse>> CreateStaffTimeEntryAsync(
+        Uri baseUri,
+        string accessToken,
+        SaveStaffTimeEntryRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<StaffTimeEntryOperationResponse>(
+            baseUri,
+            HttpMethod.Post,
+            "api/v1/staff/time-entries",
+            accessToken,
+            request,
+            static payload =>
+                payload.TimeEntryId > 0 &&
+                !string.IsNullOrWhiteSpace(payload.Status),
+            cancellationToken);
+
+    public Task<ApiResult<StaffTimeEntryOperationResponse>> UpdateStaffTimeEntryAsync(
+        Uri baseUri,
+        string accessToken,
+        long timeEntryId,
+        SaveStaffTimeEntryRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<StaffTimeEntryOperationResponse>(
+            baseUri,
+            HttpMethod.Put,
+            $"api/v1/staff/time-entries/{timeEntryId}",
+            accessToken,
+            request,
+            static payload =>
+                payload.TimeEntryId > 0 &&
+                !string.IsNullOrWhiteSpace(payload.Status),
+            cancellationToken);
+
+    public Task<ApiResult<StaffTimeEntryCancellationResponse>> CancelStaffTimeEntryAsync(
+        Uri baseUri,
+        string accessToken,
+        long timeEntryId,
+        CancelStaffTimeEntryRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<StaffTimeEntryCancellationResponse>(
+            baseUri,
+            HttpMethod.Post,
+            $"api/v1/staff/time-entries/{timeEntryId}/cancel",
+            accessToken,
+            request,
+            static payload =>
+                payload.TimeEntryId > 0 &&
+                payload.CancelledAt != default,
+            cancellationToken);
+
+    public Task<ApiResult<StaffPayoutResponse>> CreateStaffPayoutAsync(
+        Uri baseUri,
+        string accessToken,
+        CreateStaffPayoutRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<StaffPayoutResponse>(
+            baseUri,
+            HttpMethod.Post,
+            "api/v1/staff/payouts",
+            accessToken,
+            request,
+            ValidateFinancialTransactionResponse,
+            cancellationToken);
+
+    public Task<ApiResult<CourtManagementViewResponse>> GetCourtAsync(
+        Uri baseUri,
+        string accessToken,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<CourtManagementViewResponse>(
+            baseUri,
+            HttpMethod.Get,
+            "api/v1/court",
+            accessToken,
+            null,
+            ValidateCourtViewResponse,
+            cancellationToken);
+
+    public Task<ApiResult<CourtOfferOperationResponse>> CreateCourtOfferAsync(
+        Uri baseUri,
+        string accessToken,
+        SaveCourtOfferRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<CourtOfferOperationResponse>(
+            baseUri,
+            HttpMethod.Post,
+            "api/v1/court/offers",
+            accessToken,
+            request,
+            static payload => payload.OfferId > 0,
+            cancellationToken);
+
+    public Task<ApiResult<CourtOfferOperationResponse>> UpdateCourtOfferAsync(
+        Uri baseUri,
+        string accessToken,
+        long offerId,
+        SaveCourtOfferRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<CourtOfferOperationResponse>(
+            baseUri,
+            HttpMethod.Put,
+            $"api/v1/court/offers/{offerId}",
+            accessToken,
+            request,
+            static payload => payload.OfferId > 0,
+            cancellationToken);
+
+    public Task<ApiResult<SellCourtServiceResponse>> SellCourtServiceAsync(
+        Uri baseUri,
+        string accessToken,
+        SellCourtServiceRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<SellCourtServiceResponse>(
+            baseUri,
+            HttpMethod.Post,
+            "api/v1/court/sales",
+            accessToken,
+            request,
+            static payload =>
+                payload.SaleId > 0 &&
+                payload.OfferId > 0 &&
+                !string.IsNullOrWhiteSpace(payload.OfferName),
+            cancellationToken);
+
+    public Task<ApiResult<CourtSaleCancellationResponse>> CancelCourtSaleAsync(
+        Uri baseUri,
+        string accessToken,
+        long saleId,
+        CancelCourtSaleRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<CourtSaleCancellationResponse>(
+            baseUri,
+            HttpMethod.Post,
+            $"api/v1/court/sales/{saleId}/cancel",
+            accessToken,
+            request,
+            static payload => payload.SaleId > 0 && payload.VoidedAt != default,
+            cancellationToken);
+
+    public Task<ApiResult<CourtFinancialTransactionResponse>> CreateCourtStaffSettlementAsync(
+        Uri baseUri,
+        string accessToken,
+        CreateCourtStaffSettlementRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<CourtFinancialTransactionResponse>(
+            baseUri,
+            HttpMethod.Post,
+            "api/v1/court/settlements/staff",
+            accessToken,
+            request,
+            ValidateFinancialTransactionResponse,
+            cancellationToken);
+
+    public Task<ApiResult<CourtFinancialTransactionResponse>> CreateCourtAccountantPrepayAsync(
+        Uri baseUri,
+        string accessToken,
+        CreateCourtAccountantPrepayRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<CourtFinancialTransactionResponse>(
+            baseUri,
+            HttpMethod.Post,
+            "api/v1/court/accountants/prepay",
+            accessToken,
+            request,
+            ValidateFinancialTransactionResponse,
+            cancellationToken);
+
+    public Task<ApiResult<CourtFinancialTransactionResponse>> CreateCourtAccountantFinalizationAsync(
+        Uri baseUri,
+        string accessToken,
+        CreateCourtAccountantFinalizationRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<CourtFinancialTransactionResponse>(
+            baseUri,
+            HttpMethod.Post,
+            "api/v1/court/accountants/finalize",
+            accessToken,
+            request,
+            ValidateFinancialTransactionResponse,
+            cancellationToken);
+
+    public Task<ApiResult<CourtTransactionConfirmationResponse>> ConfirmCourtTransactionAsync(
+        Uri baseUri,
+        string accessToken,
+        long transactionId,
+        ConfirmCourtTransactionRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<CourtTransactionConfirmationResponse>(
+            baseUri,
+            HttpMethod.Post,
+            $"api/v1/court/transactions/{transactionId}/confirm",
+            accessToken,
+            request,
+            static payload =>
+                payload.TransactionId > 0 &&
+                payload.ConfirmedAt != default,
+            cancellationToken);
+
+    public Task<ApiResult<CourtTransactionCancellationResponse>> CancelCourtTransactionAsync(
+        Uri baseUri,
+        string accessToken,
+        long transactionId,
+        CancelCourtTransactionRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<CourtTransactionCancellationResponse>(
+            baseUri,
+            HttpMethod.Post,
+            $"api/v1/court/transactions/{transactionId}/cancel",
+            accessToken,
+            request,
+            static payload =>
+                payload.TransactionId > 0 &&
+                payload.CancelledAt != default,
+            cancellationToken);
+
+    private static bool ValidateStaffViewResponse(StaffManagementViewResponse payload) =>
+        payload.Capabilities is not null &&
+        payload.Openings is not null &&
+        payload.Jobs is not null &&
+        payload.VenueUsers is not null &&
+        payload.StaffMembers is not null &&
+        payload.Characters is not null &&
+        payload.TimeEntries is not null &&
+        payload.Openings.All(static opening =>
+            opening.OpeningId > 0 && opening.ClosesAt > opening.OpensAt) &&
+        payload.Jobs.All(static job =>
+            job.JobDefinitionId > 0 &&
+            !string.IsNullOrWhiteSpace(job.Name) &&
+            job.HourlyRateGil >= 0) &&
+        payload.StaffMembers.All(static staff =>
+            staff.StaffMemberId > 0 &&
+            !string.IsNullOrWhiteSpace(staff.DisplayName) &&
+            staff.JobDefinitionId > 0 &&
+            staff.EffectiveHourlyRateGil >= 0 &&
+            staff.CustomFixedAmountGil >= 0 &&
+            staff.UnpaidSalaryGil >= 0) &&
+        payload.TimeEntries.All(static entry =>
+            entry.TimeEntryId > 0 &&
+            entry.StaffMemberId > 0 &&
+            entry.OpeningId > 0 &&
+            !string.IsNullOrWhiteSpace(entry.Status));
+
+    private static bool ValidateCourtViewResponse(CourtManagementViewResponse payload) =>
+        payload.Capabilities is not null &&
+        payload.Offers is not null &&
+        payload.Sales is not null &&
+        payload.AccountantAccounts is not null &&
+        payload.Transactions is not null &&
+        payload.PersonalUnsettledCourtGil >= 0 &&
+        payload.PersonalUnpaidSalaryGil >= 0 &&
+        payload.Offers.All(static offer =>
+            offer.OfferId > 0 &&
+            !string.IsNullOrWhiteSpace(offer.Name) &&
+            offer.DurationMinutes > 0) &&
+        payload.Sales.All(static sale =>
+            sale.SaleId > 0 &&
+            sale.OfferId > 0 &&
+            !string.IsNullOrWhiteSpace(sale.OfferName) &&
+            sale.PriceGil >= 0) &&
+        payload.Transactions.All(static transaction =>
+            transaction.TransactionId > 0 &&
+            !string.IsNullOrWhiteSpace(transaction.TransactionType) &&
+            !string.IsNullOrWhiteSpace(transaction.Status) &&
+            transaction.TradeAmountGil >= 0 &&
+            transaction.Items is not null);
+
+    private static bool ValidateFinancialTransactionResponse(StaffPayoutResponse payload) =>
+        payload.TransactionId > 0 &&
+        payload.GrossCourtGil >= 0 &&
+        payload.SalaryGil >= 0 &&
+        payload.TradeAmountGil >= 0 &&
+        !string.IsNullOrWhiteSpace(payload.TradeDirection) &&
+        payload.CreatedAt != default;
+
+    private static bool ValidateFinancialTransactionResponse(
+        CourtFinancialTransactionResponse payload) =>
+        payload.TransactionId > 0 &&
+        payload.GrossCourtGil >= 0 &&
+        payload.SalaryGil >= 0 &&
+        payload.TradeAmountGil >= 0 &&
+        !string.IsNullOrWhiteSpace(payload.TradeDirection) &&
+        payload.CreatedAt != default;
+
     private static bool ValidatePhotoshootViewResponse(PhotoshootManagementViewResponse payload) =>
         payload.Capabilities is not null && payload.SellerPercentage is >= 0m and <= 100m &&
         payload.PersonalGrossGil >= 0 && payload.PersonalSellerShareGil >= 0 &&
