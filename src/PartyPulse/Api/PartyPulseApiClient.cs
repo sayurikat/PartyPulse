@@ -993,6 +993,36 @@ public sealed class PartyPulseApiClient : IDisposable
                               payload.SoldAt != default,
             cancellationToken);
 
+    public Task<ApiResult<PhotoshootSalePaymentStatusResponse>> SetPhotoshootSalePaymentStatusAsync(
+        Uri baseUri,
+        string accessToken,
+        long saleId,
+        SetPhotoshootSalePaymentStatusRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<PhotoshootSalePaymentStatusResponse>(
+            baseUri,
+            HttpMethod.Put,
+            $"api/v1/photoshoots/sales/{saleId}/payment-status",
+            accessToken,
+            request,
+            static payload => payload.SaleId > 0,
+            cancellationToken);
+
+    public Task<ApiResult<PhotoshootSaleCancellationResponse>> CancelPhotoshootSaleAsync(
+        Uri baseUri,
+        string accessToken,
+        long saleId,
+        CancelPhotoshootSaleRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<PhotoshootSaleCancellationResponse>(
+            baseUri,
+            HttpMethod.Post,
+            $"api/v1/photoshoots/sales/{saleId}/cancel",
+            accessToken,
+            request,
+            static payload => payload.SaleId > 0 && payload.VoidedAt != default,
+            cancellationToken);
+
     public Task<ApiResult<FinanceViewResponse>> GetFinanceAsync(
         Uri baseUri,
         string accessToken,

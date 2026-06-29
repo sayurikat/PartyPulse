@@ -120,6 +120,10 @@ public sealed record SellPhotoshootRequest(
     int PackageId,
     int AdditionalCharacters);
 
+public sealed record SetPhotoshootSalePaymentStatusRequest(bool Settled);
+
+public sealed record CancelPhotoshootSaleRequest(string? Reason);
+
 public sealed record SellPhotoshootResponse(
     long SaleId,
     int PackageId,
@@ -138,3 +142,13 @@ public sealed record SellPhotoshootResponse(
     long? PerkRedemptionId,
     DateTimeOffset? PerkNextAvailableAt,
     DateTimeOffset SoldAt);
+
+public sealed record PhotoshootSalePaymentStatusResponse(
+    long SaleId,
+    bool Settled,
+    DateTimeOffset? PaidToVenueAt);
+
+public sealed record PhotoshootSaleCancellationResponse(
+    long SaleId,
+    DateTimeOffset VoidedAt,
+    long? ReleasedPerkRedemptionId);

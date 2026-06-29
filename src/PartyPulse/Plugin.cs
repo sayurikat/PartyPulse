@@ -1070,6 +1070,22 @@ public sealed class Plugin : IDalamudPlugin
     public void SellPhotoshoot(VenueConnectionConfiguration venue, SellPhotoshootRequest request) =>
         Observe(SellPhotoshootAndReportAsync(venue, request), $"sell photoshoot for {venue.VenueCode}");
 
+    public void SetPhotoshootSalePaymentStatus(
+        VenueConnectionConfiguration venue,
+        long saleId,
+        SetPhotoshootSalePaymentStatusRequest request) =>
+        Observe(
+            SetPhotoshootSalePaymentStatusAndReportAsync(venue, saleId, request),
+            $"set photoshoot sale {saleId} payment status");
+
+    public void CancelPhotoshootSale(
+        VenueConnectionConfiguration venue,
+        long saleId,
+        CancelPhotoshootSaleRequest request) =>
+        Observe(
+            CancelPhotoshootSaleAndReportAsync(venue, saleId, request),
+            $"cancel photoshoot sale {saleId}");
+
     public void CreatePhotoshootSettlement(VenueConnectionConfiguration venue, CreatePhotoshootSettlementRequest request) =>
         Observe(CreatePhotoshootSettlementAndReportAsync(venue, request), $"create photoshoot settlement for {venue.VenueCode}");
 
@@ -2469,6 +2485,55 @@ public sealed class Plugin : IDalamudPlugin
         ChatGui.Print(
             $"Recorded photoshoot sale #{result.Value.SaleId} to {result.Value.BuyerCharacterName} for {cost}. " +
             $"Seller keeps {result.Value.SellerShareGil:N0} gil; {result.Value.VenueShareGil:N0} gil is owed to the venue.",
+            "PartyPulse");
+    }
+
+    private async Task SetPhotoshootSalePaymentStatusAndReportAsync(
+        VenueConnectionConfiguration venue,
+        long saleId,
+        SetPhotoshootSalePaymentStatusRequest request)
+    {
+        var result = await Photoshoots.SetSalePaymentStatusAsync(
+            venue,
+            saleId,
+            request,
+            LifetimeToken);
+        if (!result.Success || result.Value is null)
+        {
+            ReportVipFailure(result.Failure, "The photoshoot payment status could not be updated.");
+            return;
+        }
+
+        await Finance.LoadAsync(venue, true, LifetimeToken);
+        ChatGui.Print(
+            request.Settled
+                ? $"Photoshoot sale #{saleId} was marked settled."
+                : $"Photoshoot sale #{saleId} was marked unpaid.",
+            "PartyPulse");
+    }
+
+    private async Task CancelPhotoshootSaleAndReportAsync(
+        VenueConnectionConfiguration venue,
+        long saleId,
+        CancelPhotoshootSaleRequest request)
+    {
+        var result = await Photoshoots.CancelSaleAsync(
+            venue,
+            saleId,
+            request,
+            LifetimeToken);
+        if (!result.Success || result.Value is null)
+        {
+            ReportVipFailure(result.Failure, "The photoshoot sale could not be cancelled.");
+            return;
+        }
+
+        await VipPerks.LoadAsync(venue, true, LifetimeToken);
+        await Finance.LoadAsync(venue, true, LifetimeToken);
+        ChatGui.Print(
+            result.Value.ReleasedPerkRedemptionId is { } redemptionId
+                ? $"Photoshoot sale #{saleId} was cancelled and VIP perk redemption #{redemptionId} was restored."
+                : $"Photoshoot sale #{saleId} was cancelled.",
             "PartyPulse");
     }
 

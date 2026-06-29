@@ -12,6 +12,9 @@ namespace PartyPulse.Windows;
 
 public sealed class PhotoshootsTabRenderer(Plugin plugin)
 {
+    private const string PaymentStatusPopupName = "Photoshoot payment status###PartyPulsePhotoshootPaymentStatus";
+    private const string CancelSalePopupName = "Cancel photoshoot purchase###PartyPulsePhotoshootCancelSale";
+
     private static readonly Vector4 AvailableColor = new(0.35f, 0.85f, 0.45f, 1f);
     private static readonly Vector4 UnavailableColor = new(0.65f, 0.18f, 0.18f, 1f);
 
@@ -37,6 +40,18 @@ public sealed class PhotoshootsTabRenderer(Plugin plugin)
 
     private string settlementTargetName = string.Empty;
     private string settlementTargetWorld = string.Empty;
+
+    private string saleBuyerFilter = string.Empty;
+    private string saleSellerFilter = string.Empty;
+    private string salePackageFilter = string.Empty;
+    private long pendingPaymentSaleId;
+    private bool pendingPaymentSettled;
+    private bool openPaymentStatusPopup;
+    private long pendingCancelSaleId;
+    private string pendingCancelBuyer = string.Empty;
+    private string pendingCancelPackage = string.Empty;
+    private string cancelSaleReason = string.Empty;
+    private bool openCancelSalePopup;
 
     public void Draw(VenueConnectionConfiguration venue)
     {
@@ -94,7 +109,10 @@ public sealed class PhotoshootsTabRenderer(Plugin plugin)
         }
 
         ImGui.Separator();
-        DrawRecentSales(venue, view);
+        DrawRecentSales(venue, view, busy);
+        OpenQueuedSalePopups();
+        DrawPaymentStatusConfirmation(venue);
+        DrawCancelSaleConfirmation(venue);
         DrawSaleConfirmation(venue, view);
         ImGui.EndTabItem();
     }
@@ -454,32 +472,182 @@ public sealed class PhotoshootsTabRenderer(Plugin plugin)
         ImGui.EndDisabled();
     }
 
-    private static void DrawRecentSales(
+    private void DrawRecentSales(
         VenueConnectionConfiguration venue,
-        PhotoshootManagementViewResponse view)
+        PhotoshootManagementViewResponse view,
+        bool busy)
     {
         if (!ImGui.CollapsingHeader("Recent photoshoot sales"))
         {
             return;
         }
 
-        foreach (var sale in view.Sales.Take(100))
+        var filterWidth = Math.Min(
+            420 * ImGuiHelpers.GlobalScale,
+            Math.Max(180 * ImGuiHelpers.GlobalScale, ImGui.GetContentRegionAvail().X * 0.6f));
+        ImGui.SetNextItemWidth(filterWidth);
+        ImGui.InputText("Buyer filter", ref saleBuyerFilter, 100);
+        ImGui.SetNextItemWidth(filterWidth);
+        ImGui.InputText("Seller filter", ref saleSellerFilter, 100);
+        ImGui.SetNextItemWidth(filterWidth);
+        ImGui.InputText("Package filter", ref salePackageFilter, 100);
+
+        var buyerFilter = saleBuyerFilter.Trim();
+        var sellerFilter = saleSellerFilter.Trim();
+        var packageFilter = salePackageFilter.Trim();
+        var filteredSales = view.Sales
+            .Where(sale =>
+                (buyerFilter.Length == 0 ||
+                 sale.BuyerCharacterName.Contains(buyerFilter, StringComparison.OrdinalIgnoreCase) ||
+                 sale.BuyerWorldName.Contains(buyerFilter, StringComparison.OrdinalIgnoreCase)) &&
+                (sellerFilter.Length == 0 ||
+                 sale.SellerDisplayName.Contains(sellerFilter, StringComparison.OrdinalIgnoreCase)) &&
+                (packageFilter.Length == 0 ||
+                 sale.PackageName.Contains(packageFilter, StringComparison.OrdinalIgnoreCase)))
+            .Take(100)
+            .ToArray();
+
+        ImGui.TextDisabled($"Showing {filteredSales.Length:N0} of {view.Sales.Count:N0} recent sales.");
+
+        foreach (var sale in filteredSales)
         {
+            ImGui.PushID((int)(sale.SaleId % int.MaxValue));
             var cost = sale.BaseCostType == "vip_perk"
                 ? $"{sale.PricePerkName} + {sale.TotalGil:N0} gil"
                 : $"{sale.TotalGil:N0} gil";
             var status = sale.VoidedAt is not null
-                ? "voided"
+                ? "cancelled"
                 : sale.PaidToVenueAt is not null
                     ? "settled"
                     : sale.PendingSettlementId is not null
                         ? "pending settlement"
                         : "unsettled";
             ImGui.BulletText(
-                $"{sale.BuyerCharacterName} @ {sale.BuyerWorldName} — {sale.PackageName} — {cost} — " +
+                $"{sale.BuyerCharacterName} @ {sale.BuyerWorldName} — seller: {sale.SellerDisplayName} — " +
+                $"{sale.PackageName} — {cost} — " +
                 $"seller {sale.SellerShareGil:N0} / venue {sale.VenueShareGil:N0} — {status} — " +
                 VenueTimeZone.Format(venue, sale.SoldAt, "g"));
+
+            if (sale.VoidedAt is not null && !string.IsNullOrWhiteSpace(sale.VoidReason))
+            {
+                ImGui.Indent();
+                ImGui.TextDisabled($"Cancellation reason: {sale.VoidReason}");
+                ImGui.Unindent();
+            }
+
+            if (view.Capabilities.CanManageSettlements)
+            {
+                ImGui.Indent();
+                ImGui.BeginDisabled(busy || sale.PendingSettlementId is not null);
+                var paymentLabel = sale.PaidToVenueAt is null ? "Mark settled" : "Mark unpaid";
+                if (ImGui.SmallButton(paymentLabel))
+                {
+                    pendingPaymentSaleId = sale.SaleId;
+                    pendingPaymentSettled = sale.PaidToVenueAt is null;
+                    openPaymentStatusPopup = true;
+                }
+                ImGui.EndDisabled();
+                if (sale.PendingSettlementId is not null &&
+                    ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+                {
+                    ImGui.SetTooltip("Resolve or reject the pending settlement transaction first.");
+                }
+
+                ImGui.SameLine();
+                ImGui.BeginDisabled(busy || sale.VoidedAt is not null || sale.PendingSettlementId is not null);
+                if (ImGui.SmallButton("Cancel purchase"))
+                {
+                    pendingCancelSaleId = sale.SaleId;
+                    pendingCancelBuyer = $"{sale.BuyerCharacterName} @ {sale.BuyerWorldName}";
+                    pendingCancelPackage = sale.PackageName;
+                    cancelSaleReason = string.Empty;
+                    openCancelSalePopup = true;
+                }
+                ImGui.EndDisabled();
+                if (sale.PendingSettlementId is not null &&
+                    ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+                {
+                    ImGui.SetTooltip("Resolve or reject the pending settlement transaction before cancelling the purchase.");
+                }
+                ImGui.Unindent();
+            }
+
+            ImGui.PopID();
         }
+    }
+
+    private void OpenQueuedSalePopups()
+    {
+        if (openPaymentStatusPopup)
+        {
+            ImGui.OpenPopup(PaymentStatusPopupName);
+            openPaymentStatusPopup = false;
+        }
+
+        if (openCancelSalePopup)
+        {
+            ImGui.OpenPopup(CancelSalePopupName);
+            openCancelSalePopup = false;
+        }
+    }
+
+    private void DrawPaymentStatusConfirmation(VenueConnectionConfiguration venue)
+    {
+        if (!ImGui.BeginPopupModal(PaymentStatusPopupName, ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            return;
+        }
+
+        ImGui.TextWrapped(pendingPaymentSettled
+            ? $"Mark photoshoot sale #{pendingPaymentSaleId} as paid to the venue?"
+            : $"Mark photoshoot sale #{pendingPaymentSaleId} as unpaid to the venue?");
+        ImGui.TextWrapped(
+            "This is a privileged manual accounting override. The change is retained in the photoshoot payment audit history.");
+        if (ImGui.Button(pendingPaymentSettled ? "Mark settled" : "Mark unpaid"))
+        {
+            plugin.SetPhotoshootSalePaymentStatus(
+                venue,
+                pendingPaymentSaleId,
+                new SetPhotoshootSalePaymentStatusRequest(pendingPaymentSettled));
+            ImGui.CloseCurrentPopup();
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Cancel"))
+        {
+            ImGui.CloseCurrentPopup();
+        }
+        ImGui.EndPopup();
+    }
+
+    private void DrawCancelSaleConfirmation(VenueConnectionConfiguration venue)
+    {
+        if (!ImGui.BeginPopupModal(CancelSalePopupName, ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            return;
+        }
+
+        ImGui.TextWrapped(
+            $"Cancel photoshoot sale #{pendingCancelSaleId}: {pendingCancelPackage} for {pendingCancelBuyer}?");
+        ImGui.TextColored(
+            new Vector4(1f, 0.65f, 0.25f, 1f),
+            "Cancelling the purchase restores any VIP perk spent by this sale. Payment settlement is tracked separately and is not silently changed.");
+        ImGui.SetNextItemWidth(420 * ImGuiHelpers.GlobalScale);
+        ImGui.InputText("Reason (optional)", ref cancelSaleReason, 255);
+        if (ImGui.Button("Cancel purchase"))
+        {
+            plugin.CancelPhotoshootSale(
+                venue,
+                pendingCancelSaleId,
+                new CancelPhotoshootSaleRequest(
+                    string.IsNullOrWhiteSpace(cancelSaleReason) ? null : cancelSaleReason.Trim()));
+            ImGui.CloseCurrentPopup();
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Go back"))
+        {
+            ImGui.CloseCurrentPopup();
+        }
+        ImGui.EndPopup();
     }
 
     private void ResetForVenue(VenueConnectionConfiguration venue)
@@ -498,6 +666,17 @@ public sealed class PhotoshootsTabRenderer(Plugin plugin)
         pendingAdditionalCharacters = 0;
         settlementTargetName = string.Empty;
         settlementTargetWorld = string.Empty;
+        saleBuyerFilter = string.Empty;
+        saleSellerFilter = string.Empty;
+        salePackageFilter = string.Empty;
+        pendingPaymentSaleId = 0;
+        pendingPaymentSettled = false;
+        openPaymentStatusPopup = false;
+        pendingCancelSaleId = 0;
+        pendingCancelBuyer = string.Empty;
+        pendingCancelPackage = string.Empty;
+        cancelSaleReason = string.Empty;
+        openCancelSalePopup = false;
         loadedSellerPercentage = -1m;
         sellerPercentage = 0f;
         ResetEditor();

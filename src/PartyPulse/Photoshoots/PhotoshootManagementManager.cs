@@ -144,6 +144,36 @@ public sealed class PhotoshootManagementManager : IDisposable
                 cancellationToken),
             cancellationToken);
 
+    public Task<ApiResult<PhotoshootSalePaymentStatusResponse>> SetSalePaymentStatusAsync(
+        VenueConnectionConfiguration venue,
+        long saleId,
+        SetPhotoshootSalePaymentStatusRequest request,
+        CancellationToken cancellationToken) =>
+        MutateAsync(
+            venue,
+            (baseUri, accessToken) => apiClient.SetPhotoshootSalePaymentStatusAsync(
+                baseUri,
+                accessToken,
+                saleId,
+                request,
+                cancellationToken),
+            cancellationToken);
+
+    public Task<ApiResult<PhotoshootSaleCancellationResponse>> CancelSaleAsync(
+        VenueConnectionConfiguration venue,
+        long saleId,
+        CancelPhotoshootSaleRequest request,
+        CancellationToken cancellationToken) =>
+        MutateAsync(
+            venue,
+            (baseUri, accessToken) => apiClient.CancelPhotoshootSaleAsync(
+                baseUri,
+                accessToken,
+                saleId,
+                request,
+                cancellationToken),
+            cancellationToken);
+
     public void RemoveProfile(Guid profileId) => snapshots.TryRemove(profileId, out _);
 
     public void Dispose()

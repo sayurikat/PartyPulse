@@ -15,6 +15,9 @@ namespace PartyPulse.Windows;
 
 public sealed class VipTabRenderer(Plugin plugin)
 {
+    private const string RedeemPerkPopupName = "Confirm VIP perk redemption###PartyPulseVipPerkRedeem";
+    private const string UndoPerkPopupName = "Undo VIP perk redemption###PartyPulseUndoVipPerk";
+
     private static readonly Vector4 AvailableColor = new(0.35f, 0.85f, 0.45f, 1f);
     private static readonly Vector4 UnavailableColor = new(0.65f, 0.18f, 0.18f, 1f);
 
@@ -58,6 +61,8 @@ public sealed class VipTabRenderer(Plugin plugin)
     private int pendingRedeemPerkId;
     private long pendingUndoRedemptionId;
     private string undoReason = string.Empty;
+    private bool openRedeemPerkPopup;
+    private bool openUndoPerkPopup;
 
     public void Draw(VenueConnectionConfiguration venue)
     {
@@ -132,7 +137,7 @@ public sealed class VipTabRenderer(Plugin plugin)
         }
 
         DrawArrivalAdministration(venue);
-        DrawVipPerkAuditAdministration(venue, isBusy);
+        OpenQueuedPerkPopups();
         DrawRedeemPerkPopup(venue);
         DrawUndoPerkPopup(venue);
 
@@ -794,6 +799,7 @@ public sealed class VipTabRenderer(Plugin plugin)
             ImGuiTableFlags.RowBg |
             ImGuiTableFlags.Resizable |
             ImGuiTableFlags.ScrollY |
+            ImGuiTableFlags.ScrollX |
             ImGuiTableFlags.SizingStretchProp;
 
         if (!ImGui.BeginTable(
@@ -805,11 +811,11 @@ public sealed class VipTabRenderer(Plugin plugin)
             return;
         }
 
-        ImGui.TableSetupColumn("Character");
-        ImGui.TableSetupColumn("Discord");
-        ImGui.TableSetupColumn("Expires at");
-        ImGui.TableSetupColumn("Characters");
-        ImGui.TableSetupColumn("Actions", ImGuiTableColumnFlags.WidthFixed, 165 * ImGuiHelpers.GlobalScale);
+        ImGui.TableSetupColumn("Character", ImGuiTableColumnFlags.WidthStretch, 1.5f);
+        ImGui.TableSetupColumn("Discord", ImGuiTableColumnFlags.WidthStretch, 1f);
+        ImGui.TableSetupColumn("Expires at", ImGuiTableColumnFlags.WidthFixed, 135 * ImGuiHelpers.GlobalScale);
+        ImGui.TableSetupColumn("Characters", ImGuiTableColumnFlags.WidthFixed, 75 * ImGuiHelpers.GlobalScale);
+        ImGui.TableSetupColumn("Actions", ImGuiTableColumnFlags.WidthFixed, 130 * ImGuiHelpers.GlobalScale);
         ImGui.TableHeadersRow();
 
         foreach (var player in filteredPlayers)
@@ -1178,26 +1184,6 @@ public sealed class VipTabRenderer(Plugin plugin)
             vipBusy || plugin.VipPerks.IsBusy(venue.ProfileId));
     }
 
-    private void DrawVipPerkAuditAdministration(
-        VenueConnectionConfiguration venue,
-        bool vipBusy)
-    {
-        var snapshot = plugin.VipPerks.GetSnapshot(venue);
-        if (snapshot.Status != VipPerkManagementStatus.Ready ||
-            snapshot.View is not { Capabilities.CanUndo: true } view)
-        {
-            return;
-        }
-
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Spacing();
-        DrawPerkAudit(
-            venue,
-            view,
-            vipBusy || plugin.VipPerks.IsBusy(venue.ProfileId));
-    }
-
     private void DrawTargetPerks(VenueConnectionConfiguration venue, VipPerkManagementViewResponse view, bool busy)
     {
         if (!plugin.TargetProvider.TryGetCurrentTarget(out var target, out _)) return;
@@ -1209,6 +1195,7 @@ public sealed class VipTabRenderer(Plugin plugin)
             ImGui.TextColored(
                 UnavailableColor,
                 "No VIP perks are assigned to this target's current active package.");
+            DrawTargetPerkHistory(venue, view, target!, busy);
             return;
         }
 
@@ -1233,7 +1220,7 @@ public sealed class VipTabRenderer(Plugin plugin)
                         pendingRedeemWorldName = target.WorldName;
                         pendingRedeemPerkName = row.PerkName;
                         pendingRedeemPerkId = row.PerkId;
-                        ImGui.OpenPopup("Confirm VIP perk redemption###PartyPulseVipPerkRedeem");
+                        openRedeemPerkPopup = true;
                     }
                     ImGui.EndDisabled();
                 }
@@ -1243,6 +1230,70 @@ public sealed class VipTabRenderer(Plugin plugin)
                 var next = row.NextResetAt is { } reset
                     ? $"Next {VenueTimeZone.Format(venue, reset, "g")}" : "Used for this subscription";
                 ImGui.TextColored(UnavailableColor, next);
+            }
+            ImGui.PopID();
+        }
+
+        DrawTargetPerkHistory(venue, view, target, busy);
+    }
+
+    private void DrawTargetPerkHistory(
+        VenueConnectionConfiguration venue,
+        VipPerkManagementViewResponse view,
+        PlayerIdentity target,
+        bool busy)
+    {
+        var history = view.Redemptions
+            .Where(value =>
+                string.Equals(value.TargetCharacterName, target.CharacterName, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(value.TargetWorldName, target.WorldName, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(value => value.RedeemedAt)
+            .ThenByDescending(value => value.RedemptionId)
+            .Take(50)
+            .ToArray();
+
+        ImGui.Spacing();
+        if (!ImGui.CollapsingHeader(
+                $"Perk redemption history for {target.DisplayName}##PartyPulseTargetPerkHistory",
+                ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            return;
+        }
+
+        if (history.Length == 0)
+        {
+            ImGui.TextDisabled("No recorded VIP perk redemptions for this character.");
+            return;
+        }
+
+        foreach (var row in history)
+        {
+            ImGui.PushID((int)(row.RedemptionId % int.MaxValue));
+            var source = string.Equals(row.SourceType, "photoshoot_sale", StringComparison.OrdinalIgnoreCase)
+                ? "photoshoot purchase"
+                : "manual redemption";
+            var status = row.UndoneAt is null ? "spent" : "cancelled";
+            ImGui.BulletText(
+                $"#{row.RedemptionId} {row.PerkName} — {source} — {status} — " +
+                $"by {row.RedeemedByDisplayName} — {VenueTimeZone.Format(venue, row.RedeemedAt, "g")}");
+            if (row.UndoneAt is not null && !string.IsNullOrWhiteSpace(row.UndoReason))
+            {
+                ImGui.Indent();
+                ImGui.TextDisabled($"Cancellation reason: {row.UndoReason}");
+                ImGui.Unindent();
+            }
+
+            if (row.UndoneAt is null && view.Capabilities.CanUndo)
+            {
+                ImGui.SameLine();
+                ImGui.BeginDisabled(busy);
+                if (ImGui.SmallButton("Cancel redemption"))
+                {
+                    pendingUndoRedemptionId = row.RedemptionId;
+                    undoReason = string.Empty;
+                    openUndoPerkPopup = true;
+                }
+                ImGui.EndDisabled();
             }
             ImGui.PopID();
         }
@@ -1431,7 +1482,7 @@ public sealed class VipTabRenderer(Plugin plugin)
     private void DrawRedeemPerkPopup(VenueConnectionConfiguration venue)
     {
         if (!ImGui.BeginPopupModal(
-                "Confirm VIP perk redemption###PartyPulseVipPerkRedeem",
+                RedeemPerkPopupName,
                 ImGuiWindowFlags.AlwaysAutoResize))
         {
             return;
@@ -1439,8 +1490,11 @@ public sealed class VipTabRenderer(Plugin plugin)
 
         ImGui.TextWrapped(
             $"Spend {pendingRedeemPerkName} for {pendingRedeemCharacterName} @ {pendingRedeemWorldName}?");
+        ImGui.TextColored(
+            new Vector4(1f, 0.65f, 0.25f, 1f),
+            "This immediately consumes the perk for its current subscription renewal period. This manual redemption will not create a photoshoot sale.");
         ImGui.TextWrapped(
-            "The server will verify the active subscription and current renewal period before recording the redemption.");
+            "The server will verify the active subscription, package assignment, and current renewal period before recording it.");
 
         if (ImGui.Button("Confirm redemption"))
         {
@@ -1463,33 +1517,9 @@ public sealed class VipTabRenderer(Plugin plugin)
         ImGui.EndPopup();
     }
 
-    private void DrawPerkAudit(VenueConnectionConfiguration venue, VipPerkManagementViewResponse view, bool busy)
-    {
-        if (!ImGui.CollapsingHeader("Recent perk redemption audit")) return;
-        foreach (var row in view.Redemptions.Take(50))
-        {
-            ImGui.PushID((int)(row.RedemptionId % int.MaxValue));
-            var status = row.UndoneAt is null ? "spent" : "undone";
-            ImGui.BulletText($"#{row.RedemptionId} {row.PerkName} — {row.TargetCharacterName} @ {row.TargetWorldName} — {status} — {VenueTimeZone.Format(venue, row.RedeemedAt, "g")}");
-            if (row.UndoneAt is null)
-            {
-                ImGui.SameLine();
-                ImGui.BeginDisabled(busy);
-                if (ImGui.SmallButton("Undo"))
-                {
-                    pendingUndoRedemptionId = row.RedemptionId;
-                    undoReason = string.Empty;
-                    ImGui.OpenPopup("Undo VIP perk redemption###PartyPulseUndoVipPerk");
-                }
-                ImGui.EndDisabled();
-            }
-            ImGui.PopID();
-        }
-    }
-
     private void DrawUndoPerkPopup(VenueConnectionConfiguration venue)
     {
-        if (!ImGui.BeginPopupModal("Undo VIP perk redemption###PartyPulseUndoVipPerk", ImGuiWindowFlags.AlwaysAutoResize)) return;
+        if (!ImGui.BeginPopupModal(UndoPerkPopupName, ImGuiWindowFlags.AlwaysAutoResize)) return;
         ImGui.TextWrapped($"Undo VIP perk redemption #{pendingUndoRedemptionId}? This restores availability for its original renewal period and remains in the audit log.");
         ImGui.InputText("Reason (optional)", ref undoReason, 255);
         if (ImGui.Button("Undo redemption"))
@@ -1500,6 +1530,23 @@ public sealed class VipTabRenderer(Plugin plugin)
         ImGui.SameLine();
         if (ImGui.Button("Cancel")) ImGui.CloseCurrentPopup();
         ImGui.EndPopup();
+    }
+
+    private void OpenQueuedPerkPopups()
+    {
+        // Redeem and undo buttons are rendered under per-row PushID scopes.
+        // Open their modals here at the same root ID scope used by BeginPopupModal.
+        if (openRedeemPerkPopup)
+        {
+            ImGui.OpenPopup(RedeemPerkPopupName);
+            openRedeemPerkPopup = false;
+        }
+
+        if (openUndoPerkPopup)
+        {
+            ImGui.OpenPopup(UndoPerkPopupName);
+            openUndoPerkPopup = false;
+        }
     }
 
     private void ResetForVenueChange(VenueConnectionConfiguration venue)
@@ -1524,6 +1571,8 @@ public sealed class VipTabRenderer(Plugin plugin)
         temporaryOpeningTitle = string.Empty;
         plugin.NearbyVipPlayers.Clear();
         plugin.VipArrivalNearby.Clear();
+        openRedeemPerkPopup = false;
+        openUndoPerkPopup = false;
         ResetPackageEditor();
         ResetVipPerkEditor();
     }
