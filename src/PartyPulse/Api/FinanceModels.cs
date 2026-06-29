@@ -38,19 +38,26 @@ public sealed record FinancialSettlementItemSummary(
     int? VipPlayerId,
     string? PackageName,
     DateTimeOffset? PurchasedAt,
-    string? VipCharacterName,
-    string? VipWorldName);
+    string? CustomerCharacterName,
+    string? CustomerWorldName);
 
 public sealed record FinanceViewResponse(
     FinanceCapabilities Capabilities,
     long PersonalUnpaidVipGil,
     long PersonalPendingVipGil,
     long PersonalAvailableVipGil,
+    long PersonalUnpaidPhotoshootGil,
+    long PersonalPendingPhotoshootGil,
+    long PersonalAvailablePhotoshootGil,
     int VenuePendingCount,
     IReadOnlyList<FinancialSettlementSummary> Settlements,
     IReadOnlyList<FinancialSettlementItemSummary> Items);
 
 public sealed record CreateVipSettlementRequest(
+    string TargetCharacterName,
+    string TargetWorldName);
+
+public sealed record CreatePhotoshootSettlementRequest(
     string TargetCharacterName,
     string TargetWorldName);
 
@@ -64,7 +71,19 @@ public sealed record CreateVipSettlementResponse(
     string TargetUserDisplayName,
     DateTimeOffset CreatedAt);
 
-public sealed record RespondSettlementRequest(string Decision, string? Note);
+public sealed record CreatePhotoshootSettlementResponse(
+    long SettlementId,
+    long AmountGil,
+    int TargetUserId,
+    int TargetCharacterId,
+    string TargetCharacterName,
+    string TargetWorldName,
+    string TargetUserDisplayName,
+    DateTimeOffset CreatedAt);
+
+public sealed record RespondSettlementRequest(
+    string Decision,
+    string? Note);
 
 public sealed record RespondSettlementResponse(
     long SettlementId,

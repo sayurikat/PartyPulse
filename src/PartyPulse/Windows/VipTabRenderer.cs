@@ -40,6 +40,21 @@ public sealed class VipTabRenderer(Plugin plugin)
     private bool packageArchived;
     private string settlementTargetName = string.Empty;
     private string settlementTargetWorld = string.Empty;
+    private int editingPerkId;
+    private string perkName = string.Empty;
+    private bool perkArchived;
+    private int assignmentPackageId;
+    private int assignmentPerkId;
+    private int renewalMode;
+    private int renewalInterval = 1;
+    private int loadedAssignmentPackageId;
+    private int loadedAssignmentPerkId;
+    private string pendingRedeemCharacterName = string.Empty;
+    private string pendingRedeemWorldName = string.Empty;
+    private string pendingRedeemPerkName = string.Empty;
+    private int pendingRedeemPerkId;
+    private long pendingUndoRedemptionId;
+    private string undoReason = string.Empty;
 
     public void Draw(VenueConnectionConfiguration venue)
     {
@@ -50,6 +65,7 @@ public sealed class VipTabRenderer(Plugin plugin)
 
         ResetForVenueChange(venue);
         plugin.EnsureVipLoaded(venue);
+        plugin.EnsureVipPerksLoaded(venue);
         plugin.EnsureVipArrivalsLoaded(venue);
         plugin.EnsureTimedMacrosLoaded(venue);
 
@@ -94,6 +110,7 @@ public sealed class VipTabRenderer(Plugin plugin)
 
         ImGui.Spacing();
         DrawTargetSection(venue, view, isBusy);
+        DrawVipPerks(venue, view, isBusy);
         DrawSettlementControls(venue, view, isBusy);
 
         ImGui.Spacing();
@@ -969,12 +986,13 @@ public sealed class VipTabRenderer(Plugin plugin)
             ImGuiTableFlags.Resizable |
             ImGuiTableFlags.SizingStretchProp;
 
-        if (ImGui.BeginTable("VipPackages", 5, flags))
+        if (ImGui.BeginTable("VipPackages", 6, flags))
         {
             ImGui.TableSetupColumn("Name");
             ImGui.TableSetupColumn("Price");
             ImGui.TableSetupColumn("Duration");
             ImGui.TableSetupColumn("State");
+            ImGui.TableSetupColumn("##Perks", ImGuiTableColumnFlags.WidthFixed, 60 * ImGuiHelpers.GlobalScale);
             ImGui.TableSetupColumn("##Edit", ImGuiTableColumnFlags.WidthFixed, 60 * ImGuiHelpers.GlobalScale);
             ImGui.TableHeadersRow();
 
@@ -994,6 +1012,16 @@ public sealed class VipTabRenderer(Plugin plugin)
                 ImGui.TableSetColumnIndex(3);
                 ImGui.TextUnformatted(package.IsArchived ? "Archived" : "Active");
                 ImGui.TableSetColumnIndex(4);
+                ImGui.BeginDisabled(package.IsArchived);
+                if (ImGui.SmallButton("Perks"))
+                {
+                    assignmentPackageId = package.PackageId;
+                    assignmentPerkId = 0;
+                    loadedAssignmentPackageId = 0;
+                    loadedAssignmentPerkId = 0;
+                }
+                ImGui.EndDisabled();
+                ImGui.TableSetColumnIndex(5);
                 if (ImGui.SmallButton("Edit"))
                 {
                     LoadPackageEditor(package);
@@ -1099,6 +1127,271 @@ public sealed class VipTabRenderer(Plugin plugin)
         return "Expired";
     }
 
+    private void DrawVipPerks(
+        VenueConnectionConfiguration venue,
+        VipManagementViewResponse vipView,
+        bool vipBusy)
+    {
+        var snapshot = plugin.VipPerks.GetSnapshot(venue);
+        if (snapshot.Status != VipPerkManagementStatus.Ready || snapshot.View is null)
+        {
+            if (snapshot.Status is VipPerkManagementStatus.Denied or VipPerkManagementStatus.Failed)
+            {
+                ImGui.TextDisabled(snapshot.Message);
+            }
+            return;
+        }
+
+        var view = snapshot.View;
+        var busy = vipBusy || plugin.VipPerks.IsBusy(venue.ProfileId);
+        ImGui.Spacing();
+        if (ImGui.CollapsingHeader("VIP perks", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            DrawTargetPerks(venue, view, busy);
+            if (view.Capabilities.CanManage)
+            {
+                ImGui.Separator();
+                DrawPerkCatalog(venue, vipView, view, busy);
+            }
+            if (view.Capabilities.CanUndo)
+            {
+                ImGui.Separator();
+                DrawPerkAudit(venue, view, busy);
+            }
+        }
+        DrawRedeemPerkPopup(venue);
+        DrawUndoPerkPopup(venue);
+    }
+
+    private void DrawTargetPerks(VenueConnectionConfiguration venue, VipPerkManagementViewResponse view, bool busy)
+    {
+        if (!plugin.TargetProvider.TryGetCurrentTarget(out var target, out _)) return;
+        var rows = view.Availability.Where(value =>
+            string.Equals(value.CharacterName, target!.CharacterName, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(value.WorldName, target.WorldName, StringComparison.OrdinalIgnoreCase)).ToArray();
+        if (rows.Length == 0)
+        {
+            ImGui.TextDisabled("The targeted player has no available VIP perk assignments in an active package.");
+            return;
+        }
+
+        ImGui.TextUnformatted($"Perks for {target!.DisplayName} ({rows[0].PackageName})");
+        foreach (var row in rows.OrderBy(value => value.PerkName))
+        {
+            ImGui.PushID(row.PackagePerkId);
+            ImGui.TextUnformatted(row.PerkName);
+            ImGui.SameLine();
+            if (row.Available)
+            {
+                ImGui.TextColored(new Vector4(0.35f, 0.85f, 0.45f, 1f), "Available");
+                if (view.Capabilities.CanRedeem)
+                {
+                    ImGui.SameLine();
+                    ImGui.BeginDisabled(busy);
+                    if (ImGui.SmallButton("Redeem"))
+                    {
+                        pendingRedeemCharacterName = target.CharacterName;
+                        pendingRedeemWorldName = target.WorldName;
+                        pendingRedeemPerkName = row.PerkName;
+                        pendingRedeemPerkId = row.PerkId;
+                        ImGui.OpenPopup("Confirm VIP perk redemption###PartyPulseVipPerkRedeem");
+                    }
+                    ImGui.EndDisabled();
+                }
+            }
+            else
+            {
+                var next = row.NextResetAt is { } reset
+                    ? $"Next {VenueTimeZone.Format(venue, reset, "g")}" : "Used for this subscription";
+                ImGui.TextDisabled(next);
+            }
+            ImGui.PopID();
+        }
+    }
+
+    private void DrawPerkCatalog(
+        VenueConnectionConfiguration venue,
+        VipManagementViewResponse vipView,
+        VipPerkManagementViewResponse view,
+        bool busy)
+    {
+        ImGui.TextUnformatted("Perk definitions");
+        if (ImGui.SmallButton("New perk")) { editingPerkId = 0; perkName = string.Empty; perkArchived = false; }
+        foreach (var perk in view.Perks.OrderBy(value => value.ArchivedAt is not null).ThenBy(value => value.Name))
+        {
+            ImGui.PushID(perk.PerkId);
+            ImGui.BulletText(perk.Name + (perk.ArchivedAt is null ? string.Empty : " (archived)"));
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Edit")) { editingPerkId = perk.PerkId; perkName = perk.Name; perkArchived = perk.ArchivedAt is not null; }
+            ImGui.PopID();
+        }
+        ImGui.InputText("Perk name", ref perkName, 100);
+        if (editingPerkId > 0) ImGui.Checkbox("Perk archived", ref perkArchived);
+        ImGui.BeginDisabled(busy || string.IsNullOrWhiteSpace(perkName));
+        if (ImGui.Button(editingPerkId == 0 ? "Create perk" : "Save perk"))
+        {
+            if (editingPerkId == 0) plugin.CreateVipPerk(venue, new CreateVipPerkRequest(perkName.Trim()));
+            else plugin.UpdateVipPerk(venue, editingPerkId, new UpdateVipPerkRequest(perkName.Trim(), perkArchived));
+        }
+        ImGui.EndDisabled();
+
+        ImGui.Spacing();
+        ImGui.TextUnformatted("Assign perk to package");
+        var activePackages = vipView.Packages.Where(value => !value.IsArchived).OrderBy(value => value.Name).ToArray();
+        var activePerks = view.Perks.Where(value => value.ArchivedAt is null).OrderBy(value => value.Name).ToArray();
+        var packagePreview = activePackages.FirstOrDefault(value => value.PackageId == assignmentPackageId)?.Name ?? "Select package";
+        if (ImGui.BeginCombo("VIP package", packagePreview))
+        {
+            foreach (var package in activePackages)
+                if (ImGui.Selectable(package.Name, assignmentPackageId == package.PackageId)) assignmentPackageId = package.PackageId;
+            ImGui.EndCombo();
+        }
+        var perkPreview = activePerks.FirstOrDefault(value => value.PerkId == assignmentPerkId)?.Name ?? "Select perk";
+        if (ImGui.BeginCombo("VIP perk", perkPreview))
+        {
+            foreach (var perk in activePerks)
+                if (ImGui.Selectable(perk.Name, assignmentPerkId == perk.PerkId)) assignmentPerkId = perk.PerkId;
+            ImGui.EndCombo();
+        }
+        var existing = view.PackageAssignments.FirstOrDefault(value =>
+            value.PackageId == assignmentPackageId &&
+            value.PerkId == assignmentPerkId &&
+            value.ArchivedAt is null);
+        SyncAssignmentEditor(existing);
+
+        var modes = new[] { "One time per subscription", "Every X days", "Every X weeks", "Every X months" };
+        renewalMode = Math.Clamp(renewalMode, 0, modes.Length - 1);
+        if (ImGui.BeginCombo("Renewal", modes[renewalMode]))
+        {
+            for (var index = 0; index < modes.Length; index++)
+            {
+                if (ImGui.Selectable(modes[index], renewalMode == index)) renewalMode = index;
+            }
+            ImGui.EndCombo();
+        }
+        if (renewalMode > 0) ImGui.InputInt("Renew every", ref renewalInterval);
+        renewalInterval = Math.Max(1, renewalInterval);
+        ImGui.BeginDisabled(busy || assignmentPackageId <= 0 || assignmentPerkId <= 0);
+        if (ImGui.Button(existing is null ? "Assign perk" : "Update assignment"))
+        {
+            var unit = renewalMode switch { 1 => "day", 2 => "week", 3 => "month", _ => null };
+            plugin.SetVipPackagePerk(venue, assignmentPackageId, assignmentPerkId,
+                new SetVipPackagePerkRequest(true, unit, unit is null ? null : renewalInterval));
+        }
+        if (existing is not null)
+        {
+            ImGui.SameLine();
+            if (ImGui.Button("Remove assignment"))
+                plugin.SetVipPackagePerk(venue, assignmentPackageId, assignmentPerkId, new SetVipPackagePerkRequest(false, null, null));
+        }
+        ImGui.EndDisabled();
+
+        if (view.PackageAssignments.Count > 0)
+        {
+            ImGui.TextDisabled("Current assignments:");
+            foreach (var assignment in view.PackageAssignments.Where(value => value.ArchivedAt is null).OrderBy(value => value.PackageName).ThenBy(value => value.PerkName))
+            {
+                var renewal = assignment.RenewalUnit is null ? "one time" : $"every {assignment.RenewalInterval} {assignment.RenewalUnit}(s)";
+                ImGui.BulletText($"{assignment.PackageName}: {assignment.PerkName} — {renewal}");
+            }
+        }
+    }
+
+
+    private void SyncAssignmentEditor(VipPackagePerkSummary? assignment)
+    {
+        if (loadedAssignmentPackageId == assignmentPackageId &&
+            loadedAssignmentPerkId == assignmentPerkId)
+        {
+            return;
+        }
+
+        loadedAssignmentPackageId = assignmentPackageId;
+        loadedAssignmentPerkId = assignmentPerkId;
+        renewalInterval = Math.Max(1, assignment?.RenewalInterval ?? 1);
+        renewalMode = assignment?.RenewalUnit switch
+        {
+            "day" => 1,
+            "week" => 2,
+            "month" => 3,
+            _ => 0
+        };
+    }
+
+    private void DrawRedeemPerkPopup(VenueConnectionConfiguration venue)
+    {
+        if (!ImGui.BeginPopupModal(
+                "Confirm VIP perk redemption###PartyPulseVipPerkRedeem",
+                ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            return;
+        }
+
+        ImGui.TextWrapped(
+            $"Spend {pendingRedeemPerkName} for {pendingRedeemCharacterName} @ {pendingRedeemWorldName}?");
+        ImGui.TextWrapped(
+            "The server will verify the active subscription and current renewal period before recording the redemption.");
+
+        if (ImGui.Button("Confirm redemption"))
+        {
+            plugin.RedeemVipPerk(
+                venue,
+                new RedeemVipPerkRequest(
+                    pendingRedeemCharacterName,
+                    pendingRedeemWorldName,
+                    pendingRedeemPerkId,
+                    null));
+            ImGui.CloseCurrentPopup();
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Cancel"))
+        {
+            ImGui.CloseCurrentPopup();
+        }
+
+        ImGui.EndPopup();
+    }
+
+    private void DrawPerkAudit(VenueConnectionConfiguration venue, VipPerkManagementViewResponse view, bool busy)
+    {
+        if (!ImGui.CollapsingHeader("Recent perk redemption audit")) return;
+        foreach (var row in view.Redemptions.Take(50))
+        {
+            ImGui.PushID((int)(row.RedemptionId % int.MaxValue));
+            var status = row.UndoneAt is null ? "spent" : "undone";
+            ImGui.BulletText($"#{row.RedemptionId} {row.PerkName} — {row.TargetCharacterName} @ {row.TargetWorldName} — {status} — {VenueTimeZone.Format(venue, row.RedeemedAt, "g")}");
+            if (row.UndoneAt is null)
+            {
+                ImGui.SameLine();
+                ImGui.BeginDisabled(busy);
+                if (ImGui.SmallButton("Undo"))
+                {
+                    pendingUndoRedemptionId = row.RedemptionId;
+                    undoReason = string.Empty;
+                    ImGui.OpenPopup("Undo VIP perk redemption###PartyPulseUndoVipPerk");
+                }
+                ImGui.EndDisabled();
+            }
+            ImGui.PopID();
+        }
+    }
+
+    private void DrawUndoPerkPopup(VenueConnectionConfiguration venue)
+    {
+        if (!ImGui.BeginPopupModal("Undo VIP perk redemption###PartyPulseUndoVipPerk", ImGuiWindowFlags.AlwaysAutoResize)) return;
+        ImGui.TextWrapped($"Undo VIP perk redemption #{pendingUndoRedemptionId}? This restores availability for its original renewal period and remains in the audit log.");
+        ImGui.InputText("Reason (optional)", ref undoReason, 255);
+        if (ImGui.Button("Undo redemption"))
+        {
+            plugin.UndoVipPerkRedemption(venue, pendingUndoRedemptionId, string.IsNullOrWhiteSpace(undoReason) ? null : undoReason.Trim());
+            ImGui.CloseCurrentPopup();
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Cancel")) ImGui.CloseCurrentPopup();
+        ImGui.EndPopup();
+    }
+
     private void ResetForVenueChange(VenueConnectionConfiguration venue)
     {
         if (activeProfileId == venue.ProfileId)
@@ -1122,6 +1415,26 @@ public sealed class VipTabRenderer(Plugin plugin)
         plugin.NearbyVipPlayers.Clear();
         plugin.VipArrivalNearby.Clear();
         ResetPackageEditor();
+        ResetVipPerkEditor();
+    }
+
+    private void ResetVipPerkEditor()
+    {
+        editingPerkId = 0;
+        perkName = string.Empty;
+        perkArchived = false;
+        assignmentPackageId = 0;
+        assignmentPerkId = 0;
+        renewalMode = 0;
+        renewalInterval = 1;
+        loadedAssignmentPackageId = 0;
+        loadedAssignmentPerkId = 0;
+        pendingRedeemCharacterName = string.Empty;
+        pendingRedeemWorldName = string.Empty;
+        pendingRedeemPerkName = string.Empty;
+        pendingRedeemPerkId = 0;
+        pendingUndoRedemptionId = 0;
+        undoReason = string.Empty;
     }
 
     private void ResetPackageEditor()

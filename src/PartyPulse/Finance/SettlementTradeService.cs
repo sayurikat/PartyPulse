@@ -46,14 +46,20 @@ public sealed class SettlementTradeService
     public Task<PluginIntegrationResult> CheckReadyAsync(
         CreateVipSettlementRequest request,
         CancellationToken cancellationToken) =>
+        CheckReadyAsync(request.TargetCharacterName, request.TargetWorldName, cancellationToken);
+
+    public Task<PluginIntegrationResult> CheckReadyAsync(
+        string targetCharacterName,
+        string targetWorldName,
+        CancellationToken cancellationToken) =>
         RunOnFrameworkAsync(
             "preflight the Dropbox settlement trade",
             () =>
             {
                 var targetResult = ValidatePlayer(
                     targetManager.Target,
-                    request.TargetCharacterName,
-                    request.TargetWorldName,
+                    targetCharacterName,
+                    targetWorldName,
                     "validate the current trade target");
                 if (!targetResult.Success)
                 {
@@ -77,11 +83,18 @@ public sealed class SettlementTradeService
             TimeSpan.Zero,
             cancellationToken);
 
-    public async Task<PluginIntegrationResult> InitiateTradeAsync(
+    public Task<PluginIntegrationResult> InitiateTradeAsync(
         CreateVipSettlementResponse settlement,
+        CancellationToken cancellationToken) =>
+        InitiateTradeAsync(settlement.TargetCharacterName, settlement.TargetWorldName, settlement.AmountGil, cancellationToken);
+
+    public async Task<PluginIntegrationResult> InitiateTradeAsync(
+        string targetCharacterName,
+        string targetWorldName,
+        long amountGil,
         CancellationToken cancellationToken)
     {
-        if (settlement.AmountGil <= 0 || settlement.AmountGil > int.MaxValue)
+        if (amountGil <= 0 || amountGil > int.MaxValue)
         {
             return Failed(
                 PluginIntegrationFailureKind.InvalidRequest,
@@ -96,8 +109,8 @@ public sealed class SettlementTradeService
         var prepareResult = await RunOnFrameworkAsync(
             "prepare the Dropbox settlement target",
             () => PrepareTarget(
-                settlement.TargetCharacterName,
-                settlement.TargetWorldName),
+                targetCharacterName,
+                targetWorldName),
             TimeSpan.Zero,
             cancellationToken);
         if (!prepareResult.Success)
@@ -112,9 +125,9 @@ public sealed class SettlementTradeService
         return await RunOnFrameworkAsync(
             "start the Dropbox settlement trade",
             () => OpenQueueAndBeginTrade(
-                settlement.TargetCharacterName,
-                settlement.TargetWorldName,
-                (int)settlement.AmountGil),
+                targetCharacterName,
+                targetWorldName,
+                (int)amountGil),
             FocusTargetDelay,
             cancellationToken);
     }

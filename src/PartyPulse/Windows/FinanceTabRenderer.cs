@@ -75,6 +75,11 @@ public sealed class FinanceTabRenderer(Plugin plugin)
         ImGui.TextDisabled($"Pending: {view.PersonalPendingVipGil:N0} gil");
         ImGui.SameLine();
         ImGui.TextUnformatted($"Available: {view.PersonalAvailableVipGil:N0} gil");
+        ImGui.TextUnformatted($"My unsettled photoshoot sales: {view.PersonalUnpaidPhotoshootGil:N0} gil");
+        ImGui.SameLine();
+        ImGui.TextDisabled($"Pending: {view.PersonalPendingPhotoshootGil:N0} gil");
+        ImGui.SameLine();
+        ImGui.TextUnformatted($"Available: {view.PersonalAvailablePhotoshootGil:N0} gil");
 
         if (view.Capabilities.CanManageSettlements)
         {
@@ -180,7 +185,7 @@ public sealed class FinanceTabRenderer(Plugin plugin)
                 ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
         {
             ImGui.TableSetupColumn("Source");
-            ImGui.TableSetupColumn("VIP player");
+            ImGui.TableSetupColumn("Customer");
             ImGui.TableSetupColumn("Package");
             ImGui.TableSetupColumn("Amount");
             ImGui.TableHeadersRow();
@@ -191,8 +196,8 @@ public sealed class FinanceTabRenderer(Plugin plugin)
                 ImGui.TextUnformatted($"{item.SourceType} #{item.SourceId}");
                 ImGui.TableSetColumnIndex(1);
                 ImGui.TextUnformatted(
-                    !string.IsNullOrWhiteSpace(item.VipCharacterName)
-                        ? $"{item.VipCharacterName} @ {item.VipWorldName}"
+                    !string.IsNullOrWhiteSpace(item.CustomerCharacterName)
+                        ? $"{item.CustomerCharacterName} @ {item.CustomerWorldName}"
                         : item.VipPlayerId is { } vipPlayerId ? $"VIP #{vipPlayerId}" : "-");
                 ImGui.TableSetColumnIndex(2);
                 ImGui.TextUnformatted(item.PackageName ?? "-");

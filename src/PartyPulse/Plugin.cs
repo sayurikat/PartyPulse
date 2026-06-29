@@ -17,6 +17,7 @@ using PartyPulse.Integrations.Dropbox;
 using PartyPulse.Notifications;
 using PartyPulse.OpeningPublications;
 using PartyPulse.PartyFinder;
+using PartyPulse.Photoshoots;
 using PartyPulse.Models;
 using PartyPulse.SelfService;
 using PartyPulse.Shoutrunner;
@@ -89,6 +90,8 @@ public sealed class Plugin : IDalamudPlugin
             apiClient,
             IdentityProvider,
             Log);
+        VipPerks = new VipPerkManagementManager(Configuration, Authentication, apiClient, IdentityProvider);
+        Photoshoots = new PhotoshootManagementManager(Configuration, Authentication, apiClient, IdentityProvider);
         Vip = new VipManagementManager(
             Configuration,
             Authentication,
@@ -215,6 +218,10 @@ public sealed class Plugin : IDalamudPlugin
 
     public VipManagementManager Vip { get; }
 
+    public VipPerkManagementManager VipPerks { get; }
+
+    public PhotoshootManagementManager Photoshoots { get; }
+
     public VipArrivalManagementManager VipArrivals { get; }
 
     public GreeterManagementManager Greeter { get; }
@@ -272,6 +279,8 @@ public sealed class Plugin : IDalamudPlugin
         notificationToastWindow.Dispose();
         Notifications.Dispose();
         Finance.Dispose();
+        Photoshoots.Dispose();
+        VipPerks.Dispose();
         PartyFinderAutomation.Stop("PartyPulse is unloading.");
         OpeningPublications.Dispose();
         Djs.Dispose();
@@ -437,6 +446,8 @@ public sealed class Plugin : IDalamudPlugin
         UserManagement.RemoveProfile(venue.ProfileId);
         SelfService.RemoveProfile(venue.ProfileId);
         Vip.RemoveProfile(venue.ProfileId);
+        VipPerks.RemoveProfile(venue.ProfileId);
+        Photoshoots.RemoveProfile(venue.ProfileId);
         VipArrivals.ClearProfile(venue.ProfileId);
         Greeter.ClearProfile(venue.ProfileId);
         VenueOpenings.RemoveProfile(venue.ProfileId);
@@ -988,6 +999,73 @@ public sealed class Plugin : IDalamudPlugin
             RunTimedMacroAndReportAsync(venue, macro, opening),
             $"run timed macro {macro.TimedMacroId} for {venue.VenueCode}");
 
+    public void EnsureVipPerksLoaded(VenueConnectionConfiguration venue)
+    {
+        if (VipPerks.ShouldLoad(venue))
+            Observe(VipPerks.LoadAsync(venue, false, LifetimeToken), $"load VIP perks for {venue.VenueCode}");
+    }
+
+    public void RefreshVipPerks(VenueConnectionConfiguration venue) =>
+        Observe(VipPerks.LoadAsync(venue, true, LifetimeToken), $"refresh VIP perks for {venue.VenueCode}");
+
+    public void CreateVipPerk(VenueConnectionConfiguration venue, CreateVipPerkRequest request) =>
+        Observe(
+            CreateVipPerkAndReportAsync(venue, request),
+            $"create VIP perk for {venue.VenueCode}");
+
+    public void UpdateVipPerk(
+        VenueConnectionConfiguration venue,
+        int perkId,
+        UpdateVipPerkRequest request) =>
+        Observe(
+            UpdateVipPerkAndReportAsync(venue, perkId, request),
+            $"update VIP perk {perkId} for {venue.VenueCode}");
+
+    public void SetVipPackagePerk(
+        VenueConnectionConfiguration venue,
+        int packageId,
+        int perkId,
+        SetVipPackagePerkRequest request) =>
+        Observe(
+            SetVipPackagePerkAndReportAsync(venue, packageId, perkId, request),
+            $"assign VIP perk {perkId} for {venue.VenueCode}");
+
+    public void RedeemVipPerk(VenueConnectionConfiguration venue, RedeemVipPerkRequest request) =>
+        Observe(RedeemVipPerkAndReportAsync(venue, request), $"redeem VIP perk for {venue.VenueCode}");
+
+    public void UndoVipPerkRedemption(VenueConnectionConfiguration venue, long redemptionId, string? reason) =>
+        Observe(UndoVipPerkAndReportAsync(venue, redemptionId, reason), $"undo VIP perk redemption {redemptionId}");
+
+    public void EnsurePhotoshootsLoaded(VenueConnectionConfiguration venue)
+    {
+        if (Photoshoots.ShouldLoad(venue))
+            Observe(Photoshoots.LoadAsync(venue, false, LifetimeToken), $"load photoshoots for {venue.VenueCode}");
+    }
+
+    public void RefreshPhotoshoots(VenueConnectionConfiguration venue) =>
+        Observe(Photoshoots.LoadAsync(venue, true, LifetimeToken), $"refresh photoshoots for {venue.VenueCode}");
+
+    public void CreatePhotoshootPackage(
+        VenueConnectionConfiguration venue,
+        CreatePhotoshootPackageRequest request) =>
+        Observe(
+            CreatePhotoshootPackageAndReportAsync(venue, request),
+            $"create photoshoot package for {venue.VenueCode}");
+
+    public void UpdatePhotoshootPackage(
+        VenueConnectionConfiguration venue,
+        int packageId,
+        UpdatePhotoshootPackageRequest request) =>
+        Observe(
+            UpdatePhotoshootPackageAndReportAsync(venue, packageId, request),
+            $"update photoshoot package {packageId}");
+
+    public void SellPhotoshoot(VenueConnectionConfiguration venue, SellPhotoshootRequest request) =>
+        Observe(SellPhotoshootAndReportAsync(venue, request), $"sell photoshoot for {venue.VenueCode}");
+
+    public void CreatePhotoshootSettlement(VenueConnectionConfiguration venue, CreatePhotoshootSettlementRequest request) =>
+        Observe(CreatePhotoshootSettlementAndReportAsync(venue, request), $"create photoshoot settlement for {venue.VenueCode}");
+
     public void EnsureFinanceLoaded(VenueConnectionConfiguration venue)
     {
         if (!Finance.ShouldLoad(venue))
@@ -1282,6 +1360,8 @@ public sealed class Plugin : IDalamudPlugin
         UserManagement.RemoveProfile(venue.ProfileId);
         SelfService.RemoveProfile(venue.ProfileId);
         Vip.RemoveProfile(venue.ProfileId);
+        VipPerks.RemoveProfile(venue.ProfileId);
+        Photoshoots.RemoveProfile(venue.ProfileId);
         VipArrivals.ClearProfile(venue.ProfileId);
         Greeter.ClearProfile(venue.ProfileId);
         VenueOpenings.RemoveProfile(venue.ProfileId);
@@ -2227,6 +2307,145 @@ public sealed class Plugin : IDalamudPlugin
             "PartyPulse");
     }
 
+    private async Task CreateVipPerkAndReportAsync(
+        VenueConnectionConfiguration venue,
+        CreateVipPerkRequest request)
+    {
+        var result = await VipPerks.CreateAsync(venue, request, LifetimeToken);
+        if (!result.Success)
+        {
+            ReportVipFailure(result.Failure, "The VIP perk could not be created.");
+            return;
+        }
+
+        await RefreshPhotoshootsIfLoadedAsync(venue);
+        ChatGui.Print($"Created VIP perk '{request.Name}'.", "PartyPulse");
+    }
+
+    private async Task UpdateVipPerkAndReportAsync(
+        VenueConnectionConfiguration venue,
+        int perkId,
+        UpdateVipPerkRequest request)
+    {
+        var result = await VipPerks.UpdateAsync(venue, perkId, request, LifetimeToken);
+        if (!result.Success)
+        {
+            ReportVipFailure(result.Failure, "The VIP perk could not be updated.");
+            return;
+        }
+
+        await RefreshPhotoshootsIfLoadedAsync(venue);
+        ChatGui.Print($"Updated VIP perk '{request.Name}'.", "PartyPulse");
+    }
+
+    private async Task SetVipPackagePerkAndReportAsync(
+        VenueConnectionConfiguration venue,
+        int packageId,
+        int perkId,
+        SetVipPackagePerkRequest request)
+    {
+        var result = await VipPerks.SetPackagePerkAsync(
+            venue,
+            packageId,
+            perkId,
+            request,
+            LifetimeToken);
+        if (!result.Success)
+        {
+            ReportVipFailure(result.Failure, "The VIP package perk assignment could not be updated.");
+            return;
+        }
+
+        await RefreshPhotoshootsIfLoadedAsync(venue);
+        ChatGui.Print(
+            request.Assigned ? "VIP perk assigned to package." : "VIP perk removed from package.",
+            "PartyPulse");
+    }
+
+    private async Task CreatePhotoshootPackageAndReportAsync(
+        VenueConnectionConfiguration venue,
+        CreatePhotoshootPackageRequest request)
+    {
+        var result = await Photoshoots.CreatePackageAsync(venue, request, LifetimeToken);
+        if (!result.Success)
+        {
+            ReportVipFailure(result.Failure, "The photoshoot package could not be created.");
+            return;
+        }
+
+        ChatGui.Print($"Created photoshoot package '{request.Name}'.", "PartyPulse");
+    }
+
+    private async Task UpdatePhotoshootPackageAndReportAsync(
+        VenueConnectionConfiguration venue,
+        int packageId,
+        UpdatePhotoshootPackageRequest request)
+    {
+        var result = await Photoshoots.UpdatePackageAsync(
+            venue,
+            packageId,
+            request,
+            LifetimeToken);
+        if (!result.Success)
+        {
+            ReportVipFailure(result.Failure, "The photoshoot package could not be updated.");
+            return;
+        }
+
+        ChatGui.Print($"Updated photoshoot package '{request.Name}'.", "PartyPulse");
+    }
+
+    private async Task RefreshPhotoshootsIfLoadedAsync(VenueConnectionConfiguration venue)
+    {
+        if (Photoshoots.GetSnapshot(venue).Status == PhotoshootManagementStatus.NotLoaded)
+        {
+            return;
+        }
+
+        await Photoshoots.LoadAsync(venue, true, LifetimeToken);
+    }
+
+    private async Task RedeemVipPerkAndReportAsync(VenueConnectionConfiguration venue, RedeemVipPerkRequest request)
+    {
+        var result = await VipPerks.RedeemAsync(venue, request, LifetimeToken);
+        if (!result.Success || result.Value is null) { ReportVipFailure(result.Failure, "The VIP perk could not be redeemed."); return; }
+        await Photoshoots.LoadAsync(venue, true, LifetimeToken);
+        ChatGui.Print($"Redeemed {result.Value.PerkName} for {request.TargetCharacterName}.", "PartyPulse");
+    }
+
+    private async Task UndoVipPerkAndReportAsync(VenueConnectionConfiguration venue, long redemptionId, string? reason)
+    {
+        var result = await VipPerks.UndoAsync(venue, redemptionId, new UndoVipPerkRedemptionRequest(reason), LifetimeToken);
+        if (!result.Success) { ReportVipFailure(result.Failure, "The VIP perk redemption could not be undone."); return; }
+        await Photoshoots.LoadAsync(venue, true, LifetimeToken);
+        ChatGui.Print($"VIP perk redemption #{redemptionId} was undone.", "PartyPulse");
+    }
+
+    private async Task SellPhotoshootAndReportAsync(VenueConnectionConfiguration venue, SellPhotoshootRequest request)
+    {
+        var result = await Photoshoots.SellAsync(venue, request, LifetimeToken);
+        if (!result.Success || result.Value is null) { ReportVipFailure(result.Failure, "The photoshoot sale could not be recorded."); return; }
+        await VipPerks.LoadAsync(venue, true, LifetimeToken);
+        await Finance.LoadAsync(venue, true, LifetimeToken);
+        var cost = result.Value.BaseCostType == "vip_perk"
+            ? $"VIP perk {result.Value.PricePerkName}" + (result.Value.TotalGil > 0 ? $" plus {result.Value.TotalGil:N0} gil" : string.Empty)
+            : $"{result.Value.TotalGil:N0} gil";
+        ChatGui.Print($"Recorded photoshoot sale #{result.Value.SaleId} to {result.Value.BuyerCharacterName} for {cost}.", "PartyPulse");
+    }
+
+    private async Task CreatePhotoshootSettlementAndReportAsync(VenueConnectionConfiguration venue, CreatePhotoshootSettlementRequest request)
+    {
+        var readiness = await settlementTradeService.CheckReadyAsync(request.TargetCharacterName, request.TargetWorldName, LifetimeToken);
+        if (!readiness.Success) { ReportPluginIntegrationFailure(readiness.Failure, "The settlement was not created because Dropbox is unavailable."); return; }
+        var result = await Finance.CreatePhotoshootSettlementAsync(venue, request, LifetimeToken);
+        if (!result.Success || result.Value is null) { ReportVipFailure(result.Failure, "The photoshoot settlement could not be created."); return; }
+        var trade = await settlementTradeService.InitiateTradeAsync(result.Value.TargetCharacterName, result.Value.TargetWorldName, result.Value.AmountGil, LifetimeToken);
+        await Photoshoots.LoadAsync(venue, true, LifetimeToken);
+        Notifications.PollSoon();
+        if (!trade.Success) { ReportPluginIntegrationFailure(trade.Failure, $"Settlement #{result.Value.SettlementId} was created, but Dropbox did not start the trade."); return; }
+        ChatGui.Print($"Created photoshoot settlement #{result.Value.SettlementId} for {result.Value.AmountGil:N0} gil.", "PartyPulse");
+    }
+
     private async Task CreateVipSettlementAndReportAsync(
         VenueConnectionConfiguration venue,
         CreateVipSettlementRequest request)
@@ -2300,6 +2519,8 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         await Vip.LoadAsync(venue, true, LifetimeToken);
+        await Photoshoots.LoadAsync(venue, true, LifetimeToken);
+        await VipPerks.LoadAsync(venue, true, LifetimeToken);
         Notifications.PollSoon();
         ChatGui.Print(
             $"Settlement #{settlementId} was {result.Value.Status}.",

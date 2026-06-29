@@ -916,6 +916,70 @@ public sealed class PartyPulseApiClient : IDisposable
             static payload => !string.IsNullOrWhiteSpace(payload.MacroCode) && payload.UpdatedAt != default,
             cancellationToken);
 
+    public Task<ApiResult<VipPerkManagementViewResponse>> GetVipPerksAsync(
+        Uri baseUri,
+        string accessToken,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<VipPerkManagementViewResponse>(
+            baseUri, HttpMethod.Get, "api/v1/vip-perks", accessToken, null,
+            ValidateVipPerkViewResponse, cancellationToken);
+
+    public Task<ApiResult<VipPerkOperationResponse>> CreateVipPerkAsync(
+        Uri baseUri, string accessToken, CreateVipPerkRequest request, CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<VipPerkOperationResponse>(
+            baseUri, HttpMethod.Post, "api/v1/vip-perks", accessToken, request,
+            static payload => payload.PerkId > 0, cancellationToken);
+
+    public Task<ApiResult<VipPerkOperationResponse>> UpdateVipPerkAsync(
+        Uri baseUri, string accessToken, int perkId, UpdateVipPerkRequest request, CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<VipPerkOperationResponse>(
+            baseUri, HttpMethod.Put, $"api/v1/vip-perks/{perkId}", accessToken, request,
+            static payload => payload.PerkId > 0, cancellationToken);
+
+    public Task<ApiResult<VipPackagePerkOperationResponse>> SetVipPackagePerkAsync(
+        Uri baseUri, string accessToken, int packageId, int perkId, SetVipPackagePerkRequest request, CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<VipPackagePerkOperationResponse>(
+            baseUri, HttpMethod.Put, $"api/v1/vip-perks/packages/{packageId}/perks/{perkId}", accessToken, request,
+            static _ => true, cancellationToken);
+
+    public Task<ApiResult<RedeemVipPerkResponse>> RedeemVipPerkAsync(
+        Uri baseUri, string accessToken, RedeemVipPerkRequest request, CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<RedeemVipPerkResponse>(
+            baseUri, HttpMethod.Post, "api/v1/vip-perks/redemptions", accessToken, request,
+            static payload => payload.RedemptionId > 0 && payload.PerkId > 0 && payload.RedeemedAt != default,
+            cancellationToken);
+
+    public Task<ApiResult<UndoVipPerkRedemptionResponse>> UndoVipPerkRedemptionAsync(
+        Uri baseUri, string accessToken, long redemptionId, UndoVipPerkRedemptionRequest request, CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<UndoVipPerkRedemptionResponse>(
+            baseUri, HttpMethod.Post, $"api/v1/vip-perks/redemptions/{redemptionId}/undo", accessToken, request,
+            static payload => payload.RedemptionId > 0 && payload.UndoneAt != default, cancellationToken);
+
+    public Task<ApiResult<PhotoshootManagementViewResponse>> GetPhotoshootsAsync(
+        Uri baseUri, string accessToken, CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<PhotoshootManagementViewResponse>(
+            baseUri, HttpMethod.Get, "api/v1/photoshoots", accessToken, null,
+            ValidatePhotoshootViewResponse, cancellationToken);
+
+    public Task<ApiResult<PhotoshootPackageOperationResponse>> CreatePhotoshootPackageAsync(
+        Uri baseUri, string accessToken, CreatePhotoshootPackageRequest request, CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<PhotoshootPackageOperationResponse>(
+            baseUri, HttpMethod.Post, "api/v1/photoshoots/packages", accessToken, request,
+            static payload => payload.PackageId > 0, cancellationToken);
+
+    public Task<ApiResult<PhotoshootPackageOperationResponse>> UpdatePhotoshootPackageAsync(
+        Uri baseUri, string accessToken, int packageId, UpdatePhotoshootPackageRequest request, CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<PhotoshootPackageOperationResponse>(
+            baseUri, HttpMethod.Put, $"api/v1/photoshoots/packages/{packageId}", accessToken, request,
+            static payload => payload.PackageId > 0, cancellationToken);
+
+    public Task<ApiResult<SellPhotoshootResponse>> SellPhotoshootAsync(
+        Uri baseUri, string accessToken, SellPhotoshootRequest request, CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<SellPhotoshootResponse>(
+            baseUri, HttpMethod.Post, "api/v1/photoshoots/sales", accessToken, request,
+            static payload => payload.SaleId > 0 && payload.PackageId > 0 && payload.TotalGil >= 0 && payload.SoldAt != default,
+            cancellationToken);
+
     public Task<ApiResult<FinanceViewResponse>> GetFinanceAsync(
         Uri baseUri,
         string accessToken,
@@ -938,6 +1002,27 @@ public sealed class PartyPulseApiClient : IDisposable
             baseUri,
             HttpMethod.Post,
             "api/v1/finance/settlements/vip",
+            accessToken,
+            request,
+            static payload => payload.SettlementId > 0 &&
+                              payload.AmountGil > 0 &&
+                              payload.TargetUserId > 0 &&
+                              payload.TargetCharacterId > 0 &&
+                              !string.IsNullOrWhiteSpace(payload.TargetCharacterName) &&
+                              !string.IsNullOrWhiteSpace(payload.TargetWorldName) &&
+                              !string.IsNullOrWhiteSpace(payload.TargetUserDisplayName) &&
+                              payload.CreatedAt != default,
+            cancellationToken);
+
+    public Task<ApiResult<CreatePhotoshootSettlementResponse>> CreatePhotoshootSettlementAsync(
+        Uri baseUri,
+        string accessToken,
+        CreatePhotoshootSettlementRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<CreatePhotoshootSettlementResponse>(
+            baseUri,
+            HttpMethod.Post,
+            "api/v1/finance/settlements/photoshoots",
             accessToken,
             request,
             static payload => payload.SettlementId > 0 &&
@@ -1027,11 +1112,32 @@ public sealed class PartyPulseApiClient : IDisposable
             !string.IsNullOrWhiteSpace(subscription.PackageName) &&
             !string.IsNullOrWhiteSpace(subscription.SellerDisplayName));
 
+    private static bool ValidateVipPerkViewResponse(VipPerkManagementViewResponse payload) =>
+        payload.Capabilities is not null &&
+        payload.Perks is not null && payload.PackageAssignments is not null &&
+        payload.Availability is not null && payload.Redemptions is not null &&
+        payload.Perks.All(static value => value.PerkId > 0 && !string.IsNullOrWhiteSpace(value.Name)) &&
+        payload.PackageAssignments.All(static value => value.PackagePerkId > 0 && value.PackageId > 0 && value.PerkId > 0) &&
+        payload.Availability.All(static value => value.CharacterId > 0 && value.SubscriptionId > 0 && value.PerkId > 0) &&
+        payload.Redemptions.All(static value => value.RedemptionId > 0 && value.PerkId > 0);
+
+    private static bool ValidatePhotoshootViewResponse(PhotoshootManagementViewResponse payload) =>
+        payload.Capabilities is not null && payload.PersonalUnpaidGil >= 0 &&
+        payload.PersonalPendingGil >= 0 && payload.PersonalAvailableGil >= 0 &&
+        payload.Packages is not null && payload.Sales is not null && payload.VipStatuses is not null && payload.VipPerkAvailability is not null &&
+        payload.Packages.All(static value => value.PackageId > 0 && value.IncludedCharacters > 0 && !string.IsNullOrWhiteSpace(value.Name)) &&
+        payload.Sales.All(static value => value.SaleId > 0 && value.PackageId > 0 && value.TotalGil >= 0) &&
+        payload.VipStatuses.All(static value => value.CharacterId > 0 && value.SubscriptionId > 0 && value.VipPackageId > 0) &&
+        payload.VipPerkAvailability.All(static value => value.CharacterId > 0 && value.PerkId > 0);
+
     private static bool ValidateFinanceViewResponse(FinanceViewResponse payload) =>
         payload.Capabilities is not null &&
         payload.PersonalUnpaidVipGil >= 0 &&
         payload.PersonalPendingVipGil >= 0 &&
         payload.PersonalAvailableVipGil >= 0 &&
+        payload.PersonalUnpaidPhotoshootGil >= 0 &&
+        payload.PersonalPendingPhotoshootGil >= 0 &&
+        payload.PersonalAvailablePhotoshootGil >= 0 &&
         payload.VenuePendingCount >= 0 &&
         payload.Settlements is not null &&
         payload.Items is not null &&
