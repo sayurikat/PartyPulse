@@ -1181,6 +1181,12 @@ public sealed class Plugin : IDalamudPlugin
         RejectPurchaseRequest request) =>
         Observe(RejectPurchaseAndReportAsync(venue, purchaseId, request), $"reject purchase {purchaseId}");
 
+    public void CancelPurchase(
+        VenueConnectionConfiguration venue,
+        long purchaseId,
+        bool wasSettled) =>
+        Observe(CancelPurchaseAndReportAsync(venue, purchaseId, wasSettled), $"cancel purchase {purchaseId}");
+
     public void EnsureOtherGamesLoaded(VenueConnectionConfiguration venue)
     {
         if (OtherGames.ShouldLoad(venue))
@@ -3049,6 +3055,29 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         ChatGui.Print($"Purchase #{purchaseId} was rejected.", "PartyPulse");
+    }
+
+    private async Task CancelPurchaseAndReportAsync(
+        VenueConnectionConfiguration venue,
+        long purchaseId,
+        bool wasSettled)
+    {
+        var result = await Purchases.CancelAsync(
+            venue,
+            purchaseId,
+            new CancelPurchaseRequest(wasSettled),
+            LifetimeToken);
+        if (!result.Success || result.Value is null)
+        {
+            ReportVipFailure(result.Failure, "The purchase could not be cancelled.");
+            return;
+        }
+
+        ChatGui.Print(
+            wasSettled
+                ? $"Purchase #{purchaseId} was cancelled and the reimbursement was recorded as repaid to the club."
+                : $"Purchase #{purchaseId} was cancelled.",
+            "PartyPulse");
     }
 
     private async Task CreateOtherGameItemAndReportAsync(

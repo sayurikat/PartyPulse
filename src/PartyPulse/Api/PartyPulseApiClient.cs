@@ -2352,6 +2352,20 @@ public sealed class PartyPulseApiClient : IDisposable
             request,
             cancellationToken);
 
+    public Task<ApiResult<PurchaseStateChangeResponse>> CancelPurchaseAsync(
+        Uri baseUri,
+        string accessToken,
+        long purchaseId,
+        CancelPurchaseRequest request,
+        CancellationToken cancellationToken) =>
+        SendPurchaseStateChangeAsync(
+            baseUri,
+            accessToken,
+            purchaseId,
+            "cancel",
+            request,
+            cancellationToken);
+
     private Task<ApiResult<PurchaseStateChangeResponse>> SendPurchaseStateChangeAsync(
         Uri baseUri,
         string accessToken,

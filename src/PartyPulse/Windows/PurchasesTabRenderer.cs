@@ -14,6 +14,7 @@ public sealed class PurchasesTabRenderer
 {
     private const string ConfirmPaidPopup = "Confirm purchase trade###PartyPulseConfirmPurchasePaid";
     private const string RejectPopup = "Reject purchase###PartyPulseRejectPurchase";
+    private const string CancelPopup = "Cancel purchase###PartyPulseCancelPurchase";
 
     private readonly Plugin plugin;
     private Guid activeProfileId;
@@ -24,6 +25,8 @@ public sealed class PurchasesTabRenderer
     private long selectedPurchaseId;
     private long pendingPurchaseId;
     private string rejectionReason = string.Empty;
+    private bool pendingCancellationWasSettled;
+    private long pendingCancellationTotalPriceGil;
 
     public PurchasesTabRenderer(Plugin plugin)
     {
@@ -74,6 +77,7 @@ public sealed class PurchasesTabRenderer
         DrawSelectedPurchase(venue, view, busy);
         DrawConfirmPaidPopup(venue);
         DrawRejectPopup(venue);
+        DrawCancelPopup(venue);
 
         ImGui.EndTabItem();
     }
@@ -231,6 +235,18 @@ public sealed class PurchasesTabRenderer
             ImGui.TextWrapped($"Reason: {purchase.RejectionReason}");
         }
 
+        if (purchase.CancelledAt is { } cancelledAt)
+        {
+            ImGui.TextDisabled(
+                $"Cancelled by {purchase.CancelledByDisplayName ?? "unknown"} on " +
+                VenueTimeZone.Format(venue, cancelledAt, "g"));
+            if (purchase.SettledAt is not null)
+            {
+                ImGui.TextWrapped(
+                    "The reimbursement was recorded as repaid to the club when this purchase was cancelled.");
+            }
+        }
+
         if (!view.Capabilities.CanManage)
         {
             return;
@@ -273,6 +289,19 @@ public sealed class PurchasesTabRenderer
             }
             ImGui.TextDisabled(
                 $"Target {purchase.CreatedByCharacterName} @ {purchase.CreatedByWorldName} before starting Dropbox.");
+        }
+
+        if (purchase.Status is "pending_approval" or "approved" or "settled")
+        {
+            ImGui.Spacing();
+            if (ImGui.Button("Cancel purchase"))
+            {
+                pendingPurchaseId = purchase.PurchaseId;
+                pendingCancellationWasSettled =
+                    string.Equals(purchase.Status, "settled", StringComparison.Ordinal);
+                pendingCancellationTotalPriceGil = purchase.TotalPriceGil;
+                ImGui.OpenPopup(CancelPopup);
+            }
         }
         ImGui.EndDisabled();
     }
@@ -333,6 +362,46 @@ public sealed class PurchasesTabRenderer
         ImGui.EndPopup();
     }
 
+    private void DrawCancelPopup(VenueConnectionConfiguration venue)
+    {
+        if (!ImGui.BeginPopupModal(CancelPopup, ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            return;
+        }
+
+        ImGui.TextWrapped($"Cancel purchase #{pendingPurchaseId}?");
+        if (pendingCancellationWasSettled)
+        {
+            ImGui.TextColored(
+                new Vector4(1f, 0.4f, 0.4f, 1f),
+                $"This purchase was already paid from club funds ({pendingCancellationTotalPriceGil:N0} gil).");
+            ImGui.TextWrapped(
+                "Confirm only after the purchaser has paid the gil back to the club. " +
+                "PartyPulse will record the repayment as completed but cannot start or verify the return trade.");
+        }
+        else
+        {
+            ImGui.TextWrapped(
+                "The purchase will remain in history as cancelled and cannot be approved or paid afterward.");
+        }
+
+        var confirmLabel = pendingCancellationWasSettled
+            ? "Confirm repaid and cancel"
+            : "Confirm cancellation";
+        if (ImGui.Button(confirmLabel))
+        {
+            plugin.CancelPurchase(venue, pendingPurchaseId, pendingCancellationWasSettled);
+            ImGui.CloseCurrentPopup();
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Keep purchase"))
+        {
+            ImGui.CloseCurrentPopup();
+        }
+
+        ImGui.EndPopup();
+    }
+
     private bool MatchesFilter(PurchaseSummary purchase)
     {
         var value = filter.Trim();
@@ -351,6 +420,7 @@ public sealed class PurchasesTabRenderer
             "approved" => "Approved / unpaid",
             "settled" => "Settled",
             "rejected" => "Rejected",
+            "cancelled" => "Cancelled",
             _ => status
         };
 
@@ -360,6 +430,7 @@ public sealed class PurchasesTabRenderer
             "approved" => new Vector4(0.35f, 0.7f, 1f, 1f),
             "settled" => new Vector4(0.35f, 0.85f, 0.45f, 1f),
             "rejected" => new Vector4(1f, 0.4f, 0.4f, 1f),
+            "cancelled" => new Vector4(0.65f, 0.65f, 0.65f, 1f),
             _ => new Vector4(0.75f, 0.75f, 0.75f, 1f)
         };
         ImGui.TextColored(color, display);
@@ -380,5 +451,7 @@ public sealed class PurchasesTabRenderer
         selectedPurchaseId = 0;
         pendingPurchaseId = 0;
         rejectionReason = string.Empty;
+        pendingCancellationWasSettled = false;
+        pendingCancellationTotalPriceGil = 0;
     }
 }

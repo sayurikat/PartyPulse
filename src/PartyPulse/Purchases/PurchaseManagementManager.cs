@@ -144,6 +144,21 @@ public sealed class PurchaseManagementManager : IDisposable
                 cancellationToken),
             cancellationToken);
 
+    public Task<ApiResult<PurchaseStateChangeResponse>> CancelAsync(
+        VenueConnectionConfiguration venue,
+        long purchaseId,
+        CancelPurchaseRequest request,
+        CancellationToken cancellationToken) =>
+        MutateAsync(
+            venue,
+            (baseUri, accessToken) => apiClient.CancelPurchaseAsync(
+                baseUri,
+                accessToken,
+                purchaseId,
+                request,
+                cancellationToken),
+            cancellationToken);
+
     public void RemoveProfile(Guid profileId) => snapshots.TryRemove(profileId, out _);
 
     public void Dispose()

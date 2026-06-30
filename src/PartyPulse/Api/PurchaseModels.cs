@@ -28,7 +28,10 @@ public sealed record PurchaseSummary(
     DateTimeOffset? RejectedAt,
     int? RejectedByUserId,
     string? RejectedByDisplayName,
-    string? RejectionReason);
+    string? RejectionReason,
+    DateTimeOffset? CancelledAt,
+    int? CancelledByUserId,
+    string? CancelledByDisplayName);
 
 public sealed record PurchasesManagementViewResponse(
     PurchaseCapabilities Capabilities,
@@ -40,6 +43,8 @@ public sealed record CreatePurchaseRequest(
     long TotalPriceGil);
 
 public sealed record RejectPurchaseRequest(string Reason);
+
+public sealed record CancelPurchaseRequest(bool ConfirmRepaidToClub);
 
 public sealed record CreatePurchaseResponse(
     long PurchaseId,
