@@ -19,6 +19,7 @@ public sealed class CourtManagementManager : IDisposable
     private readonly PartyPulseApiClient apiClient;
     private readonly PlayerIdentityProvider identityProvider;
     private readonly ConcurrentDictionary<Guid, CourtManagementSnapshot> snapshots = new();
+    private readonly ConcurrentDictionary<Guid, CourtStaffSettlementPreviewResponse> settlementPreviews = new();
     private readonly ConcurrentDictionary<Guid, SemaphoreSlim> gates = new();
 
     public CourtManagementManager(
@@ -40,6 +41,12 @@ public sealed class CourtManagementManager : IDisposable
 
     public bool IsBusy(Guid profileId) =>
         gates.TryGetValue(profileId, out var gate) && gate.CurrentCount == 0;
+
+    public CourtStaffSettlementPreviewResponse? GetSettlementPreview(Guid profileId) =>
+        settlementPreviews.TryGetValue(profileId, out var preview) ? preview : null;
+
+    public void ClearSettlementPreview(Guid profileId) =>
+        settlementPreviews.TryRemove(profileId, out _);
 
     public bool ShouldLoad(VenueConnectionConfiguration venue)
     {
@@ -87,6 +94,47 @@ public sealed class CourtManagementManager : IDisposable
                 }
 
                 return await LoadCoreAsync(venue, cancellationToken);
+            },
+            cancellationToken);
+
+    public Task<ApiResult<UpdateCourtSettingsResponse>> UpdateSettingsAsync(
+        VenueConnectionConfiguration venue,
+        UpdateCourtSettingsRequest request,
+        CancellationToken cancellationToken) =>
+        MutateAsync(
+            venue,
+            (baseUri, accessToken) => apiClient.UpdateCourtSettingsAsync(
+                baseUri,
+                accessToken,
+                request,
+                cancellationToken),
+            cancellationToken);
+
+    public Task<ApiResult<CourtStaffSettlementPreviewResponse>> PreviewStaffSettlementAsync(
+        VenueConnectionConfiguration venue,
+        CreateCourtStaffSettlementRequest request,
+        CancellationToken cancellationToken) =>
+        WithGateAsync(
+            venue,
+            async () =>
+            {
+                var context = await GetAuthorizedContextAsync(venue, cancellationToken);
+                if (!context.Success)
+                {
+                    settlementPreviews.TryRemove(venue.ProfileId, out _);
+                    return ApiResult<CourtStaffSettlementPreviewResponse>.Failed(context.Failure!);
+                }
+
+                var result = await apiClient.PreviewCourtStaffSettlementAsync(
+                    context.BaseUri!,
+                    context.AccessToken!,
+                    request,
+                    cancellationToken);
+                if (result.Success && result.Value is not null)
+                    settlementPreviews[venue.ProfileId] = result.Value;
+                else
+                    settlementPreviews.TryRemove(venue.ProfileId, out _);
+                return result;
             },
             cancellationToken);
 
@@ -208,7 +256,11 @@ public sealed class CourtManagementManager : IDisposable
                 cancellationToken),
             cancellationToken);
 
-    public void RemoveProfile(Guid profileId) => snapshots.TryRemove(profileId, out _);
+    public void RemoveProfile(Guid profileId)
+    {
+        snapshots.TryRemove(profileId, out _);
+        settlementPreviews.TryRemove(profileId, out _);
+    }
 
     public void Dispose()
     {
@@ -219,6 +271,7 @@ public sealed class CourtManagementManager : IDisposable
 
         gates.Clear();
         snapshots.Clear();
+        settlementPreviews.Clear();
     }
 
     private async Task<ApiResult<CourtManagementViewResponse>> LoadCoreAsync(
@@ -282,6 +335,7 @@ public sealed class CourtManagementManager : IDisposable
                 var result = await operation(context.BaseUri!, context.AccessToken!);
                 if (result.Success)
                 {
+                    settlementPreviews.TryRemove(venue.ProfileId, out _);
                     await RefreshAfterMutationAsync(venue, context, cancellationToken);
                 }
 

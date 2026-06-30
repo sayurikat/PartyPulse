@@ -1450,6 +1450,46 @@ public sealed class PartyPulseApiClient : IDisposable
             ValidateCourtViewResponse,
             cancellationToken);
 
+    public Task<ApiResult<UpdateCourtSettingsResponse>> UpdateCourtSettingsAsync(
+        Uri baseUri,
+        string accessToken,
+        UpdateCourtSettingsRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<UpdateCourtSettingsResponse>(
+            baseUri,
+            HttpMethod.Put,
+            "api/v1/court/settings",
+            accessToken,
+            request,
+            static payload => payload.CourtKeepPercentage is >= 0m and <= 100m,
+            cancellationToken);
+
+    public Task<ApiResult<CourtStaffSettlementPreviewResponse>> PreviewCourtStaffSettlementAsync(
+        Uri baseUri,
+        string accessToken,
+        CreateCourtStaffSettlementRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<CourtStaffSettlementPreviewResponse>(
+            baseUri,
+            HttpMethod.Post,
+            "api/v1/court/settlements/staff/preview",
+            accessToken,
+            request,
+            static payload =>
+                !string.IsNullOrWhiteSpace(payload.StaffDisplayName) &&
+                !string.IsNullOrWhiteSpace(payload.StaffCharacterName) &&
+                !string.IsNullOrWhiteSpace(payload.StaffWorldName) &&
+                payload.GrossSalesGil >= 0 &&
+                payload.CourtRetainedGil >= 0 &&
+                payload.VenueShareGil >= 0 &&
+                payload.SalaryGil >= 0 &&
+                payload.SalaryDeductionGil >= 0 &&
+                payload.TradeAmountGil >= 0 &&
+                payload.SaleCount >= 0 &&
+                payload.TimeEntryCount >= 0 &&
+                payload.AdjustmentCount >= 0,
+            cancellationToken);
+
     public Task<ApiResult<CourtOfferOperationResponse>> CreateCourtOfferAsync(
         Uri baseUri,
         string accessToken,
@@ -1613,6 +1653,7 @@ public sealed class PartyPulseApiClient : IDisposable
             staff.EffectiveHourlyRateGil >= 0 &&
             staff.CustomFixedAmountGil >= 0 &&
             staff.UnpaidSalaryGil >= 0 &&
+            staff.SalaryDeductionGil >= 0 &&
             staff.UnsettledCourtGil >= 0) &&
         payload.TimeEntries.All(static entry =>
             entry.TimeEntryId > 0 &&
@@ -1628,6 +1669,7 @@ public sealed class PartyPulseApiClient : IDisposable
         payload.Transactions is not null &&
         payload.VipStatuses is not null &&
         payload.VipPerkAvailability is not null &&
+        payload.CourtKeepPercentage is >= 0m and <= 100m &&
         payload.PersonalUnsettledCourtGil >= 0 &&
         payload.PersonalUnpaidSalaryGil >= 0 &&
         payload.Offers.All(static offer =>
@@ -1642,7 +1684,11 @@ public sealed class PartyPulseApiClient : IDisposable
             sale.UnitDurationMinutes > 0 &&
             sale.TotalDurationMinutes >= sale.UnitDurationMinutes &&
             sale.UnitPriceGil >= 0 &&
-            sale.TotalPriceGil >= 0) &&
+            sale.TotalPriceGil >= 0 &&
+            sale.SellerPercentage is >= 0m and <= 100m &&
+            sale.SellerShareGil >= 0 &&
+            sale.VenueShareGil >= 0 &&
+            sale.SellerShareGil + sale.VenueShareGil == sale.TotalPriceGil) &&
         payload.Transactions.All(static transaction =>
             transaction.TransactionId > 0 &&
             !string.IsNullOrWhiteSpace(transaction.TransactionType) &&
@@ -1652,6 +1698,8 @@ public sealed class PartyPulseApiClient : IDisposable
 
     private static bool ValidateFinancialTransactionResponse(StaffPayoutResponse payload) =>
         payload.TransactionId > 0 &&
+        payload.GrossSalesGil >= 0 &&
+        payload.CourtRetainedGil >= 0 &&
         payload.GrossCourtGil >= 0 &&
         payload.SalaryGil >= 0 &&
         payload.TradeAmountGil >= 0 &&
@@ -1661,6 +1709,8 @@ public sealed class PartyPulseApiClient : IDisposable
     private static bool ValidateFinancialTransactionResponse(
         CourtFinancialTransactionResponse payload) =>
         payload.TransactionId > 0 &&
+        payload.GrossSalesGil >= 0 &&
+        payload.CourtRetainedGil >= 0 &&
         payload.GrossCourtGil >= 0 &&
         payload.SalaryGil >= 0 &&
         payload.TradeAmountGil >= 0 &&

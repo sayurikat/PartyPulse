@@ -45,6 +45,8 @@ public sealed record StaffMemberSummary(
     DateTimeOffset UpdatedAt,
     DateTimeOffset? ArchivedAt,
     long UnpaidSalaryGil,
+    long SalaryDeductionGil,
+    long StandingBalanceGil,
     long UnsettledCourtGil,
     long UnsettledAdjustmentGil,
     bool RequiresCourtSettlement);
@@ -72,7 +74,10 @@ public sealed record StaffTimeEntrySummary(
     DateTimeOffset? CancelledAt,
     string? CancelReason,
     DateTimeOffset? PaidAt,
-    long? FinancialTransactionId);
+    long? FinancialTransactionId,
+    string? PaidToCharacterName,
+    string? PaidToWorldName,
+    bool PaidViaProxy);
 
 public sealed record StaffManagementViewResponse(
     StaffCapabilities Capabilities,
@@ -114,8 +119,10 @@ public sealed record CancelStaffTimeEntryRequest(string? Reason);
 
 public sealed record CreateStaffPayoutRequest(
     long StaffMemberId,
-    string TargetCharacterName,
-    string TargetWorldName,
+    string? TargetCharacterName,
+    string? TargetWorldName,
+    bool AllowProxy,
+    bool RepaymentReceived,
     string? Note);
 
 public sealed record StaffJobOperationResponse(long JobDefinitionId);
@@ -135,6 +142,8 @@ public sealed record StaffTimeEntryCancellationResponse(
 
 public sealed record StaffPayoutResponse(
     long TransactionId,
+    long GrossSalesGil,
+    long CourtRetainedGil,
     long GrossCourtGil,
     long SalaryGil,
     long AdjustmentGil,

@@ -7,7 +7,8 @@ public sealed record CourtCapabilities(
     bool CanSell,
     bool CanAccount,
     bool CanManage,
-    bool CanFinance);
+    bool CanFinance,
+    bool CanManageCommission);
 
 public sealed record CourtOfferSummary(
     long OfferId,
@@ -31,6 +32,9 @@ public sealed record CourtSaleSummary(
     string PriceType,
     long UnitPriceGil,
     long TotalPriceGil,
+    decimal SellerPercentage,
+    long SellerShareGil,
+    long VenueShareGil,
     int? PricePerkId,
     string? PricePerkName,
     long? PerkRedemptionId,
@@ -45,6 +49,8 @@ public sealed record CourtSaleSummary(
     long? FinancialTransactionId,
     DateTimeOffset? VoidedAt,
     string? VoidReason,
+    DateTimeOffset? RefundConfirmedAt,
+    int? RefundConfirmedByUserId,
     bool IsOwnSale);
 
 public sealed record CourtVipStatusSummary(
@@ -111,6 +117,8 @@ public sealed record CourtTransactionSummary(
     string? StaffWorldName,
     string? CollectorCharacterName,
     string? CollectorWorldName,
+    long GrossSalesGil,
+    long CourtRetainedGil,
     long GrossCourtGil,
     long SalaryGil,
     long AdjustmentGil,
@@ -129,6 +137,7 @@ public sealed record CourtTransactionSummary(
     bool CanExecuteTrade,
     bool CanConfirm,
     bool CanCancel,
+    bool PayoutViaProxy,
     string? TradeTargetCharacterName,
     string? TradeTargetWorldName,
     IReadOnlyList<CourtTransactionItemSummary> Items);
@@ -136,6 +145,7 @@ public sealed record CourtTransactionSummary(
 public sealed record CourtManagementViewResponse(
     CourtCapabilities Capabilities,
     DateTimeOffset ServerNow,
+    decimal CourtKeepPercentage,
     long? CurrentStaffMemberId,
     long PersonalUnsettledCourtGil,
     long PersonalAdjustmentGil,
@@ -146,6 +156,10 @@ public sealed record CourtManagementViewResponse(
     IReadOnlyList<CourtTransactionSummary> Transactions,
     IReadOnlyList<CourtVipStatusSummary> VipStatuses,
     IReadOnlyList<CourtVipPerkAvailabilitySummary> VipPerkAvailability);
+
+public sealed record UpdateCourtSettingsRequest(decimal CourtKeepPercentage);
+
+public sealed record UpdateCourtSettingsResponse(decimal CourtKeepPercentage);
 
 public sealed record SaveCourtOfferRequest(
     string Name,
@@ -161,7 +175,26 @@ public sealed record SellCourtServiceRequest(
     string TargetCharacterName,
     string TargetWorldName);
 
-public sealed record CancelCourtSaleRequest(string? Reason);
+public sealed record CancelCourtSaleRequest(bool RefundConfirmed, string? Reason);
+
+public sealed record CourtStaffSettlementPreviewResponse(
+    long? StaffMemberId,
+    string StaffDisplayName,
+    int? StaffUserId,
+    string StaffCharacterName,
+    string StaffWorldName,
+    long GrossSalesGil,
+    long CourtRetainedGil,
+    long VenueShareGil,
+    long SalaryGil,
+    long SalaryDeductionGil,
+    long AdjustmentGil,
+    long NetGil,
+    string TradeDirection,
+    long TradeAmountGil,
+    int SaleCount,
+    int TimeEntryCount,
+    int AdjustmentCount);
 
 public sealed record CreateCourtStaffSettlementRequest(
     string CollectorMode,
@@ -196,6 +229,9 @@ public sealed record SellCourtServiceResponse(
     string PriceType,
     long UnitPriceGil,
     long TotalPriceGil,
+    decimal SellerPercentage,
+    long SellerShareGil,
+    long VenueShareGil,
     int? PricePerkId,
     string? PricePerkName,
     long? PerkRedemptionId,
@@ -206,11 +242,13 @@ public sealed record CourtSaleCancellationResponse(
     long SaleId,
     DateTimeOffset VoidedAt,
     long? ReleasedPerkRedemptionId,
-    long? AdjustmentId,
-    long AdjustmentGil);
+    DateTimeOffset? RefundConfirmedAt,
+    long RefundedGil);
 
 public sealed record CourtFinancialTransactionResponse(
     long TransactionId,
+    long GrossSalesGil,
+    long CourtRetainedGil,
     long GrossCourtGil,
     long SalaryGil,
     long AdjustmentGil,

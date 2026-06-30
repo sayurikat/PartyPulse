@@ -203,7 +203,10 @@ public sealed class TimedMacrosTabRenderer(Plugin plugin)
 
         foreach (var macro in view.Macros
                      .Where(value => value.CanManage && !value.IsScheduleInstance)
-                     .OrderBy(value => value.TypeCode == TimedMacroTypeCodes.VipAdvertisement ? 0 : value.TypeCode == TimedMacroTypeCodes.PhotoshootAdvertisement ? 1 : 2)
+                     .OrderBy(value => value.TypeCode == TimedMacroTypeCodes.VipAdvertisement ? 0
+                         : value.TypeCode == TimedMacroTypeCodes.PhotoshootAdvertisement ? 1
+                         : value.TypeCode == TimedMacroTypeCodes.CourtAdvertisement ? 2
+                         : 3)
                      .ThenBy(value => value.DisplayName, StringComparer.OrdinalIgnoreCase))
         {
             var draft = GetDraft(macro);

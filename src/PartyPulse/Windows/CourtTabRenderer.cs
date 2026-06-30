@@ -17,7 +17,8 @@ public sealed class CourtTabRenderer(Plugin plugin)
         "Cancel Court transaction###PartyPulseCourtCancelTransaction";
 
     private static readonly Vector4 AvailableColor = new(0.35f, 0.85f, 0.45f, 1f);
-    private static readonly Vector4 UnavailableColor = new(0.65f, 0.18f, 0.18f, 1f);
+    private static readonly Vector4 UnavailableColor = new(0.95f, 0.25f, 0.25f, 1f);
+    private static readonly Vector4 DueColor = new(1f, 0.72f, 0.25f, 1f);
 
     private Guid activeProfileId;
     private long selectedOfferId;
@@ -30,10 +31,19 @@ public sealed class CourtTabRenderer(Plugin plugin)
     private int pricePerkId;
     private bool offerArchived;
     private int collectorMode;
+    private string previewTargetName = string.Empty;
+    private string previewTargetWorld = string.Empty;
+    private string previewCollectorMode = string.Empty;
+    private decimal loadedCourtKeepPercentage = -1m;
+    private float courtKeepPercentage;
     private int prepayGil;
     private long selectedAccountId;
     private long pendingCancelSaleId;
     private bool openCancelSalePopup;
+    private bool pendingSaleRequiresRefund;
+    private bool refundConfirmed;
+    private long pendingRefundGil;
+    private string pendingRefundBuyer = string.Empty;
     private long pendingCancelTransactionId;
     private bool openCancelTransactionPopup;
     private string cancelReason = string.Empty;
@@ -48,6 +58,7 @@ public sealed class CourtTabRenderer(Plugin plugin)
         ResetForVenue(venue);
         plugin.EnsureCourtLoaded(venue);
         plugin.EnsureVipPerksLoaded(venue);
+        plugin.EnsureTimedMacrosLoaded(venue);
 
         var snapshot = plugin.Court.GetSnapshot(venue);
         var busy = plugin.Court.IsBusy(venue.ProfileId);
@@ -67,6 +78,9 @@ public sealed class CourtTabRenderer(Plugin plugin)
         }
 
         var view = snapshot.View;
+        SyncCommissionEditor(view);
+        DrawCourtTimedMacro(venue);
+
         var personalNetGil =
             (decimal)view.PersonalUnsettledCourtGil +
             view.PersonalAdjustmentGil -
@@ -86,6 +100,12 @@ public sealed class CourtTabRenderer(Plugin plugin)
         if (view.Capabilities.CanFinance || view.Capabilities.CanAccount)
         {
             DrawSettlement(venue, view, busy);
+        }
+
+        if (view.Capabilities.CanManageCommission)
+        {
+            ImGui.Separator();
+            DrawCommissionSettings(venue, busy);
         }
 
         if (view.Capabilities.CanManage)
@@ -109,6 +129,111 @@ public sealed class CourtTabRenderer(Plugin plugin)
         DrawSaleCancellationPopup(venue, busy);
         DrawTransactionCancellationPopup(venue, busy);
         ImGui.EndTabItem();
+    }
+
+    private void DrawCourtTimedMacro(VenueConnectionConfiguration venue)
+    {
+        var snapshot = plugin.TimedMacros.GetSnapshot(venue);
+        var view = snapshot.View;
+        var macro = view?.Macros.FirstOrDefault(value =>
+            string.Equals(value.TypeCode, TimedMacroTypeCodes.CourtAdvertisement, StringComparison.OrdinalIgnoreCase) &&
+            value.CanExecute);
+        if (view is null || macro is null)
+            return;
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+        ImGui.TextUnformatted("Court Service advertisement");
+        var opening = view.CurrentOpening;
+        var locationMessage = string.Empty;
+        var atAddress = opening is not null && plugin.LocationProvider.IsAtAddress(
+            opening.AddressWorldName,
+            opening.AddressCityName,
+            opening.AddressWard,
+            opening.AddressPlot,
+            out locationMessage);
+        var now = snapshot.EstimatedServerNow;
+        var stateText = opening is null
+            ? "Paused: no active opening"
+            : !atAddress
+                ? "Paused: not at opening address"
+                : macro.NextDueAt is not { } dueAt || dueAt <= now
+                    ? "Due now"
+                    : $"Next in {FormatTimedMacroRemaining(dueAt - now)}";
+        if (stateText == "Due now")
+        {
+            ImGui.TextColored(DueColor, stateText);
+            ImGui.SameLine();
+            ImGui.TextDisabled($"· every {macro.IntervalMinutes} minutes · shared across accountants");
+        }
+        else
+        {
+            ImGui.TextDisabled($"{stateText} · every {macro.IntervalMinutes} minutes · shared across accountants");
+        }
+
+        ImGui.SameLine();
+        var canExecute = opening is not null && atAddress && macro.Enabled && macro.IsConfigured;
+        ImGui.BeginDisabled(
+            plugin.TimedMacros.IsBusy(venue.ProfileId) ||
+            plugin.IsGameMacroBusy ||
+            !canExecute);
+        if (ImGui.SmallButton("Execute Court Service ad"))
+            plugin.RunTimedMacro(venue, macro, opening!);
+        ImGui.EndDisabled();
+        if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled) && !canExecute)
+        {
+            ImGui.SetTooltip(
+                opening is null
+                    ? "There is no active opening."
+                    : !atAddress
+                        ? locationMessage
+                        : !macro.Enabled
+                            ? "The Court Service advertisement macro is disabled."
+                            : "The Court Service advertisement macro has not been configured.");
+        }
+        else if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip("Running early is allowed and resets the shared timer.");
+        }
+    }
+
+    private static string FormatTimedMacroRemaining(TimeSpan remaining) =>
+        remaining.TotalHours >= 1
+            ? $"{(int)remaining.TotalHours:00}:{remaining.Minutes:00}:{remaining.Seconds:00}"
+            : $"{remaining.Minutes:00}:{remaining.Seconds:00}";
+
+    private void DrawCommissionSettings(
+        VenueConnectionConfiguration venue,
+        bool busy)
+    {
+        if (!ImGui.CollapsingHeader("Court worker retained percentage"))
+            return;
+
+        ImGui.TextWrapped(
+            "This percentage is retained by the Court worker from gil sales. " +
+            "Each sale snapshots the percentage, so changing it does not rewrite existing sales.");
+        ImGui.SetNextItemWidth(180f);
+        ImGui.SliderFloat("Court keeps %", ref courtKeepPercentage, 0f, 100f, "%.2f%%");
+        courtKeepPercentage = Math.Clamp(courtKeepPercentage, 0f, 100f);
+        ImGui.TextDisabled($"Saved: {loadedCourtKeepPercentage:0.##}%");
+        ImGui.BeginDisabled(busy);
+        if (ImGui.Button("Save Court percentage"))
+        {
+            plugin.UpdateCourtSettings(
+                venue,
+                new UpdateCourtSettingsRequest((decimal)courtKeepPercentage));
+        }
+        ImGui.EndDisabled();
+    }
+
+    private void SyncCommissionEditor(CourtManagementViewResponse view)
+    {
+        if (loadedCourtKeepPercentage == view.CourtKeepPercentage)
+            return;
+
+        loadedCourtKeepPercentage = view.CourtKeepPercentage;
+        courtKeepPercentage = (float)view.CourtKeepPercentage;
     }
 
     private void DrawSale(
@@ -331,7 +456,8 @@ public sealed class CourtTabRenderer(Plugin plugin)
         if (canFinance && canAccount)
         {
             var modes = new[] { "Venue finance", "My Court Accountant balance" };
-            ImGui.Combo("Settle as", ref collectorMode, modes, modes.Length);
+            if (ImGui.Combo("Settle as", ref collectorMode, modes, modes.Length))
+                plugin.ClearCourtStaffSettlementPreview(venue);
         }
         else
         {
@@ -343,28 +469,93 @@ public sealed class CourtTabRenderer(Plugin plugin)
         }
 
         ImGui.TextDisabled(
-            "The accountant or finance user creates and confirms the settlement. " +
-            "Court sales, correction entries, and unpaid salary are netted into one trade.");
+            "Preview first. Creating the settlement only reserves the source rows; " +
+            "Dropbox starts only when you click Execute with Dropbox below.");
 
         if (!plugin.TargetProvider.TryGetCurrentTarget(out var target, out var targetError))
         {
             ImGui.TextDisabled(targetError);
+            plugin.ClearCourtStaffSettlementPreview(venue);
+            previewTargetName = string.Empty;
+            previewTargetWorld = string.Empty;
             return;
         }
 
-        ImGui.TextUnformatted($"Court worker target: {target!.DisplayName}");
-        ImGui.BeginDisabled(busy);
-        if (ImGui.Button("Create settlement for target"))
+        var mode = collectorMode == 0 ? "finance" : "accountant";
+        if (!string.Equals(previewTargetName, target!.CharacterName, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(previewTargetWorld, target.WorldName, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(previewCollectorMode, mode, StringComparison.Ordinal))
         {
-            plugin.CreateCourtStaffSettlement(
+            plugin.ClearCourtStaffSettlementPreview(venue);
+            previewTargetName = target.CharacterName;
+            previewTargetWorld = target.WorldName;
+            previewCollectorMode = mode;
+        }
+
+        ImGui.TextUnformatted($"Court worker target: {target.DisplayName}");
+        ImGui.BeginDisabled(busy);
+        if (ImGui.Button("Preview settlement"))
+        {
+            plugin.PreviewCourtStaffSettlement(
                 venue,
                 new CreateCourtStaffSettlementRequest(
-                    collectorMode == 0 ? "finance" : "accountant",
+                    mode,
                     target.CharacterName,
                     target.WorldName,
                     null));
         }
         ImGui.EndDisabled();
+
+        var preview = plugin.Court.GetSettlementPreview(venue.ProfileId);
+        if (preview is null ||
+            !preview.StaffCharacterName.Equals(target.CharacterName, StringComparison.OrdinalIgnoreCase) ||
+            !preview.StaffWorldName.Equals(target.WorldName, StringComparison.OrdinalIgnoreCase))
+        {
+            ImGui.TextDisabled("No current preview. Preview again after any sale, salary, or cancellation changes.");
+            return;
+        }
+
+        ImGui.Spacing();
+        ImGui.TextUnformatted($"Settlement preview for {preview.StaffDisplayName}");
+        ImGui.BulletText($"Gross gil sales: {preview.GrossSalesGil:N0}");
+        ImGui.BulletText($"Court worker retained share: {preview.CourtRetainedGil:N0}");
+        ImGui.BulletText($"Venue share from Court sales: {preview.VenueShareGil:N0}");
+        ImGui.BulletText($"Unpaid salary: {preview.SalaryGil:N0}");
+        ImGui.BulletText($"Paid-entry salary deductions: {preview.SalaryDeductionGil:N0}");
+        ImGui.BulletText($"Other Court adjustments: {preview.AdjustmentGil:+#,0;-#,0;0}");
+        ImGui.TextDisabled(
+            $"Sources: {preview.SaleCount} sale(s), {preview.TimeEntryCount} salary entry/entries, " +
+            $"{preview.AdjustmentCount} adjustment(s).");
+
+        if (preview.TradeDirection == "staff_to_collector")
+        {
+            ImGui.TextColored(
+                UnavailableColor,
+                $"COURT WORKER OWES VENUE: {preview.TradeAmountGil:N0} gil");
+        }
+        else if (preview.TradeDirection == "collector_to_staff")
+        {
+            ImGui.TextUnformatted($"Venue/accountant pays Court worker: {preview.TradeAmountGil:N0} gil");
+        }
+        else
+        {
+            ImGui.TextColored(AvailableColor, "No gil trade required; accounting entries net to zero.");
+        }
+
+        ImGui.BeginDisabled(busy);
+        if (ImGui.Button("Create settlement from this preview"))
+        {
+            plugin.CreateCourtStaffSettlement(
+                venue,
+                new CreateCourtStaffSettlementRequest(
+                    mode,
+                    target.CharacterName,
+                    target.WorldName,
+                    null));
+        }
+        ImGui.EndDisabled();
+        ImGui.TextDisabled(
+            "The server recalculates and locks the source rows when creating, so the final transaction remains authoritative.");
     }
 
     private void DrawOfferManagement(
@@ -592,10 +783,15 @@ public sealed class CourtTabRenderer(Plugin plugin)
             ImGui.PushID($"court-tx-{transaction.TransactionId}");
             ImGui.TextUnformatted(
                 $"#{transaction.TransactionId} {transaction.TransactionType} — " +
-                $"court {transaction.GrossCourtGil:N0}, " +
-                $"corrections {transaction.AdjustmentGil:+#,0;-#,0;0}, " +
-                $"salary {transaction.SalaryGil:N0}, " +
-                $"trade {transaction.TradeAmountGil:N0} gil — {transaction.Status}");
+                $"gross sales {transaction.GrossSalesGil:N0}, " +
+                $"Court retained {transaction.CourtRetainedGil:N0}, " +
+                $"venue share {transaction.GrossCourtGil:N0}, " +
+                $"adjustments/deductions {transaction.AdjustmentGil:+#,0;-#,0;0}, " +
+                $"salary {transaction.SalaryGil:N0} — {transaction.Status}");
+            if (transaction.TradeDirection == "staff_to_collector" && transaction.TradeAmountGil > 0)
+                ImGui.TextColored(UnavailableColor, $"Court worker owes venue: {transaction.TradeAmountGil:N0} gil");
+            else
+                ImGui.TextDisabled($"Trade: {transaction.TradeAmountGil:N0} gil ({transaction.TradeDirection})");
 
             if (transaction.Status == "pending")
             {
@@ -684,6 +880,14 @@ public sealed class CourtTabRenderer(Plugin plugin)
                 $"({sale.TotalDurationMinutes:N0} min) {sale.OfferName} → " +
                 $"{sale.BuyerCharacterName} @ {sale.BuyerWorldName} by " +
                 $"{sale.SellerDisplayName} — {price} — {status}");
+            if (sale.PriceType == "gil")
+            {
+                ImGui.TextDisabled(
+                    $"Court retained {sale.SellerShareGil:N0} ({sale.SellerPercentage:0.##}%); " +
+                    $"venue share {sale.VenueShareGil:N0} gil.");
+            }
+            if (sale.RefundConfirmedAt is not null)
+                ImGui.TextDisabled($"Full client refund confirmed: {sale.TotalPriceGil:N0} gil.");
 
             var canCancel =
                 (view.Capabilities.CanManage || view.Capabilities.CanFinance) &&
@@ -696,6 +900,10 @@ public sealed class CourtTabRenderer(Plugin plugin)
                 if (ImGui.SmallButton("Cancel"))
                 {
                     pendingCancelSaleId = sale.SaleId;
+                    pendingSaleRequiresRefund = sale.PriceType == "gil" && sale.SettledAt is not null;
+                    pendingRefundGil = sale.TotalPriceGil;
+                    pendingRefundBuyer = $"{sale.BuyerCharacterName} @ {sale.BuyerWorldName}";
+                    refundConfirmed = false;
                     cancelReason = string.Empty;
                     openCancelSalePopup = true;
                 }
@@ -734,14 +942,27 @@ public sealed class CourtTabRenderer(Plugin plugin)
 
         ImGui.TextWrapped(
             $"Cancel Court sale #{pendingCancelSaleId}? A consumed VIP Perk will be released. " +
-            "If the gil was already settled, an audited correction is added to the seller's next Court settlement; " +
-            "the confirmed historical transaction is not rewritten.");
+            "Confirmed historical settlement transactions remain unchanged.");
+        if (pendingSaleRequiresRefund)
+        {
+            ImGui.TextColored(
+                UnavailableColor,
+                $"This settled sale requires a full {pendingRefundGil:N0} gil refund to {pendingRefundBuyer}.");
+            ImGui.Checkbox(
+                "I confirm the client has received the full refund",
+                ref refundConfirmed);
+        }
+
         ImGui.InputText("Reason", ref cancelReason, 255);
-        ImGui.BeginDisabled(busy);
+        ImGui.BeginDisabled(busy || (pendingSaleRequiresRefund && !refundConfirmed));
         if (ImGui.Button("Confirm cancellation"))
         {
-            plugin.CancelCourtSale(venue, pendingCancelSaleId, cancelReason);
-            pendingCancelSaleId = 0;
+            plugin.CancelCourtSale(
+                venue,
+                pendingCancelSaleId,
+                refundConfirmed,
+                cancelReason);
+            ClearPendingSaleCancellation();
             ImGui.CloseCurrentPopup();
         }
         ImGui.EndDisabled();
@@ -749,11 +970,20 @@ public sealed class CourtTabRenderer(Plugin plugin)
         ImGui.SameLine();
         if (ImGui.Button("Keep sale"))
         {
-            pendingCancelSaleId = 0;
+            ClearPendingSaleCancellation();
             ImGui.CloseCurrentPopup();
         }
 
         ImGui.EndPopup();
+    }
+
+    private void ClearPendingSaleCancellation()
+    {
+        pendingCancelSaleId = 0;
+        pendingSaleRequiresRefund = false;
+        refundConfirmed = false;
+        pendingRefundGil = 0;
+        pendingRefundBuyer = string.Empty;
     }
 
     private void DrawTransactionCancellationPopup(
@@ -832,8 +1062,14 @@ public sealed class CourtTabRenderer(Plugin plugin)
         saleQuantity = 1;
         selectedAccountId = 0;
         collectorMode = 0;
+        previewTargetName = string.Empty;
+        previewTargetWorld = string.Empty;
+        previewCollectorMode = string.Empty;
+        loadedCourtKeepPercentage = -1m;
+        courtKeepPercentage = 0f;
+        plugin.ClearCourtStaffSettlementPreview(venue);
         prepayGil = 0;
-        pendingCancelSaleId = 0;
+        ClearPendingSaleCancellation();
         openCancelSalePopup = false;
         pendingCancelTransactionId = 0;
         openCancelTransactionPopup = false;

@@ -1,6 +1,7 @@
 using System;
 using System.Globalization;
 using System.Linq;
+using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using PartyPulse.Api;
 using PartyPulse.Models;
@@ -12,6 +13,12 @@ namespace PartyPulse.Windows;
 public sealed class StaffTabRenderer(Plugin plugin)
 {
     private const string TimeFormat = "yyyy-MM-dd HH:mm";
+    private const string ProxyPayoutPopupName = "Confirm proxy Staff payout###PartyPulseStaffProxyPayout";
+    private const string RepaymentPopupName = "Confirm Staff repayment###PartyPulseStaffRepayment";
+
+    private static readonly Vector4 PositiveBalanceColor = new(1f, 0.72f, 0.25f, 1f);
+    private static readonly Vector4 NegativeBalanceColor = new(0.95f, 0.25f, 0.25f, 1f);
+    private static readonly Vector4 ZeroBalanceColor = new(0.35f, 0.85f, 0.45f, 1f);
 
     private Guid activeProfileId;
     private long selectedOpeningId;
@@ -43,6 +50,14 @@ public sealed class StaffTabRenderer(Plugin plugin)
     private long pendingCancelTransactionId;
     private bool openCancelEntryPopup;
     private bool openCancelTransactionPopup;
+    private bool openProxyPayoutPopup;
+    private bool openRepaymentPopup;
+    private bool proxyTrustConfirmed;
+    private bool proxyDeliveryConfirmed;
+    private bool repaymentAmountConfirmed;
+    private bool repaymentReceivedConfirmed;
+    private string pendingPayoutTargetName = string.Empty;
+    private string pendingPayoutTargetWorld = string.Empty;
     private string cancelReason = string.Empty;
 
     public void Draw(VenueConnectionConfiguration venue)
@@ -105,6 +120,8 @@ public sealed class StaffTabRenderer(Plugin plugin)
 
         DrawTimeEntryCancellationPopup(venue, busy);
         DrawTransactionCancellationPopup(venue, busy);
+        DrawProxyPayoutPopup(venue, view, busy);
+        DrawRepaymentPopup(venue, view, busy);
         ImGui.EndTabItem();
     }
 
@@ -301,15 +318,19 @@ public sealed class StaffTabRenderer(Plugin plugin)
 
         foreach (var member in view.StaffMembers
                      .OrderBy(member => member.ArchivedAt is not null)
+                     .ThenBy(member => member.JobName)
                      .ThenBy(member => member.DisplayName))
         {
             ImGui.PushID($"staff-member-{member.StaffMemberId}");
             ImGui.TextUnformatted(
-                $"{member.DisplayName} — {member.JobName} — " +
+                $"{member.JobName} — {member.DisplayName} — " +
                 $"{member.EffectiveHourlyRateGil:N0}/h + " +
-                $"{member.CustomFixedAmountGil:N0} fixed — " +
-                $"unpaid {member.UnpaidSalaryGil:N0}" +
+                $"{member.CustomFixedAmountGil:N0} fixed" +
                 (member.ArchivedAt is null ? string.Empty : " (archived)"));
+            ImGui.SameLine();
+            ImGui.TextColored(
+                BalanceColor(member.StandingBalanceGil),
+                $"balance {member.StandingBalanceGil:+#,0;-#,0;0} gil");
             ImGui.SameLine();
             if (ImGui.SmallButton("Edit"))
             {
@@ -608,11 +629,20 @@ public sealed class StaffTabRenderer(Plugin plugin)
             var salary = entry.SalaryGil is { } salaryGil
                 ? $"{salaryGil:N0} gil"
                 : entry.Status;
+            var status = entry.Status == "cancelled"
+                ? entry.PaidAt is not null ? "cancelled (was paid)" : "cancelled"
+                : entry.PaidAt is not null ? "paid" : entry.Status;
             ImGui.TextUnformatted(
                 $"{entry.StaffDisplayName}: " +
                 $"{VenueTimeZone.Format(venue, entry.ClockInAt, "g")} – {clockOut} | " +
-                salary +
-                (entry.PaidAt is not null ? " | paid" : string.Empty));
+                $"{salary} | {status}");
+            if (entry.PaidAt is not null && entry.PaidToCharacterName is not null)
+            {
+                ImGui.TextDisabled(
+                    entry.PaidViaProxy
+                        ? $"Paid by proxy to {entry.PaidToCharacterName} @ {entry.PaidToWorldName}"
+                        : $"Paid to {entry.PaidToCharacterName} @ {entry.PaidToWorldName}");
+            }
 
             if (entry.Status == "open")
             {
@@ -697,36 +727,43 @@ public sealed class StaffTabRenderer(Plugin plugin)
         }
 
         var staff = view.StaffMembers
-            .Where(member => member.ArchivedAt is null && member.UnpaidSalaryGil > 0)
-            .OrderBy(member => member.DisplayName)
+            .Where(member => member.ArchivedAt is null && member.StandingBalanceGil != 0)
+            .OrderBy(member => member.JobName)
+            .ThenBy(member => member.DisplayName)
             .ToArray();
         if (staff.Length > 0)
         {
             EnsureSelectedStaff(staff, ref selectedPayoutStaffId);
-            var selected = staff.First(
-                member => member.StaffMemberId == selectedPayoutStaffId);
+            var selected = staff.First(member => member.StaffMemberId == selectedPayoutStaffId);
             if (ImGui.BeginCombo(
-                    "Staff payout",
-                    $"{selected.DisplayName} — {selected.UnpaidSalaryGil:N0} gil"))
+                    "Staff balance",
+                    $"{selected.JobName} — {selected.DisplayName} — {selected.StandingBalanceGil:+#,0;-#,0;0} gil"))
             {
                 foreach (var member in staff)
                 {
                     var isSelected = member.StaffMemberId == selectedPayoutStaffId;
                     if (ImGui.Selectable(
-                            $"{member.DisplayName} — {member.UnpaidSalaryGil:N0} gil",
+                            $"{member.JobName} — {member.DisplayName} — {member.StandingBalanceGil:+#,0;-#,0;0} gil",
                             isSelected))
                     {
                         selectedPayoutStaffId = member.StaffMemberId;
                     }
 
                     if (isSelected)
-                    {
                         ImGui.SetItemDefaultFocus();
-                    }
                 }
 
                 ImGui.EndCombo();
             }
+
+            ImGui.TextColored(
+                BalanceColor(selected.StandingBalanceGil),
+                selected.StandingBalanceGil > 0
+                    ? $"Venue owes {selected.DisplayName}: {selected.StandingBalanceGil:N0} gil"
+                    : $"{selected.DisplayName} owes venue: {-selected.StandingBalanceGil:N0} gil");
+            ImGui.TextDisabled(
+                $"Unpaid salary {selected.UnpaidSalaryGil:N0} − prior paid-entry deductions " +
+                $"{selected.SalaryDeductionGil:N0} = {selected.StandingBalanceGil:+#,0;-#,0;0} gil.");
 
             if (selected.RequiresCourtSettlement)
             {
@@ -737,19 +774,58 @@ public sealed class StaffTabRenderer(Plugin plugin)
                     "Use Court Services to create one combined Court/salary settlement instead.");
             }
 
-            if (plugin.TargetProvider.TryGetCurrentTarget(out var target, out var targetError))
+            if (selected.StandingBalanceGil < 0)
             {
-                ImGui.TextUnformatted($"Verified trade target: {target!.DisplayName}");
+                ImGui.TextDisabled(
+                    "No Dropbox trade is started. Record this only after the staff member has paid the finance person.");
+                ImGui.BeginDisabled(busy || selected.RequiresCourtSettlement);
+                if (ImGui.Button("Record repayment received"))
+                {
+                    repaymentAmountConfirmed = false;
+                    repaymentReceivedConfirmed = false;
+                    openRepaymentPopup = true;
+                }
+                ImGui.EndDisabled();
+            }
+            else if (plugin.TargetProvider.TryGetCurrentTarget(out var target, out var targetError))
+            {
+                ImGui.TextUnformatted($"Trade target: {target!.DisplayName}");
+                var character = view.Characters.FirstOrDefault(value =>
+                    value.CharacterName.Equals(target.CharacterName, StringComparison.OrdinalIgnoreCase) &&
+                    value.WorldName.Equals(target.WorldName, StringComparison.OrdinalIgnoreCase));
+                var linkedToSelected =
+                    character?.StaffMemberId == selected.StaffMemberId ||
+                    (selected.VenueUserId is not null && character?.VenueUserId == selected.VenueUserId);
+                if (!linkedToSelected)
+                {
+                    ImGui.TextColored(
+                        NegativeBalanceColor,
+                        "Target is not linked to the selected Staff listing. This will be a proxy payout.");
+                }
+
                 ImGui.BeginDisabled(busy || selected.RequiresCourtSettlement);
                 if (ImGui.Button("Create payout and execute Dropbox"))
                 {
-                    plugin.CreateStaffPayout(
-                        venue,
-                        new CreateStaffPayoutRequest(
-                            selectedPayoutStaffId,
-                            target.CharacterName,
-                            target.WorldName,
-                            null));
+                    if (linkedToSelected)
+                    {
+                        plugin.CreateStaffPayout(
+                            venue,
+                            new CreateStaffPayoutRequest(
+                                selected.StaffMemberId,
+                                target.CharacterName,
+                                target.WorldName,
+                                false,
+                                false,
+                                null));
+                    }
+                    else
+                    {
+                        pendingPayoutTargetName = target.CharacterName;
+                        pendingPayoutTargetWorld = target.WorldName;
+                        proxyTrustConfirmed = false;
+                        proxyDeliveryConfirmed = false;
+                        openProxyPayoutPopup = true;
+                    }
                 }
                 ImGui.EndDisabled();
             }
@@ -760,14 +836,12 @@ public sealed class StaffTabRenderer(Plugin plugin)
         }
         else
         {
-            ImGui.TextDisabled("No unpaid locked Staff salaries.");
+            ImGui.TextDisabled("All Staff salary balances are zero.");
         }
 
         var court = plugin.Court.GetSnapshot(venue).View;
         if (court is null)
-        {
             return;
-        }
 
         foreach (var transaction in court.Transactions.Where(transaction =>
                      transaction.TransactionType == "staff_payout" &&
@@ -776,16 +850,16 @@ public sealed class StaffTabRenderer(Plugin plugin)
             ImGui.PushID($"staff-payout-{transaction.TransactionId}");
             ImGui.TextUnformatted(
                 $"Pending payout #{transaction.TransactionId}: " +
-                $"{transaction.SalaryGil:N0} gil to {transaction.StaffDisplayName}");
+                $"salary {transaction.SalaryGil:N0}, deductions {transaction.AdjustmentGil:N0}, " +
+                $"trade {transaction.TradeAmountGil:N0} gil to {transaction.StaffDisplayName}" +
+                (transaction.PayoutViaProxy ? " (proxy)" : string.Empty));
 
             if (transaction.CanExecuteTrade)
             {
                 ImGui.SameLine();
                 ImGui.BeginDisabled(busy);
                 if (ImGui.SmallButton("Execute with Dropbox"))
-                {
                     plugin.ExecuteCourtTransactionTrade(venue, transaction);
-                }
                 ImGui.EndDisabled();
             }
 
@@ -794,9 +868,7 @@ public sealed class StaffTabRenderer(Plugin plugin)
                 ImGui.SameLine();
                 ImGui.BeginDisabled(busy);
                 if (ImGui.SmallButton("Confirm Trade Success"))
-                {
                     plugin.ConfirmCourtTransaction(venue, transaction.TransactionId);
-                }
                 ImGui.EndDisabled();
             }
 
@@ -818,11 +890,150 @@ public sealed class StaffTabRenderer(Plugin plugin)
 
         if (openCancelTransactionPopup)
         {
-            ImGui.OpenPopup(
-                "Cancel Staff payout###PartyPulseStaffCancelPayout");
+            ImGui.OpenPopup("Cancel Staff payout###PartyPulseStaffCancelPayout");
             openCancelTransactionPopup = false;
         }
+        if (openProxyPayoutPopup)
+        {
+            ImGui.OpenPopup(ProxyPayoutPopupName);
+            openProxyPayoutPopup = false;
+        }
+        if (openRepaymentPopup)
+        {
+            ImGui.OpenPopup(RepaymentPopupName);
+            openRepaymentPopup = false;
+        }
     }
+
+    private void DrawProxyPayoutPopup(
+        VenueConnectionConfiguration venue,
+        StaffManagementViewResponse view,
+        bool busy)
+    {
+        if (!ImGui.BeginPopupModal(ProxyPayoutPopupName, ImGuiWindowFlags.AlwaysAutoResize))
+            return;
+
+        var selected = view.StaffMembers.FirstOrDefault(value =>
+            value.StaffMemberId == selectedPayoutStaffId);
+        if (selected is null)
+        {
+            ImGui.TextDisabled("The selected Staff listing is no longer available.");
+        }
+        else
+        {
+            ImGui.TextWrapped(
+                $"Pay {selected.StandingBalanceGil:N0} gil for {selected.DisplayName} to " +
+                $"{pendingPayoutTargetName} @ {pendingPayoutTargetWorld} as a proxy?");
+            ImGui.Checkbox(
+                "I trust this character to receive the gil for the selected staff member",
+                ref proxyTrustConfirmed);
+            ImGui.Checkbox(
+                "I understand the staff record will identify this character as the payment proxy",
+                ref proxyDeliveryConfirmed);
+
+            ImGui.BeginDisabled(
+                busy ||
+                selected.RequiresCourtSettlement ||
+                !proxyTrustConfirmed ||
+                !proxyDeliveryConfirmed);
+            if (ImGui.Button("Confirm proxy payout"))
+            {
+                plugin.CreateStaffPayout(
+                    venue,
+                    new CreateStaffPayoutRequest(
+                        selected.StaffMemberId,
+                        pendingPayoutTargetName,
+                        pendingPayoutTargetWorld,
+                        true,
+                        false,
+                        "Trusted proxy payout."));
+                ClearPayoutConfirmation();
+                ImGui.CloseCurrentPopup();
+            }
+            ImGui.EndDisabled();
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Cancel proxy payout"))
+        {
+            ClearPayoutConfirmation();
+            ImGui.CloseCurrentPopup();
+        }
+        ImGui.EndPopup();
+    }
+
+    private void DrawRepaymentPopup(
+        VenueConnectionConfiguration venue,
+        StaffManagementViewResponse view,
+        bool busy)
+    {
+        if (!ImGui.BeginPopupModal(RepaymentPopupName, ImGuiWindowFlags.AlwaysAutoResize))
+            return;
+
+        var selected = view.StaffMembers.FirstOrDefault(value =>
+            value.StaffMemberId == selectedPayoutStaffId);
+        if (selected is null || selected.StandingBalanceGil >= 0)
+        {
+            ImGui.TextDisabled("The selected negative Staff balance is no longer available.");
+        }
+        else
+        {
+            var repayment = -selected.StandingBalanceGil;
+            ImGui.TextColored(
+                NegativeBalanceColor,
+                $"Record {repayment:N0} gil received from {selected.DisplayName}?");
+            ImGui.Checkbox(
+                $"I verified the repayment amount is exactly {repayment:N0} gil",
+                ref repaymentAmountConfirmed);
+            ImGui.Checkbox(
+                "I confirm a finance person has received the gil",
+                ref repaymentReceivedConfirmed);
+
+            ImGui.BeginDisabled(
+                busy ||
+                selected.RequiresCourtSettlement ||
+                !repaymentAmountConfirmed ||
+                !repaymentReceivedConfirmed);
+            if (ImGui.Button("Confirm repayment received"))
+            {
+                plugin.CreateStaffPayout(
+                    venue,
+                    new CreateStaffPayoutRequest(
+                        selected.StaffMemberId,
+                        null,
+                        null,
+                        false,
+                        true,
+                        "Negative Staff balance received by finance."));
+                ClearPayoutConfirmation();
+                ImGui.CloseCurrentPopup();
+            }
+            ImGui.EndDisabled();
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Do not record repayment"))
+        {
+            ClearPayoutConfirmation();
+            ImGui.CloseCurrentPopup();
+        }
+        ImGui.EndPopup();
+    }
+
+    private void ClearPayoutConfirmation()
+    {
+        openProxyPayoutPopup = false;
+        openRepaymentPopup = false;
+        proxyTrustConfirmed = false;
+        proxyDeliveryConfirmed = false;
+        repaymentAmountConfirmed = false;
+        repaymentReceivedConfirmed = false;
+        pendingPayoutTargetName = string.Empty;
+        pendingPayoutTargetWorld = string.Empty;
+    }
+
+    private static Vector4 BalanceColor(long balance) =>
+        balance > 0 ? PositiveBalanceColor : balance < 0 ? NegativeBalanceColor : ZeroBalanceColor;
 
     private void DrawTimeEntryCancellationPopup(
         VenueConnectionConfiguration venue,
@@ -837,8 +1048,8 @@ public sealed class StaffTabRenderer(Plugin plugin)
 
         ImGui.TextWrapped(
             $"Cancel time entry #{pendingCancelEntryId}? Locked and paid entries remain in the audit history. " +
-            "If salary was already paid, an audited correction is added to the staff member's next Court settlement, " +
-            "allowing a corrected replacement entry without silently rewriting the confirmed payout.");
+            "If salary was already paid, that amount becomes a deduction from the staff member's next salary settlement. " +
+            "A corrected replacement entry can then be recorded without rewriting the confirmed payout.");
         ImGui.InputText("Reason", ref cancelReason, 255);
         ImGui.BeginDisabled(busy);
         if (ImGui.Button("Confirm cancellation"))
@@ -1021,6 +1232,7 @@ public sealed class StaffTabRenderer(Plugin plugin)
         pendingCancelTransactionId = 0;
         openCancelEntryPopup = false;
         openCancelTransactionPopup = false;
+        ClearPayoutConfirmation();
         cancelReason = string.Empty;
     }
 }
