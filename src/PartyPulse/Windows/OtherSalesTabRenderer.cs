@@ -53,12 +53,13 @@ public sealed class OtherSalesTabRenderer(Plugin plugin)
 
     public void Draw(VenueConnectionConfiguration venue)
     {
-        if (!ImGui.BeginTabItem("Other Sales")) return;
 
         ResetForVenue(venue);
         plugin.EnsureOtherSalesLoaded(venue);
         var snapshot = plugin.OtherSales.GetSnapshot(venue);
         var busy = plugin.OtherSales.IsBusy(venue.ProfileId) || plugin.Finance.IsBusy(venue.ProfileId);
+
+        PartyPulseUi.PageHeader("Other Sales", "Sell configurable venue items, track seller shares, and settle collected venue revenue.");
 
         ImGui.BeginDisabled(busy);
         if (ImGui.Button("Refresh Other Sales")) plugin.RefreshOtherSales(venue);
@@ -67,7 +68,6 @@ public sealed class OtherSalesTabRenderer(Plugin plugin)
         if (snapshot.Status != OtherSalesManagementStatus.Ready || snapshot.View is null)
         {
             ImGui.TextWrapped(snapshot.Message);
-            ImGui.EndTabItem();
             return;
         }
 
@@ -95,7 +95,6 @@ public sealed class OtherSalesTabRenderer(Plugin plugin)
         DrawSaleConfirmation(venue, view);
         DrawPaymentConfirmation(venue);
         DrawCancelConfirmation(venue);
-        ImGui.EndTabItem();
     }
 
     private void DrawSeller(VenueConnectionConfiguration venue, OtherSalesManagementViewResponse view, bool busy)

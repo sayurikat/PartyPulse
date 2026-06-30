@@ -21,23 +21,10 @@ public sealed class FinanceTabRenderer(Plugin plugin)
     private long pendingResponseAmountGil;
     private string pendingResponseSettlementType = string.Empty;
 
-    public bool Draw(
+    public void Draw(
         VenueConnectionConfiguration venue,
-        bool requestSelection,
         long? requestedSettlementId)
     {
-        var summary = plugin.Notifications.GetSummary(venue.ProfileId);
-        var pendingCount = summary?.PendingSettlementCount ??
-                           plugin.Finance.GetSnapshot(venue).View?.VenuePendingCount ?? 0;
-        var label = pendingCount > 0
-            ? $"Finances ({pendingCount})###PartyPulseFinances"
-            : "Finances###PartyPulseFinances";
-        var flags = requestSelection ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None;
-        if (!ImGui.BeginTabItem(label, flags))
-        {
-            return false;
-        }
-
         if (activeProfileId != venue.ProfileId)
         {
             activeProfileId = venue.ProfileId;
@@ -48,6 +35,8 @@ public sealed class FinanceTabRenderer(Plugin plugin)
         {
             selectedSettlementId = requestedId;
         }
+
+        PartyPulseUi.PageHeader("Finance", "Review personal balances and resolve venue settlement transactions across all revenue streams.");
 
         plugin.EnsureFinanceLoaded(venue);
         var snapshot = plugin.Finance.GetSnapshot(venue);
@@ -64,8 +53,7 @@ public sealed class FinanceTabRenderer(Plugin plugin)
         {
             ImGui.Spacing();
             ImGui.TextWrapped(snapshot.Message);
-            ImGui.EndTabItem();
-            return true;
+            return;
         }
 
         var view = snapshot.View;
@@ -105,8 +93,6 @@ public sealed class FinanceTabRenderer(Plugin plugin)
         DrawSelectedSettlement(venue, view, busy);
         DrawResponseConfirmation(venue);
 
-        ImGui.EndTabItem();
-        return true;
     }
 
     private void DrawSettlementList(VenueConnectionConfiguration venue, FinanceViewResponse view)

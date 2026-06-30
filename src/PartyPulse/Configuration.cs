@@ -14,11 +14,13 @@ public sealed class Configuration : IPluginConfiguration
 
     private const string LegacyAzureApiBaseUrl = "https://partypulse.azurewebsites.net";
 
-    public int Version { get; set; } = 6;
+    public int Version { get; set; } = 7;
 
     public bool IsConfigWindowMovable { get; set; } = true;
 
     public bool AutoConnect { get; set; } = true;
+
+    public bool NavigationCollapsed { get; set; }
 
     public int PartyFinderRefreshMinutes { get; set; } = 60;
 
@@ -188,9 +190,9 @@ public sealed class Configuration : IPluginConfiguration
             }
         }
 
-        if (Version < 6)
+        if (Version < 7)
         {
-            Version = 6;
+            Version = 7;
             changed = true;
         }
 

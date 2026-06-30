@@ -66,11 +66,6 @@ public sealed class VipTabRenderer(Plugin plugin)
 
     public void Draw(VenueConnectionConfiguration venue)
     {
-        if (!ImGui.BeginTabItem("VIP"))
-        {
-            return;
-        }
-
         ResetForVenueChange(venue);
         plugin.EnsureVipLoaded(venue);
         plugin.EnsureVipPerksLoaded(venue);
@@ -79,6 +74,8 @@ public sealed class VipTabRenderer(Plugin plugin)
 
         var snapshot = plugin.Vip.GetSnapshot(venue);
         var isBusy = plugin.Vip.IsBusy(venue.ProfileId);
+
+        PartyPulseUi.PageHeader("VIP", "Manage VIP players, subscriptions, arrivals, packages, perks, and related macros.");
 
         ImGui.BeginDisabled(isBusy);
         if (ImGui.Button("Refresh VIP data"))
@@ -102,7 +99,6 @@ public sealed class VipTabRenderer(Plugin plugin)
             ImGui.Spacing();
             ImGui.TextWrapped(snapshot.Message);
             DrawArrivalAdministration(venue);
-            ImGui.EndTabItem();
             return;
         }
 
@@ -141,7 +137,6 @@ public sealed class VipTabRenderer(Plugin plugin)
         DrawRedeemPerkPopup(venue);
         DrawUndoPerkPopup(venue);
 
-        ImGui.EndTabItem();
     }
 
     private void DrawVipTimedMacro(VenueConnectionConfiguration venue)

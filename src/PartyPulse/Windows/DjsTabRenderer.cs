@@ -33,8 +33,7 @@ public sealed class DjsTabRenderer(Plugin plugin)
         if (view is not null && !view.Capabilities.CanManageDirectory)
             return;
 
-        if (!ImGui.BeginTabItem("DJs"))
-            return;
+        PartyPulseUi.PageHeader("DJs", "Manage the venue DJ directory, linked characters, notes, and default hourly pricing.");
 
         var isBusy = plugin.Djs.IsBusy(venue.ProfileId);
         ImGui.BeginDisabled(isBusy);
@@ -46,7 +45,6 @@ public sealed class DjsTabRenderer(Plugin plugin)
         {
             ImGui.Spacing();
             ImGui.TextWrapped(snapshot.Message);
-            ImGui.EndTabItem();
             return;
         }
 
@@ -65,7 +63,6 @@ public sealed class DjsTabRenderer(Plugin plugin)
         ImGui.Spacing();
         DrawDirectory(venue, view, isBusy);
         DrawArchivePopup(venue, isBusy);
-        ImGui.EndTabItem();
     }
 
     private void DrawVenueSettings(

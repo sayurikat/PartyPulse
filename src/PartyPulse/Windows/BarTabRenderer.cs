@@ -50,14 +50,14 @@ public sealed class BarTabRenderer(Plugin plugin)
     public void Draw(VenueConnectionConfiguration venue)
     {
         ResetForVenue(venue);
-        if (!ImGui.BeginTabItem("Bar"))
-            return;
 
         plugin.EnsureBarLoaded(venue);
         plugin.EnsureTimedMacrosLoaded(venue);
         var snapshot = plugin.Bar.GetSnapshot(venue);
         var view = snapshot.View;
         var busy = plugin.Bar.IsBusy(venue.ProfileId) || plugin.IsGameMacroBusy;
+
+        PartyPulseUi.PageHeader("Bar", "Run buyouts and Gamba Shot, manage bar products, and review settlement-ready sales.");
 
         ImGui.BeginDisabled(plugin.Bar.IsBusy(venue.ProfileId));
         if (ImGui.Button("Refresh bar"))
@@ -68,7 +68,6 @@ public sealed class BarTabRenderer(Plugin plugin)
         {
             ImGui.Spacing();
             ImGui.TextWrapped(snapshot.Message);
-            ImGui.EndTabItem();
             return;
         }
 
@@ -88,7 +87,6 @@ public sealed class BarTabRenderer(Plugin plugin)
         ImGui.Separator();
         DrawHistory(venue, view, busy);
         DrawPopups(venue, view, busy);
-        ImGui.EndTabItem();
     }
 
     private void DrawActiveBuyout(VenueConnectionConfiguration venue, BarManagementViewResponse view, bool busy)

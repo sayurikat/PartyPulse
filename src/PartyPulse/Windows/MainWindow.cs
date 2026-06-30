@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
@@ -15,6 +17,56 @@ namespace PartyPulse.Windows;
 
 public sealed class MainWindow : Window, IDisposable
 {
+    private enum MainPage
+    {
+        Overview,
+        Openings,
+        Djs,
+        Greeter,
+        Vip,
+        Photoshoots,
+        Bar,
+        Court,
+        OtherSales,
+        OtherGames,
+        Purchases,
+        Staff,
+        TimedMacros,
+        Shoutrunner,
+        PartyFinder,
+        Finance,
+        Users,
+        MyAccount,
+    }
+
+    private sealed record NavigationItem(
+        MainPage Page,
+        string Group,
+        string Label,
+        string Abbreviation);
+
+    private static readonly NavigationItem[] NavigationItems =
+    [
+        new(MainPage.Overview, "GENERAL", "Overview", "OV"),
+        new(MainPage.Openings, "VENUE", "Openings", "OP"),
+        new(MainPage.Djs, "VENUE", "DJs", "DJ"),
+        new(MainPage.Greeter, "GUESTS & SALES", "Greeter", "GR"),
+        new(MainPage.Vip, "GUESTS & SALES", "VIP", "VIP"),
+        new(MainPage.Photoshoots, "GUESTS & SALES", "Photoshoots", "PH"),
+        new(MainPage.Bar, "GUESTS & SALES", "Bar", "BAR"),
+        new(MainPage.Court, "GUESTS & SALES", "Court Services", "CRT"),
+        new(MainPage.OtherSales, "GUESTS & SALES", "Other Sales", "SAL"),
+        new(MainPage.OtherGames, "GUESTS & SALES", "Other Games", "GM"),
+        new(MainPage.Purchases, "GUESTS & SALES", "Purchases", "PUR"),
+        new(MainPage.Staff, "OPERATIONS", "Staff", "STF"),
+        new(MainPage.TimedMacros, "OPERATIONS", "Timed Macros", "TMR"),
+        new(MainPage.Shoutrunner, "OPERATIONS", "Shoutrunner", "SHR"),
+        new(MainPage.PartyFinder, "OPERATIONS", "Party Finder", "PF"),
+        new(MainPage.Finance, "ADMINISTRATION", "Finance", "FIN"),
+        new(MainPage.Users, "ADMINISTRATION", "Users", "USR"),
+        new(MainPage.MyAccount, "ADMINISTRATION", "My Account", "ME"),
+    ];
+
     private readonly Plugin plugin;
     private readonly VipTabRenderer vipTab;
     private readonly PhotoshootsTabRenderer photoshootsTab;
@@ -31,7 +83,9 @@ public sealed class MainWindow : Window, IDisposable
     private readonly GreeterTabRenderer greeterTab;
     private readonly ShoutrunnerTabRenderer shoutrunnerTab;
     private readonly PartyFinderTabRenderer partyFinderTab;
-    private bool requestSelectFinanceTab;
+    private readonly Dictionary<(Guid ProfileId, MainPage Page), DateTimeOffset> activePageRefreshes = new();
+
+    private MainPage selectedPage = MainPage.Overview;
     private long? requestedFinanceSettlementId;
     private Guid addUserProfileId;
     private string addUserDisplayName = string.Empty;
@@ -67,7 +121,7 @@ public sealed class MainWindow : Window, IDisposable
 
         SizeConstraints = new WindowSizeConstraints
         {
-            MinimumSize = new Vector2(720, 500),
+            MinimumSize = new Vector2(820, 560),
             MaximumSize = new Vector2(float.MaxValue, float.MaxValue),
         };
     }
@@ -84,7 +138,7 @@ public sealed class MainWindow : Window, IDisposable
         plugin.Configuration.SelectedVenueProfileId = venue.ProfileId;
         plugin.Configuration.Save();
         requestedFinanceSettlementId = settlementId;
-        requestSelectFinanceTab = true;
+        selectedPage = MainPage.Finance;
         IsOpen = true;
     }
 
@@ -94,13 +148,127 @@ public sealed class MainWindow : Window, IDisposable
 
     public override void Draw()
     {
-        var selectedVenue = DrawHeader();
-        ImGui.Separator();
-        DrawFeatureTabs(selectedVenue);
+        var selectedVenue = plugin.Configuration.GetSelectedVenue();
+        var authenticated = selectedVenue?.IsRegistered == true &&
+                            CanDrawAuthenticatedFeatures(plugin.Authentication.GetSnapshot(selectedVenue));
+
+        EnsureSelectedPageVisible(selectedVenue, authenticated);
+
+        var sidebarWidth = (plugin.Configuration.NavigationCollapsed ? 62f : 196f) * ImGuiHelpers.GlobalScale;
+        if (ImGui.BeginChild("PartyPulseSidebar", new Vector2(sidebarWidth, 0), true))
+        {
+            DrawSidebar(selectedVenue, authenticated, sidebarWidth);
+        }
+        ImGui.EndChild();
+
+        ImGui.SameLine();
+        if (ImGui.BeginChild("PartyPulseContent", Vector2.Zero, false))
+        {
+            selectedVenue = DrawCompactHeader();
+            authenticated = selectedVenue?.IsRegistered == true &&
+                            CanDrawAuthenticatedFeatures(plugin.Authentication.GetSnapshot(selectedVenue));
+            EnsureSelectedPageVisible(selectedVenue, authenticated);
+            DrawSelectedPage(selectedVenue, authenticated);
+        }
+        ImGui.EndChild();
+
         DrawConfirmationPopups();
     }
 
-    private VenueConnectionConfiguration? DrawHeader()
+    private void DrawSidebar(
+        VenueConnectionConfiguration? selectedVenue,
+        bool authenticated,
+        float sidebarWidth)
+    {
+        DrawLogo(sidebarWidth, plugin.Configuration.NavigationCollapsed);
+
+        if (!plugin.Configuration.NavigationCollapsed)
+        {
+            var venueLabel = selectedVenue?.VenueName;
+            ImGui.PushTextWrapPos(ImGui.GetCursorPosX() + sidebarWidth - (20f * ImGuiHelpers.GlobalScale));
+            ImGui.TextUnformatted(string.IsNullOrWhiteSpace(venueLabel) ? "Party Pulse" : venueLabel);
+            ImGui.PopTextWrapPos();
+            ImGui.Spacing();
+        }
+
+        string? currentGroup = null;
+        foreach (var item in NavigationItems)
+        {
+            if (!IsPageVisible(item.Page, selectedVenue, authenticated))
+            {
+                continue;
+            }
+
+            if (!string.Equals(currentGroup, item.Group, StringComparison.Ordinal))
+            {
+                currentGroup = item.Group;
+                ImGui.Spacing();
+                if (plugin.Configuration.NavigationCollapsed)
+                {
+                    ImGui.Separator();
+                }
+                else
+                {
+                    ImGui.TextDisabled(currentGroup);
+                }
+            }
+
+            var label = plugin.Configuration.NavigationCollapsed
+                ? item.Abbreviation
+                : item.Label;
+            if (item.Page == MainPage.Finance)
+            {
+                var pending = plugin.Notifications.GetSummary(selectedVenue?.ProfileId ?? Guid.Empty)?.PendingSettlementCount ??
+                              (selectedVenue is null ? 0 : plugin.Finance.GetSnapshot(selectedVenue).View?.VenuePendingCount ?? 0);
+                if (pending > 0)
+                {
+                    label += plugin.Configuration.NavigationCollapsed ? $" {pending}" : $" ({pending})";
+                }
+            }
+
+            var size = new Vector2(-1, 30f * ImGuiHelpers.GlobalScale);
+            if (PartyPulseUi.NavigationButton(label, $"Nav{item.Page}", selectedPage == item.Page, size))
+            {
+                selectedPage = item.Page;
+            }
+
+            if (plugin.Configuration.NavigationCollapsed && ImGui.IsItemHovered())
+            {
+                ImGui.SetTooltip(item.Label);
+            }
+        }
+
+        var toggleHeight = 34f * ImGuiHelpers.GlobalScale;
+        var available = ImGui.GetContentRegionAvail();
+        if (available.Y > toggleHeight)
+        {
+            ImGui.SetCursorPosY(ImGui.GetCursorPosY() + available.Y - toggleHeight);
+        }
+
+        var collapseLabel = plugin.Configuration.NavigationCollapsed ? ">>" : "<<  Collapse";
+        if (ImGui.Button($"{collapseLabel}##PartyPulseToggleNavigation", new Vector2(-1, 0)))
+        {
+            plugin.Configuration.NavigationCollapsed = !plugin.Configuration.NavigationCollapsed;
+            plugin.Configuration.Save();
+        }
+    }
+
+    private static void DrawLogo(float sidebarWidth, bool collapsed)
+    {
+        var size = collapsed
+            ? 40f * ImGuiHelpers.GlobalScale
+            : 88f * ImGuiHelpers.GlobalScale;
+        var path = Path.Combine(
+            Plugin.PluginInterface.AssemblyLocation.DirectoryName ?? string.Empty,
+            "Assets",
+            "icon.png");
+        var texture = Plugin.TextureProvider.GetFromFileAbsolute(path).GetWrapOrEmpty();
+        ImGui.SetCursorPosX(Math.Max(ImGui.GetCursorPosX(), (sidebarWidth - size) / 2f));
+        ImGui.Image(texture.Handle, new Vector2(size, size));
+        ImGui.Spacing();
+    }
+
+    private VenueConnectionConfiguration? DrawCompactHeader()
     {
         var selectedVenue = DrawVenueSelector();
 
@@ -113,28 +281,26 @@ public sealed class MainWindow : Window, IDisposable
         if (selectedVenue is null)
         {
             ImGui.Spacing();
-            ImGui.TextWrapped("No venue is saved. Open Settings or use /pulse addvenue PULSE-XXXXXX.");
+            PartyPulseUi.InlineStatus("No venue selected", PartyPulseUi.Warning);
+            ImGui.Separator();
             return null;
         }
 
         if (selectedVenue.IsRegistered)
         {
+            var auth = plugin.Authentication.GetSnapshot(selectedVenue);
             ImGui.SameLine();
-            if (ImGui.Button("Authenticate"))
+            DrawConnectionStatus(auth);
+
+            ImGui.SameLine();
+            var authenticationAction = auth.Status == AuthenticationStatus.Connected
+                ? "Reconnect"
+                : "Authenticate";
+            if (ImGui.SmallButton(authenticationAction))
             {
                 plugin.ConnectVenue(selectedVenue);
             }
-        }
 
-        ImGui.Spacing();
-        ImGui.TextUnformatted(selectedVenue.VenueName.Length > 0 ? selectedVenue.VenueName : selectedVenue.DisplayLabel);
-        ImGui.TextWrapped(selectedVenue.AddressDisplay);
-        ImGui.TextDisabled(selectedVenue.VenueCode);
-
-        if (selectedVenue.IsRegistered)
-        {
-            var auth = plugin.Authentication.GetSnapshot(selectedVenue);
-            DrawConnectionStatus(selectedVenue, auth);
             if (auth.Status == AuthenticationStatus.Connected)
             {
                 plugin.EnsureVenueUsersLoaded(selectedVenue);
@@ -143,8 +309,12 @@ public sealed class MainWindow : Window, IDisposable
             else if (auth.Status == AuthenticationStatus.CharacterNotLinked &&
                      plugin.IdentityProvider.TryGetCurrent(out var identity, out _))
             {
-                ImGui.TextWrapped($"{identity!.DisplayName} is not linked to this venue user.");
-                if (ImGui.Button("Link current character"))
+                ImGui.Spacing();
+                ImGui.TextColored(
+                    PartyPulseUi.Warning,
+                    $"{identity!.DisplayName} is not linked to this venue user.");
+                ImGui.SameLine();
+                if (ImGui.SmallButton("Link current character"))
                 {
                     pendingLinkVenue = selectedVenue;
                     ImGui.OpenPopup("Link current character###PartyPulseLinkCurrentCharacter");
@@ -153,9 +323,13 @@ public sealed class MainWindow : Window, IDisposable
         }
         else
         {
-            ImGui.TextDisabled("Visitor mode — public venue information only.");
+            ImGui.SameLine();
+            PartyPulseUi.InlineStatus("Visitor mode", PartyPulseUi.Muted);
         }
 
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
         return selectedVenue;
     }
 
@@ -165,7 +339,7 @@ public sealed class MainWindow : Window, IDisposable
         var selected = configuration.GetSelectedVenue();
         var preview = selected?.DisplayLabel ?? "Select venue";
 
-        ImGui.SetNextItemWidth(260 * ImGuiHelpers.GlobalScale);
+        ImGui.SetNextItemWidth(Math.Min(360f * ImGuiHelpers.GlobalScale, ImGui.GetContentRegionAvail().X - (90f * ImGuiHelpers.GlobalScale)));
         if (ImGui.BeginCombo("##VenueSelector", preview))
         {
             foreach (var venue in configuration.VenueConnections)
@@ -176,6 +350,7 @@ public sealed class MainWindow : Window, IDisposable
                     configuration.SelectedVenueProfileId = venue.ProfileId;
                     configuration.Save();
                     selected = venue;
+                    selectedPage = MainPage.Overview;
                 }
 
                 if (isSelected)
@@ -190,80 +365,235 @@ public sealed class MainWindow : Window, IDisposable
         return selected;
     }
 
-    private static void DrawConnectionStatus(
-        VenueConnectionConfiguration venue,
-        AuthenticationSnapshot snapshot)
+    private static void DrawConnectionStatus(AuthenticationSnapshot snapshot)
     {
-        ImGui.Spacing();
-
-        var color = snapshot.Status switch
+        var (label, color) = snapshot.Status switch
         {
-            AuthenticationStatus.Connected => new Vector4(0.35f, 0.85f, 0.45f, 1f),
-            AuthenticationStatus.Connecting => new Vector4(0.35f, 0.7f, 1f, 1f),
-            AuthenticationStatus.WaitingForPlayer => new Vector4(1f, 0.8f, 0.35f, 1f),
-            AuthenticationStatus.CharacterNotLinked => new Vector4(1f, 0.8f, 0.35f, 1f),
-            AuthenticationStatus.Failed => new Vector4(1f, 0.4f, 0.4f, 1f),
-            AuthenticationStatus.Expired => new Vector4(1f, 0.65f, 0.3f, 1f),
-            _ => new Vector4(0.65f, 0.65f, 0.65f, 1f),
+            AuthenticationStatus.Connected => ("Connected", PartyPulseUi.Success),
+            AuthenticationStatus.Connecting => ("Connecting", PartyPulseUi.Info),
+            AuthenticationStatus.WaitingForPlayer => ("Waiting for player", PartyPulseUi.Warning),
+            AuthenticationStatus.CharacterNotLinked => ("Character not linked", PartyPulseUi.Warning),
+            AuthenticationStatus.Failed => ("Connection failed", PartyPulseUi.Danger),
+            AuthenticationStatus.Expired => ("Session expired", PartyPulseUi.Warning),
+            _ => ("Disconnected", PartyPulseUi.Muted),
         };
 
-        ImGui.TextColored(color, snapshot.Message);
-
-        if (snapshot.AccessTokenExpiresAt is { } expiresAt)
+        PartyPulseUi.InlineStatus(label, color);
+        if (ImGui.IsItemHovered() && !string.IsNullOrWhiteSpace(snapshot.Message))
         {
-            ImGui.SameLine();
-            ImGui.TextDisabled($"Token expires {VenueTimeZone.Format(venue, expiresAt, "t")}");
+            ImGui.SetTooltip(snapshot.Message);
         }
     }
 
-    private void DrawFeatureTabs(VenueConnectionConfiguration? selectedVenue)
+    private void DrawSelectedPage(
+        VenueConnectionConfiguration? selectedVenue,
+        bool authenticated)
     {
-        if (!ImGui.BeginTabBar("PartyPulseFeatureTabs"))
+        if (selectedPage == MainPage.Overview)
+        {
+            DrawOverviewPage(selectedVenue);
+            return;
+        }
+
+        if (selectedVenue is null || !authenticated)
+        {
+            PartyPulseUi.PageHeader("Venue access required", "Authenticate a registered venue account to use this page.");
+            return;
+        }
+
+        RunActivePageAutoRefresh(selectedVenue, selectedPage);
+
+        switch (selectedPage)
+        {
+            case MainPage.Openings:
+                venueOpeningsTab.Draw(selectedVenue);
+                break;
+            case MainPage.Djs:
+                djsTab.Draw(selectedVenue);
+                break;
+            case MainPage.Greeter:
+                greeterTab.Draw(selectedVenue);
+                break;
+            case MainPage.Vip:
+                vipTab.Draw(selectedVenue);
+                break;
+            case MainPage.Photoshoots:
+                photoshootsTab.Draw(selectedVenue);
+                break;
+            case MainPage.Bar:
+                barTab.Draw(selectedVenue);
+                break;
+            case MainPage.Court:
+                courtTab.Draw(selectedVenue);
+                break;
+            case MainPage.OtherSales:
+                otherSalesTab.Draw(selectedVenue);
+                break;
+            case MainPage.OtherGames:
+                otherGamesTab.Draw(selectedVenue);
+                break;
+            case MainPage.Purchases:
+                purchasesTab.Draw(selectedVenue);
+                break;
+            case MainPage.Staff:
+                staffTab.Draw(selectedVenue);
+                break;
+            case MainPage.TimedMacros:
+                timedMacrosTab.Draw(selectedVenue);
+                break;
+            case MainPage.Shoutrunner:
+                shoutrunnerTab.Draw(selectedVenue);
+                break;
+            case MainPage.PartyFinder:
+                partyFinderTab.Draw(selectedVenue);
+                break;
+            case MainPage.Finance:
+                financeTab.Draw(selectedVenue, requestedFinanceSettlementId);
+                requestedFinanceSettlementId = null;
+                break;
+            case MainPage.Users:
+            {
+                var snapshot = plugin.UserManagement.GetSnapshot(selectedVenue);
+                if (snapshot.View?.Capabilities.CanView == true)
+                {
+                    DrawUsersPage(selectedVenue, snapshot);
+                }
+                else
+                {
+                    PartyPulseUi.PageHeader("Users", snapshot.Message);
+                }
+                break;
+            }
+            case MainPage.MyAccount:
+                DrawMyAccountPage(selectedVenue);
+                break;
+        }
+    }
+
+    private void RunActivePageAutoRefresh(
+        VenueConnectionConfiguration venue,
+        MainPage page)
+    {
+        var interval = page switch
+        {
+            MainPage.TimedMacros => TimeSpan.FromSeconds(10),
+            MainPage.Shoutrunner or MainPage.PartyFinder or MainPage.Greeter or MainPage.Staff => TimeSpan.FromSeconds(15),
+            MainPage.Djs => TimeSpan.FromMinutes(1),
+            MainPage.Users or MainPage.MyAccount => TimeSpan.FromMinutes(2),
+            _ => TimeSpan.FromSeconds(30),
+        };
+
+        var key = (venue.ProfileId, page);
+        var now = DateTimeOffset.UtcNow;
+        if (!activePageRefreshes.TryGetValue(key, out var lastRefresh))
+        {
+            activePageRefreshes[key] = now;
+            return;
+        }
+
+        if (now - lastRefresh < interval)
         {
             return;
         }
 
-        DrawOverviewTab(selectedVenue);
-
-        if (selectedVenue?.IsRegistered == true &&
-            CanDrawAuthenticatedFeatures(plugin.Authentication.GetSnapshot(selectedVenue)))
+        activePageRefreshes[key] = now;
+        switch (page)
         {
-            DrawMyAccountTab(selectedVenue);
+            case MainPage.Openings:
+                plugin.RefreshVenueOpenings(venue);
+                plugin.RefreshDjs(venue);
+                plugin.RefreshOpeningPublications(venue);
+                break;
+            case MainPage.Djs:
+                plugin.RefreshDjs(venue);
+                break;
+            case MainPage.Greeter:
+                plugin.RefreshGreeter(venue);
+                break;
+            case MainPage.Vip:
+                plugin.RefreshVip(venue);
+                plugin.RefreshVipPerks(venue);
+                break;
+            case MainPage.Photoshoots:
+                plugin.RefreshPhotoshoots(venue);
+                plugin.RefreshVipPerks(venue);
+                break;
+            case MainPage.Bar:
+                plugin.RefreshBar(venue);
+                break;
+            case MainPage.Court:
+                plugin.RefreshCourt(venue);
+                plugin.RefreshVipPerks(venue);
+                break;
+            case MainPage.OtherSales:
+                plugin.RefreshOtherSales(venue);
+                break;
+            case MainPage.OtherGames:
+                plugin.RefreshOtherGames(venue);
+                break;
+            case MainPage.Purchases:
+                plugin.RefreshPurchases(venue);
+                break;
+            case MainPage.Staff:
+                plugin.RefreshStaff(venue);
+                plugin.RefreshCourt(venue);
+                break;
+            case MainPage.TimedMacros:
+                plugin.RefreshTimedMacros(venue);
+                break;
+            case MainPage.Shoutrunner:
+            case MainPage.PartyFinder:
+                plugin.RefreshOpeningPublications(venue);
+                break;
+            case MainPage.Finance:
+                plugin.RefreshFinance(venue);
+                break;
+            case MainPage.Users:
+                plugin.RefreshVenueUsers(venue);
+                break;
+            case MainPage.MyAccount:
+                plugin.RefreshSelfService(venue);
+                break;
+        }
+    }
 
-            var userSnapshot = plugin.UserManagement.GetSnapshot(selectedVenue);
-            if (userSnapshot.Status == VenueUserManagementStatus.Ready &&
-                userSnapshot.View?.Capabilities.CanView == true)
-            {
-                DrawUsersTab(selectedVenue, userSnapshot);
-            }
-
-            djsTab.Draw(selectedVenue);
-            venueOpeningsTab.Draw(selectedVenue);
-            timedMacrosTab.Draw(selectedVenue);
-            shoutrunnerTab.Draw(selectedVenue);
-            partyFinderTab.Draw(selectedVenue);
-            vipTab.Draw(selectedVenue);
-            photoshootsTab.Draw(selectedVenue);
-            otherSalesTab.Draw(selectedVenue);
-            otherGamesTab.Draw(selectedVenue);
-            purchasesTab.Draw(selectedVenue);
-            barTab.Draw(selectedVenue);
-            courtTab.Draw(selectedVenue);
-            staffTab.Draw(selectedVenue);
-            greeterTab.Draw(selectedVenue);
-            if (financeTab.Draw(
-                    selectedVenue,
-                    requestSelectFinanceTab,
-                    requestedFinanceSettlementId))
-            {
-                requestSelectFinanceTab = false;
-                requestedFinanceSettlementId = null;
-            }
+    private bool IsPageVisible(
+        MainPage page,
+        VenueConnectionConfiguration? venue,
+        bool authenticated)
+    {
+        if (page == MainPage.Overview)
+        {
+            return true;
         }
 
-        DrawPlaceholderTab("Games", "Venue-wide game state, rolls, host controls, and timers will live here.");
+        if (venue is null || !authenticated)
+        {
+            return false;
+        }
 
-        ImGui.EndTabBar();
+        return page switch
+        {
+            MainPage.Djs => plugin.Djs.GetSnapshot(venue).View?.Capabilities.CanManageDirectory ?? true,
+            MainPage.Openings => plugin.VenueOpenings.GetSnapshot(venue).View?.Capabilities.CanManage ?? true,
+            MainPage.TimedMacros => plugin.TimedMacros.GetSnapshot(venue).View?.Capabilities is not { } capabilities ||
+                                    capabilities.CanExecuteAny || capabilities.CanManageAny,
+            MainPage.Shoutrunner => plugin.OpeningPublications.GetSnapshot(venue).View?.Capabilities.CanUseShoutrunner ?? true,
+            MainPage.PartyFinder => plugin.OpeningPublications.GetSnapshot(venue).View?.Capabilities.CanUsePartyFinder ?? true,
+            MainPage.Greeter => plugin.Greeter.GetSnapshot(venue).Context?.Capabilities.CanUse ?? true,
+            MainPage.Users => plugin.UserManagement.GetSnapshot(venue).View?.Capabilities.CanView == true,
+            _ => true,
+        };
+    }
+
+    private void EnsureSelectedPageVisible(
+        VenueConnectionConfiguration? venue,
+        bool authenticated)
+    {
+        if (!IsPageVisible(selectedPage, venue, authenticated))
+        {
+            selectedPage = MainPage.Overview;
+        }
     }
 
     private static bool CanDrawAuthenticatedFeatures(AuthenticationSnapshot snapshot)
@@ -279,67 +609,72 @@ public sealed class MainWindow : Window, IDisposable
                 snapshot.Status == AuthenticationStatus.Failed);
     }
 
-    private void DrawOverviewTab(VenueConnectionConfiguration? selectedVenue)
+    private void DrawOverviewPage(VenueConnectionConfiguration? selectedVenue)
     {
-        if (!ImGui.BeginTabItem("Overview"))
-        {
-            return;
-        }
+        PartyPulseUi.PageHeader(
+            "Overview",
+            "Current character and venue status. Detailed venue connection information is available in Settings.");
 
         if (plugin.IdentityProvider.TryGetCurrent(out var identity, out var reason))
         {
-            ImGui.TextUnformatted($"Character: {identity!.DisplayName}");
+            PartyPulseUi.SectionHeader("Current character");
+            ImGui.TextUnformatted(identity!.DisplayName);
         }
         else
         {
             ImGui.TextDisabled(reason);
         }
 
-        ImGui.TextUnformatted($"Venue: {selectedVenue?.VenueName ?? "Not configured"}");
-        ImGui.TextUnformatted($"Address: {selectedVenue?.AddressDisplay ?? "Not configured"}");
-        ImGui.TextUnformatted($"Access: {(selectedVenue?.IsRegistered == true ? "Registered venue account" : "Visitor")}");
-        ImGui.TextWrapped("Public venue data is available to visitors. Registered venue accounts use self-service for characters, devices, and membership.");
+        PartyPulseUi.SectionHeader("Selected venue");
+        ImGui.TextUnformatted(selectedVenue?.VenueName ?? "Not configured");
+        ImGui.TextDisabled(selectedVenue?.AddressDisplay ?? "Add a venue from Settings.");
 
-        ImGui.EndTabItem();
+        var accessText = selectedVenue?.IsRegistered == true
+            ? "Registered venue account"
+            : "Visitor access";
+        var accessColor = selectedVenue?.IsRegistered == true
+            ? PartyPulseUi.Success
+            : PartyPulseUi.Muted;
+        PartyPulseUi.SectionHeader("Access");
+        ImGui.TextColored(accessColor, accessText);
+        ImGui.TextWrapped(
+            "Use the navigation on the left to move between operational areas. Only pages available to this venue account are shown.");
     }
 
-    private void DrawMyAccountTab(VenueConnectionConfiguration venue)
+    private void DrawMyAccountPage(VenueConnectionConfiguration venue)
     {
-        if (!ImGui.BeginTabItem("My Account"))
-        {
-            return;
-        }
+        PartyPulseUi.PageHeader(
+            "My Account",
+            "Manage your linked characters, additional devices, venue authorization, and local venue data.");
 
         var snapshot = plugin.SelfService.GetSnapshot(venue);
         if (snapshot.Status is SelfServiceStatus.NotLoaded or SelfServiceStatus.Loading)
         {
             ImGui.TextDisabled(snapshot.Message);
-            ImGui.EndTabItem();
             return;
         }
 
         if (snapshot.Status == SelfServiceStatus.Failed || snapshot.View is null)
         {
-            ImGui.TextColored(new Vector4(1f, 0.4f, 0.4f, 1f), snapshot.Message);
+            ImGui.TextColored(PartyPulseUi.Danger, snapshot.Message);
             if (ImGui.Button("Retry"))
             {
                 plugin.RefreshSelfService(venue);
             }
-
-            ImGui.EndTabItem();
             return;
         }
 
         var view = snapshot.View;
-        ImGui.TextUnformatted(view.IsOwner ? "Venue owner account" : "Venue staff account");
+        ImGui.TextColored(
+            view.IsOwner ? PartyPulseUi.Warning : PartyPulseUi.Info,
+            view.IsOwner ? "Venue owner account" : "Venue staff account");
         ImGui.SameLine();
         if (ImGui.SmallButton("Refresh"))
         {
             plugin.RefreshSelfService(venue);
         }
 
-        ImGui.Spacing();
-        ImGui.TextUnformatted("Registered characters");
+        PartyPulseUi.SectionHeader("Registered characters");
         var tableFlags = ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp;
         if (ImGui.BeginTable("SelfCharacters", 3, tableFlags))
         {
@@ -358,7 +693,7 @@ public sealed class MainWindow : Window, IDisposable
                 ImGui.TableSetColumnIndex(1);
                 if (character.IsCurrent)
                 {
-                    ImGui.TextColored(new Vector4(0.35f, 0.85f, 0.45f, 1f), "Current");
+                    ImGui.TextColored(PartyPulseUi.Success, "Current");
                 }
                 else if (character.IsMain)
                 {
@@ -389,11 +724,9 @@ public sealed class MainWindow : Window, IDisposable
             ImGui.EndTable();
         }
 
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Spacing();
-        ImGui.TextUnformatted("Register another device");
-        ImGui.TextWrapped("Create a short-lived code, then add this same venue on the second computer and choose 'Register with device code'.");
+        PartyPulseUi.SectionHeader(
+            "Register another device",
+            "Create a short-lived code, then add this venue on the second computer and choose Register with device code.");
         if (ImGui.Button("Create device pairing code"))
         {
             plugin.CreateDevicePairingCode(venue);
@@ -409,14 +742,11 @@ public sealed class MainWindow : Window, IDisposable
             }
         }
 
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Spacing();
-        ImGui.TextUnformatted("Venue authorization");
+        PartyPulseUi.SectionHeader("Venue authorization");
         if (view.IsLastOwner)
         {
             ImGui.TextColored(
-                new Vector4(1f, 0.65f, 0.3f, 1f),
+                PartyPulseUi.Warning,
                 "You are the venue's last active owner and cannot unauthorize until another owner exists.");
         }
 
@@ -427,30 +757,24 @@ public sealed class MainWindow : Window, IDisposable
             requestOpenUnauthorizePopup = true;
         }
         ImGui.EndDisabled();
-        ImGui.TextDisabled("This disables your venue user and revokes every registered device for that user. The public venue remains saved locally in visitor mode.");
+        ImGui.TextDisabled("Disables your venue user and revokes every registered device for that user.");
 
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Spacing();
-        ImGui.TextUnformatted("Local venue data");
+        PartyPulseUi.SectionHeader("Local venue data");
         if (ImGui.Button("Remove venue from this device"))
         {
             pendingLocalRemovalVenue = venue;
             requestOpenLocalRemovalPopup = true;
         }
-        ImGui.TextDisabled("This only removes the venue and credential stored by this plugin on this computer. It does not change the server-side venue user.");
-
-        ImGui.EndTabItem();
+        ImGui.TextDisabled("Removes only the venue and credential stored by this plugin on this computer.");
     }
 
-    private void DrawUsersTab(
+    private void DrawUsersPage(
         VenueConnectionConfiguration venue,
         VenueUserManagementSnapshot snapshot)
     {
-        if (!ImGui.BeginTabItem("User List"))
-        {
-            return;
-        }
+        PartyPulseUi.PageHeader(
+            "Users",
+            "Create venue users, review access, and open a user to manage profile, recovery, and permissions.");
 
         var view = snapshot.View!;
         var isBusy = plugin.UserManagement.IsBusy(venue.ProfileId);
@@ -462,7 +786,7 @@ public sealed class MainWindow : Window, IDisposable
         }
 
         ImGui.BeginDisabled(isBusy);
-        if (ImGui.Button("Refresh users"))
+        if (ImGui.Button("Refresh"))
         {
             plugin.RefreshVenueUsers(venue);
         }
@@ -470,8 +794,7 @@ public sealed class MainWindow : Window, IDisposable
 
         if (view.Capabilities.CanCreate)
         {
-            ImGui.Spacing();
-            ImGui.TextUnformatted("Add venue user");
+            PartyPulseUi.SectionHeader("Add venue user");
             ImGui.SetNextItemWidth(250 * ImGuiHelpers.GlobalScale);
             ImGui.InputText("Display name", ref addUserDisplayName, 50);
             ImGui.SetNextItemWidth(250 * ImGuiHelpers.GlobalScale);
@@ -513,10 +836,7 @@ public sealed class MainWindow : Window, IDisposable
             }
         }
 
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Spacing();
-
+        PartyPulseUi.SectionHeader("Venue users");
         var tableFlags =
             ImGuiTableFlags.Borders |
             ImGuiTableFlags.RowBg |
@@ -524,7 +844,7 @@ public sealed class MainWindow : Window, IDisposable
             ImGuiTableFlags.ScrollY |
             ImGuiTableFlags.SizingStretchProp;
 
-        if (ImGui.BeginTable("VenueUsers", 5, tableFlags, new Vector2(0, 300 * ImGuiHelpers.GlobalScale)))
+        if (ImGui.BeginTable("VenueUsers", 5, tableFlags, new Vector2(0, 340 * ImGuiHelpers.GlobalScale)))
         {
             ImGui.TableSetupColumn("Display name");
             ImGui.TableSetupColumn("Discord");
@@ -559,7 +879,7 @@ public sealed class MainWindow : Window, IDisposable
                 ImGui.TableSetColumnIndex(3);
                 if (user.IsOwner)
                 {
-                    ImGui.TextColored(new Vector4(1f, 0.78f, 0.25f, 1f), "Owner");
+                    ImGui.TextColored(PartyPulseUi.Warning, "Owner");
                 }
                 else
                 {
@@ -584,8 +904,6 @@ public sealed class MainWindow : Window, IDisposable
 
             ImGui.EndTable();
         }
-
-        ImGui.EndTabItem();
     }
 
     private void DrawConfirmationPopups()
@@ -718,16 +1036,4 @@ public sealed class MainWindow : Window, IDisposable
         }
     }
 
-    private static void DrawPlaceholderTab(string title, string description)
-    {
-        if (!ImGui.BeginTabItem(title))
-        {
-            return;
-        }
-
-        ImGui.TextWrapped(description);
-        ImGui.Spacing();
-        ImGui.TextDisabled("Foundation placeholder — no business operation is sent yet.");
-        ImGui.EndTabItem();
-    }
 }

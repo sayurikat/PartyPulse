@@ -25,8 +25,8 @@ public sealed class PartyFinderTabRenderer(Plugin plugin)
         var view = snapshot.View;
         if (view is not null && !view.Capabilities.CanUsePartyFinder)
             return;
-        if (!ImGui.BeginTabItem("Party Finder"))
-            return;
+
+        PartyPulseUi.PageHeader("Party Finder", "Publish the active opening text and keep the in-game listing refreshed automatically.");
 
         SyncDrafts(venue, snapshot.ReceivedAt, view);
         var busy = plugin.OpeningPublications.IsBusy(venue.ProfileId);
@@ -38,7 +38,6 @@ public sealed class PartyFinderTabRenderer(Plugin plugin)
         if (view is null)
         {
             ImGui.TextWrapped(snapshot.Message);
-            ImGui.EndTabItem();
             return;
         }
 
@@ -52,7 +51,6 @@ public sealed class PartyFinderTabRenderer(Plugin plugin)
                 DrawTemplate(venue, template, busy);
         }
 
-        ImGui.EndTabItem();
     }
 
     private void DrawActivePublication(

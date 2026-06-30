@@ -56,11 +56,6 @@ public sealed class PhotoshootsTabRenderer(Plugin plugin)
 
     public void Draw(VenueConnectionConfiguration venue)
     {
-        if (!ImGui.BeginTabItem("Photoshoots"))
-        {
-            return;
-        }
-
         ResetForVenue(venue);
         plugin.EnsurePhotoshootsLoaded(venue);
         plugin.EnsureVipPerksLoaded(venue);
@@ -68,6 +63,8 @@ public sealed class PhotoshootsTabRenderer(Plugin plugin)
 
         var snapshot = plugin.Photoshoots.GetSnapshot(venue);
         var busy = plugin.Photoshoots.IsBusy(venue.ProfileId) || plugin.Finance.IsBusy(venue.ProfileId);
+
+        PartyPulseUi.PageHeader("Photoshoots", "Sell photoshoot packages, apply VIP perks, and manage seller commission and sales history.");
         ImGui.BeginDisabled(busy);
         if (ImGui.Button("Refresh photoshoots"))
         {
@@ -78,7 +75,6 @@ public sealed class PhotoshootsTabRenderer(Plugin plugin)
         if (snapshot.Status != PhotoshootManagementStatus.Ready || snapshot.View is null)
         {
             ImGui.TextWrapped(snapshot.Message);
-            ImGui.EndTabItem();
             return;
         }
 
@@ -117,7 +113,6 @@ public sealed class PhotoshootsTabRenderer(Plugin plugin)
         DrawPaymentStatusConfirmation(venue);
         DrawCancelSaleConfirmation(venue);
         DrawSaleConfirmation(venue, view);
-        ImGui.EndTabItem();
     }
 
 

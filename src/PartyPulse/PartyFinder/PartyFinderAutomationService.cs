@@ -22,7 +22,18 @@ public enum PartyFinderAutomationState
 
 public sealed unsafe class PartyFinderAutomationService
 {
+    private enum TransientIssue
+    {
+        None,
+        AgentUnavailable,
+        ListingStateUnavailable,
+        RecruitmentUnavailable,
+        OpenListingFailed,
+    }
+
     private static readonly TimeSpan AddonTimeout = TimeSpan.FromSeconds(6);
+    private static readonly TimeSpan TransientInterruptionGrace = TimeSpan.FromSeconds(90);
+    private static readonly TimeSpan TransientRetryDelay = TimeSpan.FromSeconds(5);
     private readonly Configuration configuration;
     private readonly OpeningPublicationManagementManager publications;
     private readonly ICondition condition;
@@ -37,6 +48,8 @@ public sealed unsafe class PartyFinderAutomationService
     private DateTimeOffset openingClosesAt;
     private TimeSpan interval = TimeSpan.FromMinutes(60);
     private DateTimeOffset? stageDeadline;
+    private DateTimeOffset? transientInterruptionStartedAt;
+    private TransientIssue transientIssue;
 
     public PartyFinderAutomationService(
         Configuration configuration,
@@ -110,6 +123,8 @@ public sealed unsafe class PartyFinderAutomationService
         interval = TimeSpan.FromMinutes(Math.Clamp(intervalMinutes, 1, 1440));
         NextRefreshAt = null;
         stageDeadline = null;
+        transientInterruptionStartedAt = null;
+        transientIssue = TransientIssue.None;
 
         if (currentlyRecruiting)
         {
@@ -137,6 +152,8 @@ public sealed unsafe class PartyFinderAutomationService
         StatusMessage = message;
         NextRefreshAt = null;
         stageDeadline = null;
+        transientInterruptionStartedAt = null;
+        transientIssue = TransientIssue.None;
         profileId = Guid.Empty;
         openingId = 0;
         publicationCode = string.Empty;
@@ -176,16 +193,34 @@ public sealed unsafe class PartyFinderAutomationService
         var agent = AgentLookingForGroup.Instance();
         if (agent == null)
         {
-            Stop("Party Finder refresher stopped because Party Finder became unavailable.");
+            PauseForTransientInterruption(
+                now,
+                TransientIssue.AgentUnavailable,
+                "Party Finder is temporarily unavailable, usually during a zone transition. The refresher will resume automatically.",
+                "Party Finder refresher stopped because Party Finder remained unavailable after the zone-transition grace period.");
             return;
         }
+
+        ClearTransientInterruption(TransientIssue.AgentUnavailable);
 
         var currentText = agent->StoredRecruitmentInfo.CommentString.ToString();
         if (!string.Equals(currentText, expectedText, StringComparison.Ordinal))
         {
+            if (!condition[ConditionFlag.UsingPartyFinder] || string.IsNullOrWhiteSpace(currentText))
+            {
+                PauseForTransientInterruption(
+                    now,
+                    TransientIssue.ListingStateUnavailable,
+                    "Party Finder state is temporarily unavailable. The refresher is preserving its schedule while the game finishes loading.",
+                    "Party Finder refresher stopped because the expected listing did not return after the zone-transition grace period.");
+                return;
+            }
+
             Stop("Party Finder refresher stopped because the in-game description was changed. PartyPulse did not overwrite it.");
             return;
         }
+
+        ClearTransientInterruption(TransientIssue.ListingStateUnavailable);
 
         switch (State)
         {
@@ -240,9 +275,14 @@ public sealed unsafe class PartyFinderAutomationService
             case PartyFinderAutomationState.WaitingForRefresh:
                 if (!condition[ConditionFlag.UsingPartyFinder])
                 {
-                    Stop("Party Finder refresher stopped because the listing is no longer recruiting.");
+                    PauseForTransientInterruption(
+                        now,
+                        TransientIssue.RecruitmentUnavailable,
+                        "Party Finder recruitment is temporarily unavailable. The refresher will resume if the listing returns after the zone transition.",
+                        "Party Finder refresher stopped because the listing was no longer recruiting after the zone-transition grace period.");
                     return;
                 }
+                ClearTransientInterruption(TransientIssue.RecruitmentUnavailable);
                 if (NextRefreshAt is { } next && now >= next)
                     BeginRefresh(now);
                 break;
@@ -250,9 +290,14 @@ public sealed unsafe class PartyFinderAutomationService
             case PartyFinderAutomationState.WaitingForDetail:
                 if (!condition[ConditionFlag.UsingPartyFinder])
                 {
-                    Stop("Party Finder refresher stopped because the listing is no longer recruiting.");
+                    PauseForTransientInterruption(
+                        now,
+                        TransientIssue.RecruitmentUnavailable,
+                        "Party Finder recruitment is temporarily unavailable while opening the listing. The refresher will retry automatically.",
+                        "Party Finder refresher stopped because the listing was no longer recruiting after the zone-transition grace period.");
                     return;
                 }
+                ClearTransientInterruption(TransientIssue.RecruitmentUnavailable);
                 if (TryClickButton("LookingForGroupDetail", 109))
                 {
                     State = PartyFinderAutomationState.WaitingForConditions;
@@ -294,14 +339,75 @@ public sealed unsafe class PartyFinderAutomationService
         var agent = AgentLookingForGroup.Instance();
         if (agent == null || playerState.ContentId == 0 || !agent->OpenListingByContentId(playerState.ContentId))
         {
-            Stop("Party Finder refresher stopped because the current listing could not be opened.");
+            if (!IsRunning)
+            {
+                Stop("Party Finder refresher could not start because the current listing could not be opened.");
+                return;
+            }
+
+            PauseForTransientInterruption(
+                now,
+                TransientIssue.OpenListingFailed,
+                "The current Party Finder listing could not be opened yet. PartyPulse will retry automatically.",
+                "Party Finder refresher stopped because the current listing could not be opened after repeated retries.");
+            if (IsRunning)
+            {
+                State = PartyFinderAutomationState.WaitingForRefresh;
+                NextRefreshAt = now + TransientRetryDelay;
+            }
             return;
         }
 
+        ClearTransientInterruption(TransientIssue.OpenListingFailed);
         State = PartyFinderAutomationState.WaitingForDetail;
         stageDeadline = now + AddonTimeout;
         NextRefreshAt = null;
         StatusMessage = "Opening the current Party Finder listing for refresh...";
+    }
+
+
+    private void PauseForTransientInterruption(
+        DateTimeOffset now,
+        TransientIssue issue,
+        string waitingMessage,
+        string timeoutMessage)
+    {
+        if (transientIssue != issue)
+        {
+            transientIssue = issue;
+            transientInterruptionStartedAt = now;
+        }
+        else
+        {
+            transientInterruptionStartedAt ??= now;
+        }
+
+        if (now - transientInterruptionStartedAt.Value >= TransientInterruptionGrace)
+        {
+            Stop(timeoutMessage);
+            return;
+        }
+
+        if (State is PartyFinderAutomationState.WaitingForInitialWindow or
+            PartyFinderAutomationState.WaitingForInitialConditions or
+            PartyFinderAutomationState.WaitingForDetail or
+            PartyFinderAutomationState.WaitingForConditions)
+        {
+            stageDeadline = now + AddonTimeout;
+        }
+
+        StatusMessage = waitingMessage;
+    }
+
+    private void ClearTransientInterruption(TransientIssue issue)
+    {
+        if (transientIssue != issue)
+        {
+            return;
+        }
+
+        transientIssue = TransientIssue.None;
+        transientInterruptionStartedAt = null;
     }
 
     private bool TryClickButton(string addonName, uint buttonId) =>

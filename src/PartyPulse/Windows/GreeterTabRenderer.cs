@@ -23,12 +23,12 @@ public sealed class GreeterTabRenderer(Plugin plugin)
         if (snapshot.Status == GreeterManagementStatus.Denied)
             return;
 
-        if (!ImGui.BeginTabItem("Greeter"))
-            return;
 
         plugin.EnsureGreeterLoaded(venue);
         snapshot = plugin.Greeter.GetSnapshot(venue);
         var busy = plugin.Greeter.IsBusy(venue.ProfileId) || plugin.IsGameMacroBusy;
+
+        PartyPulseUi.PageHeader("Greeter", "Track arriving players, identify VIPs and residents, and execute greeting macros.");
         ImGui.BeginDisabled(plugin.Greeter.IsBusy(venue.ProfileId));
         if (ImGui.SmallButton("Refresh greeter"))
             plugin.RefreshGreeter(venue);
@@ -39,7 +39,6 @@ public sealed class GreeterTabRenderer(Plugin plugin)
         {
             ImGui.Spacing();
             ImGui.TextWrapped(snapshot.Message);
-            ImGui.EndTabItem();
             return;
         }
 
@@ -94,7 +93,6 @@ public sealed class GreeterTabRenderer(Plugin plugin)
             DrawMacroSetup(venue, context, busy);
         }
 
-        ImGui.EndTabItem();
     }
 
     private static void DrawOpeningAndDj(VenueConnectionConfiguration venue, GreeterContextResponse context)

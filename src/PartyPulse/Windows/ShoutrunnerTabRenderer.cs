@@ -28,8 +28,8 @@ public sealed class ShoutrunnerTabRenderer(Plugin plugin)
         var view = snapshot.View;
         if (view is not null && !view.Capabilities.CanUseShoutrunner)
             return;
-        if (!ImGui.BeginTabItem("Shoutrunner"))
-            return;
+
+        PartyPulseUi.PageHeader("Shoutrunner", "Plan world routes, execute opening advertisements, and track completed destinations.");
 
         SyncDrafts(venue, snapshot.ReceivedAt, view, "shoutrunner");
         var busy = plugin.OpeningPublications.IsBusy(venue.ProfileId);
@@ -42,7 +42,6 @@ public sealed class ShoutrunnerTabRenderer(Plugin plugin)
         {
             ImGui.TextWrapped(snapshot.Message);
             DrawConfirmations(venue, null, null);
-            ImGui.EndTabItem();
             return;
         }
 
@@ -61,7 +60,6 @@ public sealed class ShoutrunnerTabRenderer(Plugin plugin)
             venue,
             view,
             ShoutrunnerPublicationSelector.Resolve(view, snapshot.EstimatedServerNow, VenueTimeZone.Resolve(venue)));
-        ImGui.EndTabItem();
     }
 
     private void DrawTools(

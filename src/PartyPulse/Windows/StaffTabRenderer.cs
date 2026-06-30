@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Linq;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
+using Dalamud.Interface.Utility;
 using PartyPulse.Api;
 using PartyPulse.Models;
 using PartyPulse.Services;
@@ -69,11 +70,6 @@ public sealed class StaffTabRenderer(Plugin plugin)
 
     public void Draw(VenueConnectionConfiguration venue)
     {
-        if (!ImGui.BeginTabItem("Staff"))
-        {
-            return;
-        }
-
         ResetForVenue(venue);
         plugin.EnsureStaffLoaded(venue);
         plugin.EnsureCourtLoaded(venue);
@@ -81,6 +77,8 @@ public sealed class StaffTabRenderer(Plugin plugin)
         var snapshot = plugin.Staff.GetSnapshot(venue);
         var busy = plugin.Staff.IsBusy(venue.ProfileId) ||
                    plugin.Court.IsBusy(venue.ProfileId);
+
+        PartyPulseUi.PageHeader("Staff", "Account for attendance, manage staff and jobs, review time entries, and process payouts.");
 
         ImGui.BeginDisabled(busy);
         if (ImGui.Button("Refresh Staff"))
@@ -93,7 +91,6 @@ public sealed class StaffTabRenderer(Plugin plugin)
         if (snapshot.Status != StaffManagementStatus.Ready || snapshot.View is null)
         {
             ImGui.TextWrapped(snapshot.Message);
-            ImGui.EndTabItem();
             return;
         }
 
@@ -131,7 +128,6 @@ public sealed class StaffTabRenderer(Plugin plugin)
         DrawTransactionCancellationPopup(venue, busy);
         DrawProxyPayoutPopup(venue, view, busy);
         DrawRepaymentPopup(venue, view, busy);
-        ImGui.EndTabItem();
     }
 
     private void DrawOpeningSelector(
@@ -217,14 +213,39 @@ public sealed class StaffTabRenderer(Plugin plugin)
 
         ImGui.TextDisabled(
             $"{accountedStaffIds.Count} accounted for; {pendingStaff.Length} awaiting a clock-in or absence.");
+        ImGui.SameLine();
         ImGui.TextDisabled(
-            $"Input timezone: {VenueTimeZone.Resolve(venue).DisplayName}; format {TimeFormat}");
+            $"Times use {VenueTimeZone.Resolve(venue).DisplayName} ({TimeFormat}).");
 
         if (pendingStaff.Length == 0)
         {
-            ImGui.TextUnformatted("All listed staff are accounted for this opening.");
+            ImGui.TextColored(PartyPulseUi.Success, "All listed staff are accounted for this opening.");
             return;
         }
+
+        var flags = ImGuiTableFlags.Borders |
+                    ImGuiTableFlags.RowBg |
+                    ImGuiTableFlags.Resizable |
+                    ImGuiTableFlags.ScrollX |
+                    ImGuiTableFlags.SizingFixedFit;
+        if (!ImGui.BeginTable(
+                "StaffAttendanceTable",
+                6,
+                flags,
+                new Vector2(0, 0),
+                1040f * ImGuiHelpers.GlobalScale))
+        {
+            return;
+        }
+
+        ImGui.TableSetupScrollFreeze(0, 1);
+        ImGui.TableSetupColumn("Staff", ImGuiTableColumnFlags.WidthFixed, 225f * ImGuiHelpers.GlobalScale);
+        ImGui.TableSetupColumn("Clock-in time", ImGuiTableColumnFlags.WidthFixed, 190f * ImGuiHelpers.GlobalScale);
+        ImGui.TableSetupColumn("Quick time", ImGuiTableColumnFlags.WidthFixed, 225f * ImGuiHelpers.GlobalScale);
+        ImGui.TableSetupColumn("Clock in", ImGuiTableColumnFlags.WidthFixed, 92f * ImGuiHelpers.GlobalScale);
+        ImGui.TableSetupColumn("Absence", ImGuiTableColumnFlags.WidthFixed, 155f * ImGuiHelpers.GlobalScale);
+        ImGui.TableSetupColumn("Confirm", ImGuiTableColumnFlags.WidthFixed, 125f * ImGuiHelpers.GlobalScale);
+        ImGui.TableHeadersRow();
 
         foreach (var member in pendingStaff)
         {
@@ -237,23 +258,37 @@ public sealed class StaffTabRenderer(Plugin plugin)
                 .OrderBy(static item => item.FirstSeenAt)
                 .FirstOrDefault();
 
-            ImGui.Separator();
+            ImGui.TableNextRow();
+            ImGui.TableSetColumnIndex(0);
             ImGui.TextUnformatted(member.DisplayName);
-            ImGui.SameLine();
             ImGui.TextDisabled(
-                $"{member.JobName} | {member.EffectiveHourlyRateGil:N0}/hour + " +
+                $"{member.JobName} · {member.EffectiveHourlyRateGil:N0}/h + " +
                 $"{member.CustomFixedAmountGil:N0} fixed");
+            if (firstSeen is not null)
+            {
+                ImGui.TextColored(
+                    PartyPulseUi.Info,
+                    $"First seen {VenueTimeZone.Format(venue, firstSeen.FirstSeenAt, "t")}");
+                if (ImGui.IsItemHovered())
+                {
+                    ImGui.SetTooltip($"{firstSeen.CharacterName} @ {firstSeen.WorldName}");
+                }
+            }
 
-            ImGui.SameLine();
-            ImGui.SetNextItemWidth(180f);
-            if (ImGui.InputText("Clock in", ref state.ClockInText, 32))
+            ImGui.TableSetColumnIndex(1);
+            ImGui.SetNextItemWidth(-1);
+            if (ImGui.InputText("##clock-in", ref state.ClockInText, 32))
             {
                 state.ClockInSource = "manual";
                 state.ExactFirstSeenAt = null;
                 state.Error = string.Empty;
             }
+            if (state.Error.Length > 0)
+            {
+                ImGui.TextColored(PartyPulseUi.Danger, state.Error);
+            }
 
-            ImGui.SameLine();
+            ImGui.TableSetColumnIndex(2);
             if (ImGui.SmallButton("Now"))
             {
                 state.ClockInText = FormatInputTime(venue, DateTimeOffset.UtcNow);
@@ -261,35 +296,30 @@ public sealed class StaffTabRenderer(Plugin plugin)
                 state.ExactFirstSeenAt = null;
                 state.Error = string.Empty;
             }
-
             ImGui.SameLine();
-            if (ImGui.SmallButton("Opening start"))
+            if (ImGui.SmallButton("Start"))
             {
                 state.ClockInText = FormatInputTime(venue, opening.OpensAt);
                 state.ClockInSource = "opening_start";
                 state.ExactFirstSeenAt = null;
                 state.Error = string.Empty;
             }
-
-            if (firstSeen is not null)
-            {
-                ImGui.SameLine();
-                if (ImGui.SmallButton("First seen"))
-                {
-                    state.ClockInText = FormatInputTime(venue, firstSeen.FirstSeenAt);
-                    state.ClockInSource = "first_seen";
-                    state.ExactFirstSeenAt = firstSeen.FirstSeenAt;
-                    state.Error = string.Empty;
-                }
-
-                ImGui.SameLine();
-                ImGui.TextDisabled(
-                    $"{VenueTimeZone.Format(venue, firstSeen.FirstSeenAt, "t")} via " +
-                    $"{firstSeen.CharacterName} @ {firstSeen.WorldName}");
-            }
-
             ImGui.SameLine();
-            if (ImGui.SmallButton("Round down 15 min"))
+            ImGui.BeginDisabled(firstSeen is null);
+            if (ImGui.SmallButton("Seen") && firstSeen is not null)
+            {
+                state.ClockInText = FormatInputTime(venue, firstSeen.FirstSeenAt);
+                state.ClockInSource = "first_seen";
+                state.ExactFirstSeenAt = firstSeen.FirstSeenAt;
+                state.Error = string.Empty;
+            }
+            ImGui.EndDisabled();
+            if (firstSeen is null && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+            {
+                ImGui.SetTooltip("No first-seen record is available for this opening.");
+            }
+            ImGui.SameLine();
+            if (ImGui.SmallButton("-15m"))
             {
                 if (TryParseTime(venue, state.ClockInText, out var parsed, out var error))
                 {
@@ -304,16 +334,16 @@ public sealed class StaffTabRenderer(Plugin plugin)
                 }
             }
 
-            ImGui.SameLine();
+            ImGui.TableSetColumnIndex(3);
             ImGui.BeginDisabled(busy);
-            if (ImGui.Button("Check in"))
+            if (ImGui.Button("Check in", new Vector2(-1, 0)))
             {
                 SubmitClockIn(venue, opening, member, state);
             }
             ImGui.EndDisabled();
 
-            ImGui.SameLine();
-            ImGui.SetNextItemWidth(145f);
+            ImGui.TableSetColumnIndex(4);
+            ImGui.SetNextItemWidth(-1);
             if (ImGui.BeginCombo(
                     "##absence-reason",
                     state.AbsenceReasonCode == "unplanned"
@@ -333,9 +363,9 @@ public sealed class StaffTabRenderer(Plugin plugin)
                 ImGui.EndCombo();
             }
 
-            ImGui.SameLine();
+            ImGui.TableSetColumnIndex(5);
             ImGui.BeginDisabled(busy);
-            if (ImGui.Button("Confirm absent"))
+            if (ImGui.Button("Confirm absent", new Vector2(-1, 0)))
             {
                 plugin.SetStaffAbsence(
                     venue,
@@ -345,13 +375,10 @@ public sealed class StaffTabRenderer(Plugin plugin)
             }
             ImGui.EndDisabled();
 
-            if (state.Error.Length > 0)
-            {
-                ImGui.TextWrapped(state.Error);
-            }
-
             ImGui.PopID();
         }
+
+        ImGui.EndTable();
     }
 
     private AttendanceRowState GetAttendanceRowState(

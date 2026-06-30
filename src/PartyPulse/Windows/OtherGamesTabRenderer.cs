@@ -64,12 +64,13 @@ public sealed class OtherGamesTabRenderer(Plugin plugin)
 
     public void Draw(VenueConnectionConfiguration venue)
     {
-        if (!ImGui.BeginTabItem("Other Games")) return;
 
         ResetForVenue(venue);
         plugin.EnsureOtherGamesLoaded(venue);
         var snapshot = plugin.OtherGames.GetSnapshot(venue);
         var busy = plugin.OtherGames.IsBusy(venue.ProfileId) || plugin.Finance.IsBusy(venue.ProfileId);
+
+        PartyPulseUi.PageHeader("Other Games", "Sell game entries, record outcomes and winnings, and settle each seller's net balance.");
 
         ImGui.BeginDisabled(busy);
         if (ImGui.Button("Refresh Other Games")) plugin.RefreshOtherGames(venue);
@@ -78,7 +79,6 @@ public sealed class OtherGamesTabRenderer(Plugin plugin)
         if (snapshot.Status != OtherGamesManagementStatus.Ready || snapshot.View is null)
         {
             ImGui.TextWrapped(snapshot.Message);
-            ImGui.EndTabItem();
             return;
         }
 
@@ -115,7 +115,6 @@ public sealed class OtherGamesTabRenderer(Plugin plugin)
         DrawOutcomeConfirmation(venue);
         DrawCancelConfirmation(venue);
         DrawPayoutConfirmation(venue);
-        ImGui.EndTabItem();
     }
 
     private void DrawSeller(VenueConnectionConfiguration venue, OtherGamesManagementViewResponse view, bool busy)

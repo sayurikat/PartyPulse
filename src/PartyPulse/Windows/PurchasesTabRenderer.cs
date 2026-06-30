@@ -35,14 +35,11 @@ public sealed class PurchasesTabRenderer
 
     public void Draw(VenueConnectionConfiguration venue)
     {
-        if (!ImGui.BeginTabItem("Purchases"))
-        {
-            return;
-        }
-
         ResetForVenue(venue);
         plugin.EnsurePurchasesLoaded(venue);
         var snapshot = plugin.Purchases.GetSnapshot(venue);
+
+        PartyPulseUi.PageHeader("Purchases", "Record venue expenses, approve and pay requests, and maintain an auditable purchase history.");
 
         if (ImGui.Button("Refresh Purchases"))
         {
@@ -52,7 +49,6 @@ public sealed class PurchasesTabRenderer
         if (snapshot.Status is PurchaseManagementStatus.NotLoaded or PurchaseManagementStatus.Loading)
         {
             ImGui.TextDisabled(snapshot.Message);
-            ImGui.EndTabItem();
             return;
         }
 
@@ -60,7 +56,6 @@ public sealed class PurchasesTabRenderer
             snapshot.View is null)
         {
             ImGui.TextWrapped(snapshot.Message);
-            ImGui.EndTabItem();
             return;
         }
 
@@ -79,7 +74,6 @@ public sealed class PurchasesTabRenderer
         DrawRejectPopup(venue);
         DrawCancelPopup(venue);
 
-        ImGui.EndTabItem();
     }
 
     private void DrawCreateForm(

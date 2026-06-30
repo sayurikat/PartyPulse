@@ -26,13 +26,13 @@ public sealed class TimedMacrosTabRenderer(Plugin plugin)
     {
         ResetForVenueChange(venue);
 
-        if (!ImGui.BeginTabItem("Timed Macros"))
-            return;
 
         plugin.EnsureTimedMacrosLoaded(venue);
         var snapshot = plugin.TimedMacros.GetSnapshot(venue);
         var view = snapshot.View;
         var isBusy = plugin.TimedMacros.IsBusy(venue.ProfileId) || plugin.IsGameMacroBusy;
+
+        PartyPulseUi.PageHeader("Timed Macros", "Run shared venue timers and manage opening-bound or global macro definitions.");
         ImGui.BeginDisabled(plugin.TimedMacros.IsBusy(venue.ProfileId));
         if (ImGui.Button("Refresh timed macros"))
             plugin.RefreshTimedMacros(venue);
@@ -44,7 +44,6 @@ public sealed class TimedMacrosTabRenderer(Plugin plugin)
         {
             ImGui.Spacing();
             ImGui.TextWrapped(snapshot.Message);
-            ImGui.EndTabItem();
             return;
         }
 
@@ -70,7 +69,6 @@ public sealed class TimedMacrosTabRenderer(Plugin plugin)
         }
 
         DrawArchivePopup(venue, isBusy);
-        ImGui.EndTabItem();
     }
 
     private static void DrawOpeningStatus(

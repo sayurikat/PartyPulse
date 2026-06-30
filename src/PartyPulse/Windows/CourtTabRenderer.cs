@@ -50,11 +50,6 @@ public sealed class CourtTabRenderer(Plugin plugin)
 
     public void Draw(VenueConnectionConfiguration venue)
     {
-        if (!ImGui.BeginTabItem("Court Services"))
-        {
-            return;
-        }
-
         ResetForVenue(venue);
         plugin.EnsureCourtLoaded(venue);
         plugin.EnsureVipPerksLoaded(venue);
@@ -62,6 +57,8 @@ public sealed class CourtTabRenderer(Plugin plugin)
 
         var snapshot = plugin.Court.GetSnapshot(venue);
         var busy = plugin.Court.IsBusy(venue.ProfileId);
+
+        PartyPulseUi.PageHeader("Court Services", "Sell court services, manage offers and commission, and settle worker balances.");
 
         ImGui.BeginDisabled(busy);
         if (ImGui.Button("Refresh Court Services"))
@@ -73,7 +70,6 @@ public sealed class CourtTabRenderer(Plugin plugin)
         if (snapshot.Status != CourtManagementStatus.Ready || snapshot.View is null)
         {
             ImGui.TextWrapped(snapshot.Message);
-            ImGui.EndTabItem();
             return;
         }
 
@@ -128,7 +124,6 @@ public sealed class CourtTabRenderer(Plugin plugin)
         OpenQueuedPopups();
         DrawSaleCancellationPopup(venue, busy);
         DrawTransactionCancellationPopup(venue, busy);
-        ImGui.EndTabItem();
     }
 
     private void DrawCourtTimedMacro(VenueConnectionConfiguration venue)

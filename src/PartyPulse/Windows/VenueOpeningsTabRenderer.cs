@@ -77,8 +77,7 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
         if (view is not null && !view.Capabilities.CanManage)
             return;
 
-        if (!ImGui.BeginTabItem("Openings"))
-            return;
+        PartyPulseUi.PageHeader("Venue Openings", "Schedule openings, assign DJs, manage publication text, and review previous events.");
 
         var isBusy = plugin.VenueOpenings.IsBusy(venue.ProfileId);
         var djsBusy = plugin.Djs.IsBusy(venue.ProfileId);
@@ -102,7 +101,6 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
         {
             ImGui.Spacing();
             ImGui.TextWrapped(snapshot.Message);
-            ImGui.EndTabItem();
             return;
         }
 
@@ -158,7 +156,6 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
         }
 
         DrawConfirmationPopups(venue, isBusy || djsBusy);
-        ImGui.EndTabItem();
     }
 
     private void DrawEditor(
