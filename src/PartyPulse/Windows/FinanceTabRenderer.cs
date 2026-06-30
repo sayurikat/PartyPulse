@@ -12,11 +12,14 @@ namespace PartyPulse.Windows;
 
 public sealed class FinanceTabRenderer(Plugin plugin)
 {
+    private static readonly Vector4 Negative = new(0.9f, 0.35f, 0.35f, 1f);
     private Guid activeProfileId;
     private long selectedSettlementId;
     private long pendingResponseSettlementId;
     private string responseDecision = string.Empty;
     private string responseNote = string.Empty;
+    private long pendingResponseAmountGil;
+    private string pendingResponseSettlementType = string.Empty;
 
     public bool Draw(
         VenueConnectionConfiguration venue,
@@ -85,6 +88,11 @@ public sealed class FinanceTabRenderer(Plugin plugin)
         ImGui.TextDisabled($"Pending: {view.PersonalPendingOtherSalesGil:N0} gil");
         ImGui.SameLine();
         ImGui.TextUnformatted($"Available: {view.PersonalAvailableOtherSalesGil:N0} gil");
+        ImGui.TextUnformatted("My unsettled Other Games net: ");
+        ImGui.SameLine(); DrawSigned(view.PersonalUnsettledOtherGamesGil);
+        ImGui.SameLine(); ImGui.TextDisabled($"Pending: {view.PersonalPendingOtherGamesGil:N0} gil");
+        ImGui.SameLine(); ImGui.TextUnformatted("Available: ");
+        ImGui.SameLine(); DrawSigned(view.PersonalAvailableOtherGamesGil);
 
         if (view.Capabilities.CanManageSettlements)
         {
@@ -137,7 +145,7 @@ public sealed class FinanceTabRenderer(Plugin plugin)
                 selectedSettlementId = settlement.SettlementId;
             }
             ImGui.TableSetColumnIndex(1);
-            ImGui.TextUnformatted($"{settlement.AmountGil:N0} gil");
+            DrawSigned(settlement.AmountGil);
             ImGui.TableSetColumnIndex(2);
             ImGui.TextUnformatted($"{settlement.InitiatedByDisplayName}\n{settlement.InitiatedByCharacterName}");
             ImGui.TableSetColumnIndex(3);
@@ -165,7 +173,12 @@ public sealed class FinanceTabRenderer(Plugin plugin)
         }
 
         ImGui.TextUnformatted($"Settlement #{settlement.SettlementId} — {settlement.Status}");
-        ImGui.TextUnformatted($"{settlement.AmountGil:N0} gil from {settlement.InitiatedByDisplayName} to {settlement.TargetUserDisplayName}");
+        if (settlement.SettlementType == "other_games" && settlement.AmountGil < 0)
+            ImGui.TextColored(Negative, $"Venue owes {settlement.TargetUserDisplayName} {-settlement.AmountGil:N0} gil.");
+        else if (settlement.SettlementType == "other_games" && settlement.AmountGil == 0)
+            ImGui.TextUnformatted($"Zero-net settlement for {settlement.InitiatedByDisplayName}; no trade is required.");
+        else
+            ImGui.TextUnformatted($"{settlement.AmountGil:N0} gil from {settlement.InitiatedByDisplayName} to {settlement.TargetUserDisplayName}");
         ImGui.TextDisabled(
             $"Initiated by {settlement.InitiatedByCharacterName} @ {settlement.InitiatedByWorldName}; " +
             $"targeted {settlement.TargetCharacterName} @ {settlement.TargetWorldName}");
@@ -207,7 +220,7 @@ public sealed class FinanceTabRenderer(Plugin plugin)
                 ImGui.TableSetColumnIndex(2);
                 ImGui.TextUnformatted(item.PackageName ?? "-");
                 ImGui.TableSetColumnIndex(3);
-                ImGui.TextUnformatted($"{item.AmountGil:N0} gil");
+                DrawSigned(item.AmountGil);
             }
             ImGui.EndTable();
         }
@@ -219,9 +232,23 @@ public sealed class FinanceTabRenderer(Plugin plugin)
 
         ImGui.Spacing();
         ImGui.BeginDisabled(busy);
-        if (ImGui.Button("Confirm payment received"))
+        if (settlement.SettlementType == "other_games" && settlement.AmountGil < 0)
+        {
+            if (ImGui.Button($"Trade seller {-settlement.AmountGil:N0} gil"))
+                plugin.TradeOtherGamesSeller(venue, settlement);
+            ImGui.SameLine();
+        }
+
+        var confirmLabel = settlement.SettlementType == "other_games" && settlement.AmountGil < 0
+            ? "Confirm payout complete"
+            : settlement.SettlementType == "other_games" && settlement.AmountGil == 0
+                ? "Close zero-net settlement"
+                : "Confirm payment received";
+        if (ImGui.Button(confirmLabel))
         {
             pendingResponseSettlementId = settlement.SettlementId;
+            pendingResponseAmountGil = settlement.AmountGil;
+            pendingResponseSettlementType = settlement.SettlementType;
             responseDecision = "confirm";
             responseNote = string.Empty;
             ImGui.OpenPopup("Resolve settlement###PartyPulseResolveSettlement");
@@ -230,6 +257,8 @@ public sealed class FinanceTabRenderer(Plugin plugin)
         if (ImGui.Button("Reject transaction"))
         {
             pendingResponseSettlementId = settlement.SettlementId;
+            pendingResponseAmountGil = settlement.AmountGil;
+            pendingResponseSettlementType = settlement.SettlementType;
             responseDecision = "reject";
             responseNote = string.Empty;
             ImGui.OpenPopup("Resolve settlement###PartyPulseResolveSettlement");
@@ -247,11 +276,19 @@ public sealed class FinanceTabRenderer(Plugin plugin)
         }
 
         var confirm = string.Equals(responseDecision, "confirm", StringComparison.Ordinal);
+        var reverseOtherGame = pendingResponseSettlementType == "other_games" && pendingResponseAmountGil < 0;
+        var zeroOtherGame = pendingResponseSettlementType == "other_games" && pendingResponseAmountGil == 0;
         ImGui.TextWrapped(confirm
-            ? $"Confirm that settlement #{pendingResponseSettlementId} was paid to the club?"
+            ? reverseOtherGame
+                ? $"Confirm that the venue paid {-pendingResponseAmountGil:N0} gil to the seller for settlement #{pendingResponseSettlementId}?"
+                : zeroOtherGame
+                    ? $"Close zero-net settlement #{pendingResponseSettlementId}?"
+                    : $"Confirm that settlement #{pendingResponseSettlementId} was paid to the club?"
             : $"Reject settlement #{pendingResponseSettlementId} as invalid or unpaid?");
         ImGui.TextWrapped(confirm
-            ? "Confirming marks every included source payment as settled."
+            ? reverseOtherGame
+                ? "Confirm only after the seller has received the venue payout. Every included game sale will be marked settled."
+                : "Confirming marks every included source payment as settled."
             : "Rejecting releases the included source payments so a new settlement can be initiated.");
         ImGui.SetNextItemWidth(420 * ImGuiHelpers.GlobalScale);
         ImGui.InputText("Note (optional)", ref responseNote, 255);
@@ -269,5 +306,11 @@ public sealed class FinanceTabRenderer(Plugin plugin)
             ImGui.CloseCurrentPopup();
         }
         ImGui.EndPopup();
+    }
+
+    private static void DrawSigned(long amount)
+    {
+        if (amount < 0) ImGui.TextColored(Negative, $"{amount:N0} gil");
+        else ImGui.TextUnformatted($"{amount:N0} gil");
     }
 }

@@ -1071,6 +1071,61 @@ public sealed class PartyPulseApiClient : IDisposable
             baseUri, HttpMethod.Post, $"api/v1/other-sales/sales/{saleId}/cancel", accessToken, request,
             static payload => payload.SaleId > 0 && payload.VoidedAt != default, cancellationToken);
 
+    public Task<ApiResult<OtherGamesManagementViewResponse>> GetOtherGamesAsync(
+        Uri baseUri, string accessToken, CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<OtherGamesManagementViewResponse>(
+            baseUri, HttpMethod.Get, "api/v1/other-games", accessToken, null,
+            ValidateOtherGamesViewResponse, cancellationToken);
+
+    public Task<ApiResult<OtherGameItemOperationResponse>> CreateOtherGameItemAsync(
+        Uri baseUri, string accessToken, CreateOtherGameItemRequest request, CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<OtherGameItemOperationResponse>(
+            baseUri, HttpMethod.Post, "api/v1/other-games/items", accessToken, request,
+            static payload => payload.ItemId > 0, cancellationToken);
+
+    public Task<ApiResult<OtherGameItemOperationResponse>> UpdateOtherGameItemAsync(
+        Uri baseUri, string accessToken, int itemId, UpdateOtherGameItemRequest request, CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<OtherGameItemOperationResponse>(
+            baseUri, HttpMethod.Put, $"api/v1/other-games/items/{itemId}", accessToken, request,
+            static payload => payload.ItemId > 0, cancellationToken);
+
+    public Task<ApiResult<UpdateOtherGameSellerPercentageResponse>> UpdateOtherGameSellerPercentageAsync(
+        Uri baseUri, string accessToken, int itemId, UpdateOtherGameSellerPercentageRequest request, CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<UpdateOtherGameSellerPercentageResponse>(
+            baseUri, HttpMethod.Put, $"api/v1/other-games/items/{itemId}/seller-percentage", accessToken, request,
+            static payload => payload.ItemId > 0 && payload.SellerPercentage is >= 0m and <= 100m, cancellationToken);
+
+    public Task<ApiResult<SellOtherGameResponse>> SellOtherGameAsync(
+        Uri baseUri, string accessToken, SellOtherGameRequest request, CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<SellOtherGameResponse>(
+            baseUri, HttpMethod.Post, "api/v1/other-games/sales", accessToken, request,
+            static payload => payload.SaleId > 0 && payload.ItemId > 0 && payload.Quantity > 0 &&
+                              payload.TotalGil >= 0 && payload.SellerPercentage is >= 0m and <= 100m &&
+                              payload.SellerShareGil >= 0 && payload.VenueShareGil >= 0 &&
+                              payload.SellerShareGil + payload.VenueShareGil == payload.TotalGil &&
+                              payload.SoldAt != default, cancellationToken);
+
+    public Task<ApiResult<OtherGameOutcomeResponse>> SetOtherGameOutcomeAsync(
+        Uri baseUri, string accessToken, long saleId, SetOtherGameOutcomeRequest request, CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<OtherGameOutcomeResponse>(
+            baseUri, HttpMethod.Put, $"api/v1/other-games/sales/{saleId}/outcome", accessToken, request,
+            static payload => payload.SaleId > 0 &&
+                              ((payload.OutcomeStatus == "no_win" && payload.WinAmountGil == 0) ||
+                               (payload.OutcomeStatus == "win" && payload.WinAmountGil > 0)) &&
+                              payload.OutcomeRecordedAt != default, cancellationToken);
+
+    public Task<ApiResult<OtherGameSettlementStatusResponse>> SetOtherGameSettlementStatusAsync(
+        Uri baseUri, string accessToken, long saleId, SetOtherGameSettlementStatusRequest request, CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<OtherGameSettlementStatusResponse>(
+            baseUri, HttpMethod.Put, $"api/v1/other-games/sales/{saleId}/settlement-status", accessToken, request,
+            static payload => payload.SaleId > 0, cancellationToken);
+
+    public Task<ApiResult<OtherGameSaleCancellationResponse>> CancelOtherGameSaleAsync(
+        Uri baseUri, string accessToken, long saleId, CancelOtherGameSaleRequest request, CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<OtherGameSaleCancellationResponse>(
+            baseUri, HttpMethod.Post, $"api/v1/other-games/sales/{saleId}/cancel", accessToken, request,
+            static payload => payload.SaleId > 0 && payload.VoidedAt != default, cancellationToken);
+
     public Task<ApiResult<BarManagementViewResponse>> GetBarAsync(
         Uri baseUri, string accessToken, CancellationToken cancellationToken) =>
         SendAuthorizedAsync<BarManagementViewResponse>(
@@ -1234,6 +1289,50 @@ public sealed class PartyPulseApiClient : IDisposable
                               payload.CreatedAt != default,
             cancellationToken);
 
+    public Task<ApiResult<CreateOtherGamesSettlementResponse>> CreateOtherGamesSettlementAsync(
+        Uri baseUri,
+        string accessToken,
+        CreateOtherGamesSettlementRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<CreateOtherGamesSettlementResponse>(
+            baseUri,
+            HttpMethod.Post,
+            "api/v1/finance/settlements/other-games",
+            accessToken,
+            request,
+            static payload => payload.SettlementId > 0 &&
+                              ((payload.AmountGil > 0 && payload.TradeDirection == "seller_to_venue") ||
+                               (payload.AmountGil == 0 && payload.TradeDirection == "none")) &&
+                              payload.TargetUserId > 0 &&
+                              payload.TargetCharacterId > 0 &&
+                              !string.IsNullOrWhiteSpace(payload.TargetCharacterName) &&
+                              !string.IsNullOrWhiteSpace(payload.TargetWorldName) &&
+                              !string.IsNullOrWhiteSpace(payload.TargetUserDisplayName) &&
+                              payload.CreatedAt != default,
+            cancellationToken);
+
+    public Task<ApiResult<CreateOtherGamesSettlementResponse>> CreateOtherGamesPayoutAsync(
+        Uri baseUri,
+        string accessToken,
+        CreateOtherGamesPayoutRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<CreateOtherGamesSettlementResponse>(
+            baseUri,
+            HttpMethod.Post,
+            "api/v1/finance/settlements/other-games/payout",
+            accessToken,
+            request,
+            static payload => payload.SettlementId > 0 &&
+                              payload.AmountGil < 0 &&
+                              payload.TradeDirection == "venue_to_seller" &&
+                              payload.TargetUserId > 0 &&
+                              payload.TargetCharacterId > 0 &&
+                              !string.IsNullOrWhiteSpace(payload.TargetCharacterName) &&
+                              !string.IsNullOrWhiteSpace(payload.TargetWorldName) &&
+                              !string.IsNullOrWhiteSpace(payload.TargetUserDisplayName) &&
+                              payload.CreatedAt != default,
+            cancellationToken);
+
     public Task<ApiResult<CreateBarSettlementResponse>> CreateBarSettlementAsync(
         Uri baseUri,
         string accessToken,
@@ -1269,7 +1368,6 @@ public sealed class PartyPulseApiClient : IDisposable
             request,
             static payload => payload.SettlementId > 0 &&
                               !string.IsNullOrWhiteSpace(payload.Status) &&
-                              payload.AmountGil > 0 &&
                               payload.RespondedAt != default,
             cancellationToken);
 
@@ -1827,6 +1925,43 @@ public sealed class PartyPulseApiClient : IDisposable
         payload.VipStatuses.All(static value => value.CharacterId > 0 && value.SubscriptionId > 0 && value.VipPackageId > 0) &&
         payload.VipPerkAvailability.All(static value => value.CharacterId > 0 && value.PerkId > 0);
 
+    private static bool ValidateOtherGamesViewResponse(OtherGamesManagementViewResponse payload) =>
+        payload.Capabilities is not null &&
+        payload.PersonalGrossGil >= 0 && payload.PersonalSellerShareGil >= 0 && payload.PersonalWinGil >= 0 &&
+        payload.PersonalAwaitingOutcomeCount >= 0 && payload.PersonalAvailableSaleCount >= 0 &&
+        payload.Items is not null && payload.Perks is not null && payload.Sales is not null &&
+        payload.SellerBalances is not null && payload.VipStatuses is not null && payload.VipPerkAvailability is not null &&
+        payload.Items.All(static item =>
+            item.ItemId > 0 && !string.IsNullOrWhiteSpace(item.Name) &&
+            item.SellerPercentage is >= 0m and <= 100m &&
+            ((item.PricePerUnitGil is >= 0 && item.PricePerkId is null) ||
+             (item.PricePerUnitGil is null && item.PricePerkId is > 0))) &&
+        payload.Sales.All(static sale =>
+            sale.SaleId > 0 && sale.ItemId > 0 && sale.Quantity > 0 &&
+            !string.IsNullOrWhiteSpace(sale.PriceType) &&
+            !string.IsNullOrWhiteSpace(sale.ItemName) &&
+            !string.IsNullOrWhiteSpace(sale.SellerDisplayName) &&
+            !string.IsNullOrWhiteSpace(sale.BuyerCharacterName) &&
+            !string.IsNullOrWhiteSpace(sale.BuyerWorldName) &&
+            sale.UnitPriceGil >= 0 && sale.TotalGil >= 0 &&
+            sale.SellerPercentage is >= 0m and <= 100m &&
+            sale.SellerShareGil >= 0 && sale.VenueShareGil >= 0 &&
+            sale.SellerShareGil + sale.VenueShareGil == sale.TotalGil &&
+            (sale.OutcomeStatus == "pending" || sale.OutcomeStatus == "no_win" || sale.OutcomeStatus == "win") &&
+            (sale.OutcomeStatus switch
+            {
+                "pending" => sale.WinAmountGil is null && sale.NetVenueGil is null,
+                "no_win" => sale.WinAmountGil == 0 && sale.NetVenueGil == sale.VenueShareGil,
+                "win" => sale.WinAmountGil.HasValue && sale.WinAmountGil.Value > 0 &&
+                         sale.NetVenueGil == sale.VenueShareGil - sale.WinAmountGil.Value,
+                _ => false
+            }) &&
+            ((sale.PriceType == "gil" && sale.PricePerkId is null) ||
+             (sale.PriceType == "vip_perk" && sale.PricePerkId is > 0 && sale.Quantity == 1))) &&
+        payload.SellerBalances.All(static balance => balance.SellerUserId > 0 && balance.AwaitingOutcomeCount >= 0) &&
+        payload.VipStatuses.All(static value => value.CharacterId > 0 && value.SubscriptionId > 0 && value.VipPackageId > 0) &&
+        payload.VipPerkAvailability.All(static value => value.CharacterId > 0 && value.PerkId > 0);
+
     private static bool ValidateFinanceViewResponse(FinanceViewResponse payload) =>
         payload.Capabilities is not null &&
         payload.PersonalUnpaidVipGil >= 0 &&
@@ -1843,7 +1978,7 @@ public sealed class PartyPulseApiClient : IDisposable
         payload.Items is not null &&
         payload.Settlements.All(static settlement =>
             settlement.SettlementId > 0 &&
-            settlement.AmountGil > 0 &&
+            (settlement.SettlementType == "other_games" || settlement.AmountGil > 0) &&
             !string.IsNullOrWhiteSpace(settlement.SettlementType) &&
             !string.IsNullOrWhiteSpace(settlement.Status) &&
             !string.IsNullOrWhiteSpace(settlement.InitiatedByDisplayName) &&
@@ -1852,7 +1987,7 @@ public sealed class PartyPulseApiClient : IDisposable
             item.SettlementItemId > 0 &&
             item.SettlementId > 0 &&
             item.SourceId > 0 &&
-            item.AmountGil > 0 &&
+            (item.SourceType == "other_game_sale" || item.AmountGil > 0) &&
             !string.IsNullOrWhiteSpace(item.SourceType));
 
     private static bool ValidateVenueOpeningScheduleResponse(VenueOpeningScheduleResponse payload) =>

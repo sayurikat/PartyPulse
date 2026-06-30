@@ -21,6 +21,7 @@ using PartyPulse.OpeningPublications;
 using PartyPulse.PartyFinder;
 using PartyPulse.Photoshoots;
 using PartyPulse.OtherSales;
+using PartyPulse.OtherGames;
 using PartyPulse.Models;
 using PartyPulse.SelfService;
 using PartyPulse.Staff;
@@ -97,6 +98,7 @@ public sealed class Plugin : IDalamudPlugin
         VipPerks = new VipPerkManagementManager(Configuration, Authentication, apiClient, IdentityProvider);
         Photoshoots = new PhotoshootManagementManager(Configuration, Authentication, apiClient, IdentityProvider);
         OtherSales = new OtherSalesManagementManager(Configuration, Authentication, apiClient, IdentityProvider);
+        OtherGames = new OtherGamesManagementManager(Configuration, Authentication, apiClient, IdentityProvider);
         Court = new CourtManagementManager(Configuration, Authentication, apiClient, IdentityProvider);
         Staff = new StaffManagementManager(Configuration, Authentication, apiClient, IdentityProvider);
         Bar = new BarManagementManager(Configuration, Authentication, apiClient, IdentityProvider);
@@ -232,6 +234,8 @@ public sealed class Plugin : IDalamudPlugin
 
     public OtherSalesManagementManager OtherSales { get; }
 
+    public OtherGamesManagementManager OtherGames { get; }
+
     public CourtManagementManager Court { get; }
 
     public StaffManagementManager Staff { get; }
@@ -296,6 +300,7 @@ public sealed class Plugin : IDalamudPlugin
         Finance.Dispose();
         Photoshoots.Dispose();
         OtherSales.Dispose();
+        OtherGames.Dispose();
         Court.Dispose();
         Staff.Dispose();
         Bar.Dispose();
@@ -468,6 +473,7 @@ public sealed class Plugin : IDalamudPlugin
         VipPerks.RemoveProfile(venue.ProfileId);
         Photoshoots.RemoveProfile(venue.ProfileId);
         OtherSales.RemoveProfile(venue.ProfileId);
+        OtherGames.RemoveProfile(venue.ProfileId);
         Court.RemoveProfile(venue.ProfileId);
         Staff.RemoveProfile(venue.ProfileId);
         Bar.RemoveProfile(venue.ProfileId);
@@ -1142,6 +1148,45 @@ public sealed class Plugin : IDalamudPlugin
     public void CreateOtherSalesSettlement(VenueConnectionConfiguration venue, CreateOtherSalesSettlementRequest request) =>
         Observe(CreateOtherSalesSettlementAndReportAsync(venue, request), $"create Other Sales settlement for {venue.VenueCode}");
 
+    public void EnsureOtherGamesLoaded(VenueConnectionConfiguration venue)
+    {
+        if (OtherGames.ShouldLoad(venue))
+            Observe(OtherGames.LoadAsync(venue, false, LifetimeToken), $"load Other Games for {venue.VenueCode}");
+    }
+
+    public void RefreshOtherGames(VenueConnectionConfiguration venue) =>
+        Observe(OtherGames.LoadAsync(venue, true, LifetimeToken), $"refresh Other Games for {venue.VenueCode}");
+
+    public void CreateOtherGameItem(VenueConnectionConfiguration venue, CreateOtherGameItemRequest request) =>
+        Observe(CreateOtherGameItemAndReportAsync(venue, request), $"create Other Games item for {venue.VenueCode}");
+
+    public void UpdateOtherGameItem(VenueConnectionConfiguration venue, int itemId, UpdateOtherGameItemRequest request) =>
+        Observe(UpdateOtherGameItemAndReportAsync(venue, itemId, request), $"update Other Games item {itemId}");
+
+    public void UpdateOtherGameSellerPercentage(VenueConnectionConfiguration venue, int itemId, UpdateOtherGameSellerPercentageRequest request) =>
+        Observe(UpdateOtherGameSellerPercentageAndReportAsync(venue, itemId, request), $"update Other Games seller percentage {itemId}");
+
+    public void SellOtherGame(VenueConnectionConfiguration venue, SellOtherGameRequest request) =>
+        Observe(SellOtherGameAndReportAsync(venue, request), $"record Other Game sale for {venue.VenueCode}");
+
+    public void SetOtherGameOutcome(VenueConnectionConfiguration venue, long saleId, SetOtherGameOutcomeRequest request) =>
+        Observe(SetOtherGameOutcomeAndReportAsync(venue, saleId, request), $"set Other Game {saleId} outcome");
+
+    public void SetOtherGameSettlementStatus(VenueConnectionConfiguration venue, long saleId, SetOtherGameSettlementStatusRequest request) =>
+        Observe(SetOtherGameSettlementStatusAndReportAsync(venue, saleId, request), $"set Other Game {saleId} settlement status");
+
+    public void CancelOtherGame(VenueConnectionConfiguration venue, long saleId, CancelOtherGameSaleRequest request) =>
+        Observe(CancelOtherGameAndReportAsync(venue, saleId, request), $"cancel Other Game sale {saleId}");
+
+    public void CreateOtherGamesSettlement(VenueConnectionConfiguration venue, CreateOtherGamesSettlementRequest request) =>
+        Observe(CreateOtherGamesSettlementAndReportAsync(venue, request), $"create Other Games settlement for {venue.VenueCode}");
+
+    public void CreateOtherGamesPayout(VenueConnectionConfiguration venue, CreateOtherGamesPayoutRequest request) =>
+        Observe(CreateOtherGamesPayoutAndReportAsync(venue, request), $"create Other Games payout for seller {request.SellerUserId}");
+
+    public void TradeOtherGamesSeller(VenueConnectionConfiguration venue, FinancialSettlementSummary settlement) =>
+        Observe(TradeOtherGamesSellerAndReportAsync(venue, settlement), $"trade Other Games seller for settlement {settlement.SettlementId}");
+
     public void EnsureCourtLoaded(VenueConnectionConfiguration venue)
     {
         if (Court.ShouldLoad(venue))
@@ -1569,6 +1614,7 @@ public sealed class Plugin : IDalamudPlugin
         VipPerks.RemoveProfile(venue.ProfileId);
         Photoshoots.RemoveProfile(venue.ProfileId);
         OtherSales.RemoveProfile(venue.ProfileId);
+        OtherGames.RemoveProfile(venue.ProfileId);
         Court.RemoveProfile(venue.ProfileId);
         Staff.RemoveProfile(venue.ProfileId);
         Bar.RemoveProfile(venue.ProfileId);
@@ -1702,6 +1748,7 @@ public sealed class Plugin : IDalamudPlugin
             await VipPerks.LoadAsync(venue, true, LifetimeToken);
             await RefreshPhotoshootsIfLoadedAsync(venue);
             await RefreshOtherSalesIfLoadedAsync(venue);
+            await RefreshOtherGamesIfLoadedAsync(venue);
             ChatGui.Print($"Created VIP package '{request.Name}'.", "PartyPulse");
             return;
         }
@@ -1720,6 +1767,7 @@ public sealed class Plugin : IDalamudPlugin
             await VipPerks.LoadAsync(venue, true, LifetimeToken);
             await RefreshPhotoshootsIfLoadedAsync(venue);
             await RefreshOtherSalesIfLoadedAsync(venue);
+            await RefreshOtherGamesIfLoadedAsync(venue);
             ChatGui.Print($"Updated VIP package '{request.Name}'.", "PartyPulse");
             return;
         }
@@ -1744,6 +1792,7 @@ public sealed class Plugin : IDalamudPlugin
             await VipPerks.LoadAsync(venue, true, LifetimeToken);
             await RefreshPhotoshootsIfLoadedAsync(venue);
             await RefreshOtherSalesIfLoadedAsync(venue);
+            await RefreshOtherGamesIfLoadedAsync(venue);
 
             if (result.Value.WasNewVip && result.Value.OpeningId is { } openingId)
             {
@@ -1785,6 +1834,7 @@ public sealed class Plugin : IDalamudPlugin
             await VipPerks.LoadAsync(venue, true, LifetimeToken);
             await RefreshPhotoshootsIfLoadedAsync(venue);
             await RefreshOtherSalesIfLoadedAsync(venue);
+            await RefreshOtherGamesIfLoadedAsync(venue);
             ChatGui.Print(
                 $"Linked {request.CharacterName} @ {request.WorldName} to the VIP player.",
                 "PartyPulse");
@@ -1843,6 +1893,7 @@ public sealed class Plugin : IDalamudPlugin
             await VipPerks.LoadAsync(venue, true, LifetimeToken);
             await RefreshPhotoshootsIfLoadedAsync(venue);
             await RefreshOtherSalesIfLoadedAsync(venue);
+            await RefreshOtherGamesIfLoadedAsync(venue);
             ChatGui.Print("Unlinked the character from the VIP player.", "PartyPulse");
             return;
         }
@@ -1865,6 +1916,7 @@ public sealed class Plugin : IDalamudPlugin
             await VipPerks.LoadAsync(venue, true, LifetimeToken);
             await RefreshPhotoshootsIfLoadedAsync(venue);
             await RefreshOtherSalesIfLoadedAsync(venue);
+            await RefreshOtherGamesIfLoadedAsync(venue);
             ChatGui.Print(
                 $"Cancelled VIP subscription #{subscriptionId}. Refunds must be handled separately.",
                 "PartyPulse");
@@ -2553,6 +2605,7 @@ public sealed class Plugin : IDalamudPlugin
 
         await RefreshPhotoshootsIfLoadedAsync(venue);
         await RefreshOtherSalesIfLoadedAsync(venue);
+        await RefreshOtherGamesIfLoadedAsync(venue);
         ChatGui.Print($"Created VIP perk '{request.Name}'.", "PartyPulse");
     }
 
@@ -2570,6 +2623,7 @@ public sealed class Plugin : IDalamudPlugin
 
         await RefreshPhotoshootsIfLoadedAsync(venue);
         await RefreshOtherSalesIfLoadedAsync(venue);
+        await RefreshOtherGamesIfLoadedAsync(venue);
         ChatGui.Print($"Updated VIP perk '{request.Name}'.", "PartyPulse");
     }
 
@@ -2593,6 +2647,7 @@ public sealed class Plugin : IDalamudPlugin
 
         await RefreshPhotoshootsIfLoadedAsync(venue);
         await RefreshOtherSalesIfLoadedAsync(venue);
+        await RefreshOtherGamesIfLoadedAsync(venue);
         ChatGui.Print(
             request.Assigned ? "VIP perk assigned to package." : "VIP perk removed from package.",
             "PartyPulse");
@@ -2663,6 +2718,7 @@ public sealed class Plugin : IDalamudPlugin
         if (!result.Success || result.Value is null) { ReportVipFailure(result.Failure, "The VIP perk could not be redeemed."); return; }
         await Photoshoots.LoadAsync(venue, true, LifetimeToken);
         await RefreshOtherSalesIfLoadedAsync(venue);
+        await RefreshOtherGamesIfLoadedAsync(venue);
         ChatGui.Print($"Redeemed {result.Value.PerkName} for {request.TargetCharacterName}.", "PartyPulse");
     }
 
@@ -2672,6 +2728,7 @@ public sealed class Plugin : IDalamudPlugin
         if (!result.Success) { ReportVipFailure(result.Failure, "The VIP perk redemption could not be undone."); return; }
         await Photoshoots.LoadAsync(venue, true, LifetimeToken);
         await RefreshOtherSalesIfLoadedAsync(venue);
+        await RefreshOtherGamesIfLoadedAsync(venue);
         ChatGui.Print($"VIP perk redemption #{redemptionId} was undone.", "PartyPulse");
     }
 
@@ -2855,6 +2912,224 @@ public sealed class Plugin : IDalamudPlugin
             return;
 
         await OtherSales.LoadAsync(venue, true, LifetimeToken);
+    }
+
+    private async Task CreateOtherGameItemAndReportAsync(
+        VenueConnectionConfiguration venue,
+        CreateOtherGameItemRequest request)
+    {
+        var result = await OtherGames.CreateItemAsync(venue, request, LifetimeToken);
+        if (!result.Success) { ReportVipFailure(result.Failure, "The Other Games item could not be created."); return; }
+        ChatGui.Print($"Created Other Games item '{request.Name}'.", "PartyPulse");
+    }
+
+    private async Task UpdateOtherGameItemAndReportAsync(
+        VenueConnectionConfiguration venue,
+        int itemId,
+        UpdateOtherGameItemRequest request)
+    {
+        var result = await OtherGames.UpdateItemAsync(venue, itemId, request, LifetimeToken);
+        if (!result.Success) { ReportVipFailure(result.Failure, "The Other Games item could not be updated."); return; }
+        ChatGui.Print($"Updated Other Games item '{request.Name}'.", "PartyPulse");
+    }
+
+    private async Task UpdateOtherGameSellerPercentageAndReportAsync(
+        VenueConnectionConfiguration venue,
+        int itemId,
+        UpdateOtherGameSellerPercentageRequest request)
+    {
+        var result = await OtherGames.UpdateSellerPercentageAsync(venue, itemId, request, LifetimeToken);
+        if (!result.Success || result.Value is null) { ReportVipFailure(result.Failure, "The seller percentage could not be updated."); return; }
+        ChatGui.Print($"Seller keeps {result.Value.SellerPercentage:0.##}% for Other Games item #{itemId}.", "PartyPulse");
+    }
+
+    private async Task SellOtherGameAndReportAsync(
+        VenueConnectionConfiguration venue,
+        SellOtherGameRequest request)
+    {
+        var result = await OtherGames.SellAsync(venue, request, LifetimeToken);
+        if (!result.Success || result.Value is null) { ReportVipFailure(result.Failure, "The Other Game sale could not be recorded."); return; }
+        await VipPerks.LoadAsync(venue, true, LifetimeToken);
+        await Finance.LoadAsync(venue, true, LifetimeToken);
+        var price = result.Value.PriceType == "vip_perk" ? $"VIP perk {result.Value.PricePerkName}" : $"{result.Value.TotalGil:N0} gil";
+        ChatGui.Print(
+            $"Recorded Other Game sale #{result.Value.SaleId}: {result.Value.Quantity:N0} × {result.Value.ItemName} " +
+            $"to {result.Value.BuyerCharacterName} for {price}. Record the outcome from Game history.",
+            "PartyPulse");
+    }
+
+    private async Task SetOtherGameOutcomeAndReportAsync(
+        VenueConnectionConfiguration venue,
+        long saleId,
+        SetOtherGameOutcomeRequest request)
+    {
+        var result = await OtherGames.SetOutcomeAsync(venue, saleId, request, LifetimeToken);
+        if (!result.Success || result.Value is null) { ReportVipFailure(result.Failure, "The game outcome could not be recorded."); return; }
+        await Finance.LoadAsync(venue, true, LifetimeToken);
+        ChatGui.Print(
+            result.Value.OutcomeStatus == "no_win"
+                ? $"Other Game sale #{saleId} was marked no win. Net venue balance: {result.Value.NetVenueGil:N0} gil."
+                : $"Other Game sale #{saleId} win recorded: {result.Value.WinAmountGil:N0} gil. Net venue balance: {result.Value.NetVenueGil:N0} gil.",
+            "PartyPulse");
+    }
+
+    private async Task SetOtherGameSettlementStatusAndReportAsync(
+        VenueConnectionConfiguration venue,
+        long saleId,
+        SetOtherGameSettlementStatusRequest request)
+    {
+        var result = await OtherGames.SetSaleSettlementStatusAsync(venue, saleId, request, LifetimeToken);
+        if (!result.Success || result.Value is null) { ReportVipFailure(result.Failure, "The Other Game settlement status could not be updated."); return; }
+        await Finance.LoadAsync(venue, true, LifetimeToken);
+        ChatGui.Print(request.Settled ? $"Other Game sale #{saleId} was marked settled." : $"Other Game sale #{saleId} was marked unsettled.", "PartyPulse");
+    }
+
+    private async Task CancelOtherGameAndReportAsync(
+        VenueConnectionConfiguration venue,
+        long saleId,
+        CancelOtherGameSaleRequest request)
+    {
+        var result = await OtherGames.CancelSaleAsync(venue, saleId, request, LifetimeToken);
+        if (!result.Success || result.Value is null) { ReportVipFailure(result.Failure, "The Other Game sale could not be cancelled."); return; }
+        await VipPerks.LoadAsync(venue, true, LifetimeToken);
+        await Finance.LoadAsync(venue, true, LifetimeToken);
+        ChatGui.Print(
+            result.Value.ReleasedPerkRedemptionId is { } redemptionId
+                ? $"Other Game sale #{saleId} was cancelled, the buyer was confirmed refunded, and VIP perk redemption #{redemptionId} was restored."
+                : $"Other Game sale #{saleId} was cancelled and the buyer was confirmed refunded.",
+            "PartyPulse");
+    }
+
+    private async Task RefreshOtherGamesIfLoadedAsync(VenueConnectionConfiguration venue)
+    {
+        if (OtherGames.GetSnapshot(venue).Status == OtherGamesManagementStatus.NotLoaded) return;
+        await OtherGames.LoadAsync(venue, true, LifetimeToken);
+    }
+
+    private async Task CreateOtherGamesSettlementAndReportAsync(
+        VenueConnectionConfiguration venue,
+        CreateOtherGamesSettlementRequest request)
+    {
+        var result = await Finance.CreateOtherGamesSettlementAsync(venue, request, LifetimeToken);
+        if (!result.Success || result.Value is null)
+        {
+            ReportVipFailure(result.Failure, "The Other Games settlement could not be created.");
+            return;
+        }
+
+        await OtherGames.LoadAsync(venue, true, LifetimeToken);
+        Notifications.PollSoon();
+
+        if (result.Value.AmountGil > 0)
+        {
+            var readiness = await settlementTradeService.CheckReadyAsync(
+                result.Value.TargetCharacterName,
+                result.Value.TargetWorldName,
+                LifetimeToken);
+            if (!readiness.Success)
+            {
+                ReportPluginIntegrationFailure(
+                    readiness.Failure,
+                    $"Settlement #{result.Value.SettlementId} was created, but Dropbox is unavailable. Open it from Finance when ready.");
+                return;
+            }
+
+            var trade = await settlementTradeService.InitiateTradeAsync(
+                result.Value.TargetCharacterName,
+                result.Value.TargetWorldName,
+                result.Value.AmountGil,
+                LifetimeToken);
+            if (!trade.Success)
+            {
+                ReportPluginIntegrationFailure(trade.Failure, $"Settlement #{result.Value.SettlementId} was created, but Dropbox did not start the trade.");
+                return;
+            }
+
+            ChatGui.Print($"Created Other Games settlement #{result.Value.SettlementId}. Trade {result.Value.AmountGil:N0} gil to the finance manager.", "PartyPulse");
+            return;
+        }
+
+        ChatGui.Print($"Created zero-net Other Games settlement #{result.Value.SettlementId}; no trade is required.", "PartyPulse");
+    }
+
+    private async Task CreateOtherGamesPayoutAndReportAsync(
+        VenueConnectionConfiguration venue,
+        CreateOtherGamesPayoutRequest request)
+    {
+        var result = await Finance.CreateOtherGamesPayoutAsync(venue, request, LifetimeToken);
+        if (!result.Success || result.Value is null)
+        {
+            ReportVipFailure(result.Failure, "The Other Games seller payout could not be created.");
+            return;
+        }
+
+        await OtherGames.LoadAsync(venue, true, LifetimeToken);
+        Notifications.PollSoon();
+
+        var amount = Math.Abs(result.Value.AmountGil);
+        var readiness = await settlementTradeService.CheckReadyAsync(
+            result.Value.TargetCharacterName,
+            result.Value.TargetWorldName,
+            LifetimeToken);
+        if (!readiness.Success)
+        {
+            ReportPluginIntegrationFailure(
+                readiness.Failure,
+                $"Payout settlement #{result.Value.SettlementId} was created, but Dropbox is unavailable. Open it from Finance when ready.");
+            return;
+        }
+
+        var trade = await settlementTradeService.InitiateTradeAsync(
+            result.Value.TargetCharacterName,
+            result.Value.TargetWorldName,
+            amount,
+            LifetimeToken);
+        if (!trade.Success)
+        {
+            ReportPluginIntegrationFailure(
+                trade.Failure,
+                $"Payout settlement #{result.Value.SettlementId} was created, but Dropbox did not start the trade.");
+            return;
+        }
+
+        ChatGui.Print(
+            $"Created Other Games payout settlement #{result.Value.SettlementId} and started a {amount:N0} gil trade to {result.Value.TargetCharacterName}. Confirm it from Finance after the trade completes.",
+            "PartyPulse");
+    }
+
+    private async Task TradeOtherGamesSellerAndReportAsync(
+        VenueConnectionConfiguration venue,
+        FinancialSettlementSummary settlement)
+    {
+        if (!settlement.IsPending || settlement.SettlementType != "other_games" || settlement.AmountGil >= 0)
+        {
+            ChatGui.PrintError("This settlement is not a pending Other Games venue-to-seller payout.", "PartyPulse");
+            return;
+        }
+
+        var amount = Math.Abs(settlement.AmountGil);
+        var readiness = await settlementTradeService.CheckReadyAsync(
+            settlement.TargetCharacterName,
+            settlement.TargetWorldName,
+            LifetimeToken);
+        if (!readiness.Success)
+        {
+            ReportPluginIntegrationFailure(readiness.Failure, "Dropbox is unavailable or the seller is not currently targeted.");
+            return;
+        }
+
+        var trade = await settlementTradeService.InitiateTradeAsync(
+            settlement.TargetCharacterName,
+            settlement.TargetWorldName,
+            amount,
+            LifetimeToken);
+        if (!trade.Success)
+        {
+            ReportPluginIntegrationFailure(trade.Failure, "Dropbox did not start the venue payout trade.");
+            return;
+        }
+
+        ChatGui.Print($"Started a {amount:N0} gil venue payout to {settlement.TargetCharacterName}. Confirm the settlement after the trade completes.", "PartyPulse");
     }
 
     private async Task BarMutationAndReportAsync<T>(
@@ -3117,6 +3392,7 @@ public sealed class Plugin : IDalamudPlugin
         await Vip.LoadAsync(venue, true, LifetimeToken);
         await Photoshoots.LoadAsync(venue, true, LifetimeToken);
         await RefreshOtherSalesIfLoadedAsync(venue);
+        await RefreshOtherGamesIfLoadedAsync(venue);
         await VipPerks.LoadAsync(venue, true, LifetimeToken);
         Notifications.PollSoon();
         ChatGui.Print(

@@ -149,6 +149,44 @@ public sealed class FinanceManagementManager : IDisposable
             },
             cancellationToken);
 
+    public Task<ApiResult<CreateOtherGamesSettlementResponse>> CreateOtherGamesSettlementAsync(
+        VenueConnectionConfiguration venue,
+        CreateOtherGamesSettlementRequest request,
+        CancellationToken cancellationToken) =>
+        WithGateAsync(
+            venue,
+            async () =>
+            {
+                var context = await GetAuthorizedContextAsync(venue, cancellationToken);
+                if (!context.Success)
+                    return ApiResult<CreateOtherGamesSettlementResponse>.Failed(context.Failure!);
+                var result = await apiClient.CreateOtherGamesSettlementAsync(
+                    context.BaseUri!, context.AccessToken!, request, cancellationToken);
+                if (result.Success)
+                    await RefreshAfterMutationAsync(venue, context, cancellationToken);
+                return result;
+            },
+            cancellationToken);
+
+    public Task<ApiResult<CreateOtherGamesSettlementResponse>> CreateOtherGamesPayoutAsync(
+        VenueConnectionConfiguration venue,
+        CreateOtherGamesPayoutRequest request,
+        CancellationToken cancellationToken) =>
+        WithGateAsync(
+            venue,
+            async () =>
+            {
+                var context = await GetAuthorizedContextAsync(venue, cancellationToken);
+                if (!context.Success)
+                    return ApiResult<CreateOtherGamesSettlementResponse>.Failed(context.Failure!);
+                var result = await apiClient.CreateOtherGamesPayoutAsync(
+                    context.BaseUri!, context.AccessToken!, request, cancellationToken);
+                if (result.Success)
+                    await RefreshAfterMutationAsync(venue, context, cancellationToken);
+                return result;
+            },
+            cancellationToken);
+
     public Task<ApiResult<CreateBarSettlementResponse>> CreateBarSettlementAsync(
         VenueConnectionConfiguration venue,
         CreateBarSettlementRequest request,

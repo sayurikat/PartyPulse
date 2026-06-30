@@ -52,6 +52,9 @@ public sealed record FinanceViewResponse(
     long PersonalUnpaidOtherSalesGil,
     long PersonalPendingOtherSalesGil,
     long PersonalAvailableOtherSalesGil,
+    long PersonalUnsettledOtherGamesGil,
+    long PersonalPendingOtherGamesGil,
+    long PersonalAvailableOtherGamesGil,
     int VenuePendingCount,
     IReadOnlyList<FinancialSettlementSummary> Settlements,
     IReadOnlyList<FinancialSettlementItemSummary> Items);
@@ -67,6 +70,12 @@ public sealed record CreatePhotoshootSettlementRequest(
 public sealed record CreateOtherSalesSettlementRequest(
     string TargetCharacterName,
     string TargetWorldName);
+
+public sealed record CreateOtherGamesSettlementRequest(
+    string TargetCharacterName,
+    string TargetWorldName);
+
+public sealed record CreateOtherGamesPayoutRequest(int SellerUserId);
 
 public sealed record CreateBarSettlementRequest(
     string TargetCharacterName,
@@ -95,6 +104,17 @@ public sealed record CreatePhotoshootSettlementResponse(
 public sealed record CreateOtherSalesSettlementResponse(
     long SettlementId,
     long AmountGil,
+    int TargetUserId,
+    int TargetCharacterId,
+    string TargetCharacterName,
+    string TargetWorldName,
+    string TargetUserDisplayName,
+    DateTimeOffset CreatedAt);
+
+public sealed record CreateOtherGamesSettlementResponse(
+    long SettlementId,
+    long AmountGil,
+    string TradeDirection,
     int TargetUserId,
     int TargetCharacterId,
     string TargetCharacterName,
