@@ -214,7 +214,7 @@ public sealed class CourtTabRenderer(Plugin plugin)
             "This percentage is retained by the Court worker from gil sales. " +
             "Each sale snapshots the percentage, so changing it does not rewrite existing sales.");
         ImGui.SetNextItemWidth(180f);
-        ImGui.SliderFloat("Court keeps %", ref courtKeepPercentage, 0f, 100f, "%.2f%%");
+        ImGui.InputFloat("Court keeps (%)", ref courtKeepPercentage, 0.25f, 1f, "%.2f");
         courtKeepPercentage = Math.Clamp(courtKeepPercentage, 0f, 100f);
         ImGui.TextDisabled($"Saved: {loadedCourtKeepPercentage:0.##}%");
         ImGui.BeginDisabled(busy);
