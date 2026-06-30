@@ -664,6 +664,34 @@ public sealed class PartyPulseApiClient : IDisposable
             static payload => payload.DjId > 0 && payload.ArchivedAt != default,
             cancellationToken);
 
+    public Task<ApiResult<UpdateDjSettingsResponse>> UpdateDjSettingsAsync(
+        Uri baseUri,
+        string accessToken,
+        UpdateDjSettingsRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<UpdateDjSettingsResponse>(
+            baseUri,
+            HttpMethod.Put,
+            "api/v1/djs/settings",
+            accessToken,
+            request,
+            static payload => payload.DefaultHourlyRateGil >= 0 && payload.UpdatedAt != default,
+            cancellationToken);
+
+    public Task<ApiResult<DjCharacterLinkResponse>> LinkDjCharacterAsync(
+        Uri baseUri,
+        string accessToken,
+        LinkDjCharacterRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<DjCharacterLinkResponse>(
+            baseUri,
+            HttpMethod.Put,
+            "api/v1/djs/character-link",
+            accessToken,
+            request,
+            static payload => payload.CharacterId > 0,
+            cancellationToken);
+
     public Task<ApiResult<DjBookingSummary>> SaveDjBookingAsync(
         Uri baseUri,
         string accessToken,
@@ -692,6 +720,50 @@ public sealed class PartyPulseApiClient : IDisposable
             accessToken,
             null,
             static payload => payload.BookingId > 0 && payload.DeletedAt != default,
+            cancellationToken);
+
+    public Task<ApiResult<DjPaymentOperationResponse>> StartDjPaymentAsync(
+        Uri baseUri,
+        string accessToken,
+        long bookingId,
+        StartDjPaymentRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<DjPaymentOperationResponse>(
+            baseUri,
+            HttpMethod.Post,
+            $"api/v1/djs/bookings/{bookingId}/payments/start",
+            accessToken,
+            request,
+            ValidateDjPaymentResponse,
+            cancellationToken);
+
+    public Task<ApiResult<DjPaymentOperationResponse>> ConfirmDjPaymentAsync(
+        Uri baseUri,
+        string accessToken,
+        long paymentId,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<DjPaymentOperationResponse>(
+            baseUri,
+            HttpMethod.Post,
+            $"api/v1/djs/payments/{paymentId}/confirm",
+            accessToken,
+            null,
+            ValidateDjPaymentResponse,
+            cancellationToken);
+
+    public Task<ApiResult<DjPaymentOperationResponse>> CancelDjPaymentAsync(
+        Uri baseUri,
+        string accessToken,
+        long paymentId,
+        CancelDjPaymentRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<DjPaymentOperationResponse>(
+            baseUri,
+            HttpMethod.Post,
+            $"api/v1/djs/payments/{paymentId}/cancel",
+            accessToken,
+            request,
+            ValidateDjPaymentResponse,
             cancellationToken);
 
     public Task<ApiResult<TimedMacroViewResponse>> GetTimedMacrosAsync(
@@ -2099,10 +2171,17 @@ public sealed class PartyPulseApiClient : IDisposable
 
     private static bool ValidateDjViewResponse(DjViewResponse payload) =>
         payload.Capabilities is not null &&
+        payload.DefaultHourlyRateGil >= 0 &&
         payload.Djs is not null &&
+        payload.Characters is not null &&
         payload.Bookings is not null &&
         payload.Statuses is not null &&
         payload.Djs.All(ValidateDjSummary) &&
+        payload.Characters.All(static character =>
+            character.CharacterId > 0 &&
+            character.DjId > 0 &&
+            !string.IsNullOrWhiteSpace(character.CharacterName) &&
+            !string.IsNullOrWhiteSpace(character.WorldName)) &&
         payload.Bookings.All(ValidateDjBookingSummary) &&
         payload.Statuses.All(static status =>
             !string.IsNullOrWhiteSpace(status.StatusCode) &&
@@ -2123,7 +2202,22 @@ public sealed class PartyPulseApiClient : IDisposable
         !string.IsNullOrWhiteSpace(booking.StatusName) &&
         !string.IsNullOrWhiteSpace(booking.DjName) &&
         booking.TimedMacroId > 0 &&
+        booking.PriceGil >= 0 &&
+        (booking.PaymentId is null ||
+         (!string.IsNullOrWhiteSpace(booking.PaymentStatus) &&
+          !string.IsNullOrWhiteSpace(booking.PaymentTargetCharacterName) &&
+          !string.IsNullOrWhiteSpace(booking.PaymentTargetWorldName) &&
+          booking.PaymentStartedAt is not null)) &&
         booking.CreatedAt != default;
+
+    private static bool ValidateDjPaymentResponse(DjPaymentOperationResponse payment) =>
+        payment.PaymentId > 0 &&
+        payment.BookingId > 0 &&
+        payment.AmountGil > 0 &&
+        !string.IsNullOrWhiteSpace(payment.Status) &&
+        !string.IsNullOrWhiteSpace(payment.TargetCharacterName) &&
+        !string.IsNullOrWhiteSpace(payment.TargetWorldName) &&
+        payment.StartedAt != default;
 
     private static bool ValidateTimedMacroViewResponse(TimedMacroViewResponse payload) =>
         payload.Capabilities is not null &&

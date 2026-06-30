@@ -44,6 +44,16 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
     private string bookingStatusCode = DjBookingStatusCodes.Pending;
     private string bookingNote = string.Empty;
     private string bookingMacroOverride = string.Empty;
+    private string bookingPriceGil = "0";
+    private bool bookingPriceManuallyEdited;
+    private long? pendingProxyPaymentBookingId;
+    private long pendingProxyPaymentAmount;
+    private string pendingProxyTargetCharacterName = string.Empty;
+    private string pendingProxyTargetWorldName = string.Empty;
+    private bool requestProxyPaymentPopup;
+    private long? pendingCancelDjPaymentId;
+    private long pendingCancelDjPaymentAmount;
+    private bool requestCancelDjPaymentPopup;
     private long? pendingDeleteBookingId;
     private long? pendingDeleteBookingOpeningId;
     private bool requestDeleteBookingPopup;
@@ -506,24 +516,44 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
         ImGui.SameLine();
         ImGui.TextDisabled($"Confirmed {coverage.ConfirmedMinutes:N0}/{coverage.TotalMinutes:N0} minutes; pending {coverage.PendingMinutes:N0}; gap {coverage.GapMinutes:N0}.");
 
-        if (!view.Capabilities.CanManageSchedule)
+        if (view.Capabilities.CanManageSchedule)
         {
-            ImGui.TextDisabled("You do not have permission to manage opening DJ schedules.");
-            return;
+            if (view.Djs.Count == 0)
+                ImGui.TextWrapped("Register at least one DJ in the DJs tab before adding an opening schedule.");
+            else
+                DrawDjBookingEditor(venue, opening, bookings, view, isBusy);
+        }
+        else
+        {
+            ImGui.TextDisabled("You do not have permission to edit the opening DJ schedule.");
         }
 
-        if (view.Djs.Count == 0)
+        if (ImGui.Button("Close DJ scheduler"))
         {
-            ImGui.TextWrapped("Register at least one DJ in the DJs tab before adding an opening schedule.");
-            return;
+            selectedDjOpeningId = null;
+            ClearBookingDraft();
         }
 
         ImGui.Spacing();
+        DrawDjBookingTable(venue, opening, bookings, view, isBusy);
+    }
+
+    private void DrawDjBookingEditor(
+        VenueConnectionConfiguration venue,
+        VenueOpeningScheduleItem opening,
+        IReadOnlyList<DjBookingSummary> bookings,
+        DjViewResponse view,
+        bool isBusy)
+    {
+        ImGui.Spacing();
         ImGui.TextUnformatted(editingBookingId is null ? "Add DJ slot" : $"Edit DJ slot #{editingBookingId}");
 
+        var activePaymentLocksPrice = editingBookingId is { } editedId &&
+                                      bookings.FirstOrDefault(value => value.BookingId == editedId)?.HasActivePayment == true;
         var selectedDj = view.Djs.FirstOrDefault(value => value.DjId == selectedDjId) ?? view.Djs.First();
         if (selectedDjId <= 0)
             selectedDjId = selectedDj.DjId;
+        ImGui.BeginDisabled(activePaymentLocksPrice);
         ImGui.SetNextItemWidth(300 * ImGuiHelpers.GlobalScale);
         if (ImGui.BeginCombo("DJ", $"{selectedDj.Name}{(selectedDj.Resident ? " (Resident)" : string.Empty)}"))
         {
@@ -537,6 +567,7 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
             }
             ImGui.EndCombo();
         }
+        ImGui.EndDisabled();
 
         ImGui.SetNextItemWidth(210 * ImGuiHelpers.GlobalScale);
         var bookingStartChanged = ImGui.InputText("Starts (venue time)##DjBooking", ref bookingStartsAtLocal, 17);
@@ -547,14 +578,13 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
         if ((bookingStartChanged || bookingDurationChanged) &&
             TryParseLocalDateTime(venue, bookingStartsAtLocal, out var calculatedStart, out _))
         {
-            var synchronizedDuration = bookingDurationChanged
-                ? bookingDurationMinutes
-                : Math.Clamp(bookingDurationMinutes, 15, 2880);
+            var synchronizedDuration = Math.Clamp(bookingDurationMinutes, 15, 2880);
             bookingEndsAtLocal = VenueTimeZone.Format(
                 venue,
                 calculatedStart.AddMinutes(synchronizedDuration),
                 LocalDateTimeFormat,
                 CultureInfo.InvariantCulture);
+            SuggestBookingPrice(view.DefaultHourlyRateGil, synchronizedDuration, false);
         }
 
         ImGui.SetNextItemWidth(210 * ImGuiHelpers.GlobalScale);
@@ -564,9 +594,25 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
             TryParseLocalDateTime(venue, bookingEndsAtLocal, out var durationEnd, out _) &&
             durationEnd > durationStart)
         {
-            bookingDurationMinutes = (int)Math.Round(
-                (durationEnd - durationStart).TotalMinutes);
+            bookingDurationMinutes = (int)Math.Round((durationEnd - durationStart).TotalMinutes);
+            SuggestBookingPrice(view.DefaultHourlyRateGil, bookingDurationMinutes, false);
         }
+
+        ImGui.BeginDisabled(activePaymentLocksPrice);
+        ImGui.SetNextItemWidth(220 * ImGuiHelpers.GlobalScale);
+        if (ImGui.InputText("Total price (gil)##DjBooking", ref bookingPriceGil, 16))
+            bookingPriceManuallyEdited = true;
+        var priceValid = long.TryParse(
+                             bookingPriceGil,
+                             NumberStyles.Integer | NumberStyles.AllowThousands,
+                             CultureInfo.InvariantCulture,
+                             out var parsedPrice) &&
+                         parsedPrice is >= 0 and <= int.MaxValue;
+        ImGui.SameLine();
+        if (ImGui.SmallButton("Use venue suggestion"))
+            SuggestBookingPrice(view.DefaultHourlyRateGil, bookingDurationMinutes, true);
+        ImGui.EndDisabled();
+        ImGui.TextDisabled($"Venue default: {view.DefaultHourlyRateGil:N0} gil/hour. The booking stores this total as a snapshot.");
 
         var selectedStatus = view.Statuses.FirstOrDefault(value =>
             string.Equals(value.StatusCode, bookingStatusCode, StringComparison.OrdinalIgnoreCase)) ?? view.Statuses.First();
@@ -606,7 +652,8 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
                            actualBookingDurationMinutes is >= 15 and <= 2880 &&
                            startsAt.ToUniversalTime() >= opening.OpensAt &&
                            endsAt.ToUniversalTime() <= opening.ClosesAt &&
-                           macroValid;
+                           macroValid &&
+                           priceValid;
 
         if (!startValid)
             ImGui.TextColored(new Vector4(1f, 0.45f, 0.4f, 1f), startError);
@@ -618,7 +665,12 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
             ImGui.TextColored(new Vector4(1f, 0.45f, 0.4f, 1f), "DJ slot duration must be between 15 and 2880 minutes.");
         else if (startsAt.ToUniversalTime() < opening.OpensAt || endsAt.ToUniversalTime() > opening.ClosesAt)
             ImGui.TextColored(new Vector4(1f, 0.45f, 0.4f, 1f), "DJ slot must remain entirely inside the opening.");
+        else if (!priceValid)
+            ImGui.TextColored(new Vector4(1f, 0.45f, 0.4f, 1f), $"Price must be between 0 and {int.MaxValue:N0} gil.");
         ImGui.TextDisabled($"Macro: {lines}/15 lines; longest line {longestLine}/180 characters.");
+
+        if (activePaymentLocksPrice)
+            ImGui.TextDisabled("An active payment locks the booking's DJ and price until that payment is cancelled.");
 
         ImGui.BeginDisabled(isBusy || !bookingValid);
         if (ImGui.Button(editingBookingId is null ? "Add DJ slot" : "Save DJ slot"))
@@ -634,7 +686,8 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
                     endsAt.ToUniversalTime(),
                     bookingStatusCode,
                     string.IsNullOrWhiteSpace(bookingNote) ? null : bookingNote.Trim(),
-                    string.IsNullOrWhiteSpace(bookingMacroOverride) ? null : bookingMacroOverride));
+                    string.IsNullOrWhiteSpace(bookingMacroOverride) ? null : bookingMacroOverride,
+                    parsedPrice));
         }
         ImGui.EndDisabled();
 
@@ -647,20 +700,20 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
                 InitializeBookingDraft(venue, opening, bookings, view);
             }
         }
+    }
 
-        ImGui.SameLine();
-        if (ImGui.Button("Close DJ scheduler"))
-        {
-            selectedDjOpeningId = null;
-            ClearBookingDraft();
-        }
-
-        ImGui.Spacing();
+    private void DrawDjBookingTable(
+        VenueConnectionConfiguration venue,
+        VenueOpeningScheduleItem opening,
+        IReadOnlyList<DjBookingSummary> bookings,
+        DjViewResponse view,
+        bool isBusy)
+    {
         var flags = ImGuiTableFlags.Borders |
                     ImGuiTableFlags.RowBg |
                     ImGuiTableFlags.Resizable |
                     ImGuiTableFlags.SizingStretchProp;
-        if (!ImGui.BeginTable("OpeningDjScheduleTable", 7, flags))
+        if (!ImGui.BeginTable("OpeningDjScheduleTable", 9, flags))
             return;
 
         ImGui.TableSetupColumn("Time");
@@ -669,7 +722,9 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
         ImGui.TableSetupColumn("Status");
         ImGui.TableSetupColumn("Twitch");
         ImGui.TableSetupColumn("Macro");
-        ImGui.TableSetupColumn("Actions", ImGuiTableColumnFlags.WidthFixed, 130 * ImGuiHelpers.GlobalScale);
+        ImGui.TableSetupColumn("Price", ImGuiTableColumnFlags.WidthFixed, 100 * ImGuiHelpers.GlobalScale);
+        ImGui.TableSetupColumn("Payment", ImGuiTableColumnFlags.WidthFixed, 220 * ImGuiHelpers.GlobalScale);
+        ImGui.TableSetupColumn("Schedule", ImGuiTableColumnFlags.WidthFixed, 130 * ImGuiHelpers.GlobalScale);
         ImGui.TableHeadersRow();
 
         foreach (var booking in bookings)
@@ -691,10 +746,16 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
             if (!string.IsNullOrWhiteSpace(booking.Note) && ImGui.IsItemHovered())
                 ImGui.SetTooltip(booking.Note);
             ImGui.TableSetColumnIndex(6);
-            ImGui.BeginDisabled(isBusy);
+            ImGui.TextUnformatted($"{booking.PriceGil:N0}");
+            ImGui.TableSetColumnIndex(7);
+            DrawDjPaymentActions(venue, booking, view, isBusy);
+            ImGui.TableSetColumnIndex(8);
+            ImGui.BeginDisabled(isBusy || !view.Capabilities.CanManageSchedule);
             if (ImGui.SmallButton("Edit"))
                 LoadBookingDraft(venue, booking);
+            ImGui.EndDisabled();
             ImGui.SameLine();
+            ImGui.BeginDisabled(isBusy || !view.Capabilities.CanManageSchedule || booking.HasActivePayment);
             if (ImGui.SmallButton("Delete"))
             {
                 pendingDeleteBookingId = booking.BookingId;
@@ -706,6 +767,83 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
         }
 
         ImGui.EndTable();
+    }
+
+    private void DrawDjPaymentActions(
+        VenueConnectionConfiguration venue,
+        DjBookingSummary booking,
+        DjViewResponse view,
+        bool isBusy)
+    {
+        var paymentLabel = booking.PaymentStatus switch
+        {
+            DjPaymentStatusCodes.Started => "Trade started",
+            DjPaymentStatusCodes.Paid => "Paid",
+            DjPaymentStatusCodes.Cancelled => "Cancelled",
+            _ => "Unpaid"
+        };
+        ImGui.TextUnformatted(paymentLabel);
+        if (booking.PaymentId is not null && !string.IsNullOrWhiteSpace(booking.PaymentTargetCharacterName))
+        {
+            ImGui.TextDisabled($"{booking.PaymentTargetCharacterName} @ {booking.PaymentTargetWorldName}{(booking.PaymentViaProxy ? " (proxy)" : string.Empty)}");
+        }
+
+        if (!view.Capabilities.CanManagePayments)
+            return;
+
+        if (booking.HasActivePayment && booking.PaymentId is { } activePaymentId)
+        {
+            if (string.Equals(booking.PaymentStatus, DjPaymentStatusCodes.Started, StringComparison.OrdinalIgnoreCase))
+            {
+                ImGui.BeginDisabled(isBusy);
+                if (ImGui.SmallButton("Confirm paid"))
+                    plugin.ConfirmDjPayment(venue, activePaymentId);
+                ImGui.EndDisabled();
+                ImGui.SameLine();
+            }
+
+            ImGui.BeginDisabled(isBusy);
+            if (ImGui.SmallButton("Cancel payment"))
+            {
+                pendingCancelDjPaymentId = activePaymentId;
+                pendingCancelDjPaymentAmount = booking.PriceGil;
+                requestCancelDjPaymentPopup = true;
+            }
+            ImGui.EndDisabled();
+            return;
+        }
+
+        var hasTarget = plugin.TargetProvider.TryGetCurrentTarget(out var target, out var reason);
+        ImGui.BeginDisabled(isBusy || booking.PriceGil <= 0 || !hasTarget);
+        if (ImGui.SmallButton("Pay via Dropbox") && target is not null)
+        {
+            var linked = view.Characters.Any(character =>
+                character.DjId == booking.DjId &&
+                string.Equals(character.CharacterName, target.CharacterName, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(character.WorldName, target.WorldName, StringComparison.OrdinalIgnoreCase));
+            if (linked)
+            {
+                plugin.StartDjPayment(
+                    venue,
+                    booking.BookingId,
+                    target.CharacterName,
+                    target.WorldName,
+                    false);
+            }
+            else
+            {
+                pendingProxyPaymentBookingId = booking.BookingId;
+                pendingProxyPaymentAmount = booking.PriceGil;
+                pendingProxyTargetCharacterName = target.CharacterName;
+                pendingProxyTargetWorldName = target.WorldName;
+                requestProxyPaymentPopup = true;
+            }
+        }
+        ImGui.EndDisabled();
+        if (!hasTarget && ImGui.IsItemHovered())
+            ImGui.SetTooltip(reason);
+        else if (booking.PriceGil <= 0 && ImGui.IsItemHovered())
+            ImGui.SetTooltip("Set a positive booking price before paying the DJ.");
     }
 
     private void ProcessPendingSuggestions(
@@ -898,6 +1036,16 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
             requestDeleteBookingPopup = false;
             ImGui.OpenPopup("Delete DJ booking###PartyPulseDeleteDjBooking");
         }
+        if (requestProxyPaymentPopup)
+        {
+            requestProxyPaymentPopup = false;
+            ImGui.OpenPopup("Pay unlinked DJ target###PartyPulseProxyDjPayment");
+        }
+        if (requestCancelDjPaymentPopup)
+        {
+            requestCancelDjPaymentPopup = false;
+            ImGui.OpenPopup("Cancel DJ payment###PartyPulseCancelDjPayment");
+        }
 
         if (ImGui.BeginPopupModal("Cancel scheduled opening###PartyPulseCancelScheduledOpening", ImGuiWindowFlags.AlwaysAutoResize))
         {
@@ -934,6 +1082,57 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
             if (ImGui.Button("Keep open"))
             {
                 pendingCloseOpeningId = null;
+                ImGui.CloseCurrentPopup();
+            }
+            ImGui.EndPopup();
+        }
+
+        if (ImGui.BeginPopupModal("Pay unlinked DJ target###PartyPulseProxyDjPayment", ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            ImGui.TextWrapped(
+                $"{pendingProxyTargetCharacterName} @ {pendingProxyTargetWorldName} is not linked to this DJ. " +
+                $"Confirm that this manager, friend, or other proxy should receive {pendingProxyPaymentAmount:N0} gil for the DJ.");
+            ImGui.BeginDisabled(isBusy || pendingProxyPaymentBookingId is null);
+            if (ImGui.Button("Pay proxy via Dropbox"))
+            {
+                plugin.StartDjPayment(
+                    venue,
+                    pendingProxyPaymentBookingId!.Value,
+                    pendingProxyTargetCharacterName,
+                    pendingProxyTargetWorldName,
+                    true);
+                ClearPendingProxyPayment();
+                ImGui.CloseCurrentPopup();
+            }
+            ImGui.EndDisabled();
+            ImGui.SameLine();
+            if (ImGui.Button("Do not pay"))
+            {
+                ClearPendingProxyPayment();
+                ImGui.CloseCurrentPopup();
+            }
+            ImGui.EndPopup();
+        }
+
+        if (ImGui.BeginPopupModal("Cancel DJ payment###PartyPulseCancelDjPayment", ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            ImGui.TextWrapped(
+                $"Cancel this {pendingCancelDjPaymentAmount:N0} gil DJ payment? " +
+                "This confirms that the DJ has refunded the venue in full. The audit record is retained and the booking can then be paid again.");
+            ImGui.BeginDisabled(isBusy || pendingCancelDjPaymentId is null);
+            if (ImGui.Button("Confirm refund and cancel"))
+            {
+                plugin.CancelDjPayment(venue, pendingCancelDjPaymentId!.Value);
+                pendingCancelDjPaymentId = null;
+                pendingCancelDjPaymentAmount = 0;
+                ImGui.CloseCurrentPopup();
+            }
+            ImGui.EndDisabled();
+            ImGui.SameLine();
+            if (ImGui.Button("Keep payment"))
+            {
+                pendingCancelDjPaymentId = null;
+                pendingCancelDjPaymentAmount = 0;
                 ImGui.CloseCurrentPopup();
             }
             ImGui.EndPopup();
@@ -1085,6 +1284,8 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
         bookingStatusCode = DjBookingStatusCodes.Pending;
         bookingNote = string.Empty;
         bookingMacroOverride = string.Empty;
+        bookingPriceManuallyEdited = false;
+        SuggestBookingPrice(view?.DefaultHourlyRateGil ?? 0, bookingDurationMinutes, true);
     }
 
     private void LoadBookingDraft(VenueConnectionConfiguration venue, DjBookingSummary booking)
@@ -1097,6 +1298,8 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
         bookingStatusCode = booking.StatusCode;
         bookingNote = booking.Note ?? string.Empty;
         bookingMacroOverride = booking.CustomMacroText ?? string.Empty;
+        bookingPriceGil = booking.PriceGil.ToString(CultureInfo.InvariantCulture);
+        bookingPriceManuallyEdited = true;
     }
 
     private void ClearBookingDraft()
@@ -1110,6 +1313,34 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
         bookingStatusCode = DjBookingStatusCodes.Pending;
         bookingNote = string.Empty;
         bookingMacroOverride = string.Empty;
+        bookingPriceGil = "0";
+        bookingPriceManuallyEdited = false;
+        ClearPendingProxyPayment();
+        pendingCancelDjPaymentId = null;
+        pendingCancelDjPaymentAmount = 0;
+        requestCancelDjPaymentPopup = false;
+    }
+
+    private void SuggestBookingPrice(long hourlyRateGil, int duration, bool force)
+    {
+        if (bookingPriceManuallyEdited && !force)
+            return;
+
+        var suggested = Math.Round(
+            hourlyRateGil * Math.Clamp(duration, 0, 2880) / 60m,
+            MidpointRounding.AwayFromZero);
+        bookingPriceGil = Math.Clamp(suggested, 0m, int.MaxValue)
+            .ToString("0", CultureInfo.InvariantCulture);
+        bookingPriceManuallyEdited = false;
+    }
+
+    private void ClearPendingProxyPayment()
+    {
+        pendingProxyPaymentBookingId = null;
+        pendingProxyPaymentAmount = 0;
+        pendingProxyTargetCharacterName = string.Empty;
+        pendingProxyTargetWorldName = string.Empty;
+        requestProxyPaymentPopup = false;
     }
 
     private void EnsureDraft(VenueConnectionConfiguration venue, VenueOpeningScheduleResponse view)

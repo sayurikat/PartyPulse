@@ -124,6 +124,40 @@ public sealed class DjManagementManager : IDisposable
             ApiResult<ArchiveDjResponse>.Failed,
             cancellationToken);
 
+    public Task<ApiResult<UpdateDjSettingsResponse>> UpdateSettingsAsync(
+        VenueConnectionConfiguration venue,
+        UpdateDjSettingsRequest request,
+        CancellationToken cancellationToken) =>
+        WithMutationAsync(
+            venue,
+            async context =>
+            {
+                var result = await apiClient.UpdateDjSettingsAsync(
+                    context.BaseUri!, context.AccessToken!, request, cancellationToken);
+                if (result.Success)
+                    await RefreshCoreAsync(venue, context, cancellationToken);
+                return result;
+            },
+            ApiResult<UpdateDjSettingsResponse>.Failed,
+            cancellationToken);
+
+    public Task<ApiResult<DjCharacterLinkResponse>> LinkCharacterAsync(
+        VenueConnectionConfiguration venue,
+        LinkDjCharacterRequest request,
+        CancellationToken cancellationToken) =>
+        WithMutationAsync(
+            venue,
+            async context =>
+            {
+                var result = await apiClient.LinkDjCharacterAsync(
+                    context.BaseUri!, context.AccessToken!, request, cancellationToken);
+                if (result.Success)
+                    await RefreshCoreAsync(venue, context, cancellationToken);
+                return result;
+            },
+            ApiResult<DjCharacterLinkResponse>.Failed,
+            cancellationToken);
+
     public Task<ApiResult<DjBookingSummary>> SaveBookingAsync(
         VenueConnectionConfiguration venue,
         long? bookingId,
@@ -161,6 +195,59 @@ public sealed class DjManagementManager : IDisposable
                 return result;
             },
             ApiResult<DeleteDjBookingResponse>.Failed,
+            cancellationToken);
+
+    public Task<ApiResult<DjPaymentOperationResponse>> StartPaymentAsync(
+        VenueConnectionConfiguration venue,
+        long bookingId,
+        StartDjPaymentRequest request,
+        CancellationToken cancellationToken) =>
+        WithMutationAsync(
+            venue,
+            async context =>
+            {
+                var result = await apiClient.StartDjPaymentAsync(
+                    context.BaseUri!, context.AccessToken!, bookingId, request, cancellationToken);
+                if (result.Success)
+                    await RefreshCoreAsync(venue, context, cancellationToken);
+                return result;
+            },
+            ApiResult<DjPaymentOperationResponse>.Failed,
+            cancellationToken);
+
+    public Task<ApiResult<DjPaymentOperationResponse>> ConfirmPaymentAsync(
+        VenueConnectionConfiguration venue,
+        long paymentId,
+        CancellationToken cancellationToken) =>
+        WithMutationAsync(
+            venue,
+            async context =>
+            {
+                var result = await apiClient.ConfirmDjPaymentAsync(
+                    context.BaseUri!, context.AccessToken!, paymentId, cancellationToken);
+                if (result.Success)
+                    await RefreshCoreAsync(venue, context, cancellationToken);
+                return result;
+            },
+            ApiResult<DjPaymentOperationResponse>.Failed,
+            cancellationToken);
+
+    public Task<ApiResult<DjPaymentOperationResponse>> CancelPaymentAsync(
+        VenueConnectionConfiguration venue,
+        long paymentId,
+        CancelDjPaymentRequest request,
+        CancellationToken cancellationToken) =>
+        WithMutationAsync(
+            venue,
+            async context =>
+            {
+                var result = await apiClient.CancelDjPaymentAsync(
+                    context.BaseUri!, context.AccessToken!, paymentId, request, cancellationToken);
+                if (result.Success)
+                    await RefreshCoreAsync(venue, context, cancellationToken);
+                return result;
+            },
+            ApiResult<DjPaymentOperationResponse>.Failed,
             cancellationToken);
 
     public void RemoveProfile(Guid profileId)

@@ -877,6 +877,20 @@ public sealed class Plugin : IDalamudPlugin
             ArchiveDjAndReportAsync(venue, djId),
             $"archive DJ {djId} for {venue.VenueCode}");
 
+    public void UpdateDjSettings(
+        VenueConnectionConfiguration venue,
+        UpdateDjSettingsRequest request) =>
+        Observe(
+            UpdateDjSettingsAndReportAsync(venue, request),
+            $"update DJ settings for {venue.VenueCode}");
+
+    public void LinkDjCharacter(
+        VenueConnectionConfiguration venue,
+        LinkDjCharacterRequest request) =>
+        Observe(
+            LinkDjCharacterAndReportAsync(venue, request),
+            $"update DJ character link for {venue.VenueCode}");
+
     public void SaveDjBooking(
         VenueConnectionConfiguration venue,
         long? bookingId,
@@ -892,6 +906,33 @@ public sealed class Plugin : IDalamudPlugin
         Observe(
             DeleteDjBookingAndReportAsync(venue, openingId, bookingId),
             $"delete DJ booking {bookingId} for {venue.VenueCode}");
+
+    public void StartDjPayment(
+        VenueConnectionConfiguration venue,
+        long bookingId,
+        string targetCharacterName,
+        string targetWorldName,
+        bool proxyConfirmed) =>
+        Observe(
+            StartDjPaymentAndReportAsync(
+                venue,
+                bookingId,
+                new StartDjPaymentRequest(targetCharacterName, targetWorldName, proxyConfirmed)),
+            $"start DJ payment for booking {bookingId} at {venue.VenueCode}");
+
+    public void ConfirmDjPayment(
+        VenueConnectionConfiguration venue,
+        long paymentId) =>
+        Observe(
+            ConfirmDjPaymentAndReportAsync(venue, paymentId),
+            $"confirm DJ payment {paymentId} for {venue.VenueCode}");
+
+    public void CancelDjPayment(
+        VenueConnectionConfiguration venue,
+        long paymentId) =>
+        Observe(
+            CancelDjPaymentAndReportAsync(venue, paymentId),
+            $"cancel DJ payment {paymentId} for {venue.VenueCode}");
 
     public void EnsureOpeningPublicationsLoaded(VenueConnectionConfiguration venue)
     {
@@ -2549,6 +2590,40 @@ public sealed class Plugin : IDalamudPlugin
         ReportVipFailure(result.Failure, "The DJ could not be removed.");
     }
 
+    private async Task UpdateDjSettingsAndReportAsync(
+        VenueConnectionConfiguration venue,
+        UpdateDjSettingsRequest request)
+    {
+        var result = await Djs.UpdateSettingsAsync(venue, request, LifetimeToken);
+        if (result.Success && result.Value is not null)
+        {
+            ChatGui.Print(
+                $"Default DJ rate updated to {result.Value.DefaultHourlyRateGil:N0} gil per hour.",
+                "PartyPulse");
+            return;
+        }
+
+        ReportVipFailure(result.Failure, "The default DJ rate could not be updated.");
+    }
+
+    private async Task LinkDjCharacterAndReportAsync(
+        VenueConnectionConfiguration venue,
+        LinkDjCharacterRequest request)
+    {
+        var result = await Djs.LinkCharacterAsync(venue, request, LifetimeToken);
+        if (result.Success)
+        {
+            ChatGui.Print(
+                request.DjId is null
+                    ? $"Unlinked {request.CharacterName} @ {request.WorldName} from its DJ."
+                    : $"Linked {request.CharacterName} @ {request.WorldName} to the DJ.",
+                "PartyPulse");
+            return;
+        }
+
+        ReportVipFailure(result.Failure, "The DJ character link could not be updated.");
+    }
+
     private async Task SaveDjBookingAndReportAsync(
         VenueConnectionConfiguration venue,
         long? bookingId,
@@ -2585,6 +2660,84 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         ReportVipFailure(result.Failure, "The DJ booking could not be removed.");
+    }
+
+    private async Task StartDjPaymentAndReportAsync(
+        VenueConnectionConfiguration venue,
+        long bookingId,
+        StartDjPaymentRequest request)
+    {
+        var readiness = await settlementTradeService.CheckReadyAsync(
+            request.TargetCharacterName,
+            request.TargetWorldName,
+            LifetimeToken);
+        if (!readiness.Success)
+        {
+            ReportPluginIntegrationFailure(
+                readiness.Failure,
+                "The DJ payment was not started because Dropbox is unavailable.");
+            return;
+        }
+
+        var result = await Djs.StartPaymentAsync(venue, bookingId, request, LifetimeToken);
+        if (!result.Success || result.Value is null)
+        {
+            ReportVipFailure(result.Failure, "The DJ payment could not be started.");
+            return;
+        }
+
+        var trade = await settlementTradeService.InitiateTradeAsync(
+            result.Value.TargetCharacterName,
+            result.Value.TargetWorldName,
+            result.Value.AmountGil,
+            LifetimeToken);
+        if (!trade.Success)
+        {
+            ReportPluginIntegrationFailure(
+                trade.Failure,
+                $"DJ payment #{result.Value.PaymentId} was recorded as started, but Dropbox did not start the trade. Cancel the payment attempt before retrying.");
+            return;
+        }
+
+        ChatGui.Print(
+            $"Started DJ payment #{result.Value.PaymentId} for {result.Value.AmountGil:N0} gil. Confirm it after the trade completes.",
+            "PartyPulse");
+    }
+
+    private async Task ConfirmDjPaymentAndReportAsync(
+        VenueConnectionConfiguration venue,
+        long paymentId)
+    {
+        var result = await Djs.ConfirmPaymentAsync(venue, paymentId, LifetimeToken);
+        if (result.Success && result.Value is not null)
+        {
+            ChatGui.Print(
+                $"Confirmed DJ payment #{paymentId} as complete ({result.Value.AmountGil:N0} gil).",
+                "PartyPulse");
+            return;
+        }
+
+        ReportVipFailure(result.Failure, "The DJ payment could not be confirmed.");
+    }
+
+    private async Task CancelDjPaymentAndReportAsync(
+        VenueConnectionConfiguration venue,
+        long paymentId)
+    {
+        var result = await Djs.CancelPaymentAsync(
+            venue,
+            paymentId,
+            new CancelDjPaymentRequest(true),
+            LifetimeToken);
+        if (result.Success && result.Value is not null)
+        {
+            ChatGui.Print(
+                $"Cancelled DJ payment #{paymentId}; the {result.Value.AmountGil:N0} gil refund was confirmed.",
+                "PartyPulse");
+            return;
+        }
+
+        ReportVipFailure(result.Failure, "The DJ payment could not be cancelled.");
     }
 
     private async Task RunNewVipMacroAndReportAsync(
