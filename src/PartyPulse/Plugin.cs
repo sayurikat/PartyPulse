@@ -20,6 +20,7 @@ using PartyPulse.Notifications;
 using PartyPulse.OpeningPublications;
 using PartyPulse.PartyFinder;
 using PartyPulse.Photoshoots;
+using PartyPulse.OtherSales;
 using PartyPulse.Models;
 using PartyPulse.SelfService;
 using PartyPulse.Staff;
@@ -95,6 +96,7 @@ public sealed class Plugin : IDalamudPlugin
             Log);
         VipPerks = new VipPerkManagementManager(Configuration, Authentication, apiClient, IdentityProvider);
         Photoshoots = new PhotoshootManagementManager(Configuration, Authentication, apiClient, IdentityProvider);
+        OtherSales = new OtherSalesManagementManager(Configuration, Authentication, apiClient, IdentityProvider);
         Court = new CourtManagementManager(Configuration, Authentication, apiClient, IdentityProvider);
         Staff = new StaffManagementManager(Configuration, Authentication, apiClient, IdentityProvider);
         Bar = new BarManagementManager(Configuration, Authentication, apiClient, IdentityProvider);
@@ -228,6 +230,8 @@ public sealed class Plugin : IDalamudPlugin
 
     public PhotoshootManagementManager Photoshoots { get; }
 
+    public OtherSalesManagementManager OtherSales { get; }
+
     public CourtManagementManager Court { get; }
 
     public StaffManagementManager Staff { get; }
@@ -291,6 +295,7 @@ public sealed class Plugin : IDalamudPlugin
         Notifications.Dispose();
         Finance.Dispose();
         Photoshoots.Dispose();
+        OtherSales.Dispose();
         Court.Dispose();
         Staff.Dispose();
         Bar.Dispose();
@@ -462,6 +467,7 @@ public sealed class Plugin : IDalamudPlugin
         Vip.RemoveProfile(venue.ProfileId);
         VipPerks.RemoveProfile(venue.ProfileId);
         Photoshoots.RemoveProfile(venue.ProfileId);
+        OtherSales.RemoveProfile(venue.ProfileId);
         Court.RemoveProfile(venue.ProfileId);
         Staff.RemoveProfile(venue.ProfileId);
         Bar.RemoveProfile(venue.ProfileId);
@@ -1106,6 +1112,36 @@ public sealed class Plugin : IDalamudPlugin
     public void CreatePhotoshootSettlement(VenueConnectionConfiguration venue, CreatePhotoshootSettlementRequest request) =>
         Observe(CreatePhotoshootSettlementAndReportAsync(venue, request), $"create photoshoot settlement for {venue.VenueCode}");
 
+    public void EnsureOtherSalesLoaded(VenueConnectionConfiguration venue)
+    {
+        if (OtherSales.ShouldLoad(venue))
+            Observe(OtherSales.LoadAsync(venue, false, LifetimeToken), $"load Other Sales for {venue.VenueCode}");
+    }
+
+    public void RefreshOtherSales(VenueConnectionConfiguration venue) =>
+        Observe(OtherSales.LoadAsync(venue, true, LifetimeToken), $"refresh Other Sales for {venue.VenueCode}");
+
+    public void CreateOtherSaleItem(VenueConnectionConfiguration venue, CreateOtherSaleItemRequest request) =>
+        Observe(CreateOtherSaleItemAndReportAsync(venue, request), $"create Other Sales item for {venue.VenueCode}");
+
+    public void UpdateOtherSaleItem(VenueConnectionConfiguration venue, int itemId, UpdateOtherSaleItemRequest request) =>
+        Observe(UpdateOtherSaleItemAndReportAsync(venue, itemId, request), $"update Other Sales item {itemId}");
+
+    public void UpdateOtherSaleSellerPercentage(VenueConnectionConfiguration venue, int itemId, UpdateOtherSaleSellerPercentageRequest request) =>
+        Observe(UpdateOtherSaleSellerPercentageAndReportAsync(venue, itemId, request), $"update Other Sales seller percentage {itemId}");
+
+    public void SellOtherSale(VenueConnectionConfiguration venue, SellOtherSaleRequest request) =>
+        Observe(SellOtherSaleAndReportAsync(venue, request), $"record Other Sale for {venue.VenueCode}");
+
+    public void SetOtherSalePaymentStatus(VenueConnectionConfiguration venue, long saleId, SetOtherSalePaymentStatusRequest request) =>
+        Observe(SetOtherSalePaymentStatusAndReportAsync(venue, saleId, request), $"set Other Sale {saleId} payment status");
+
+    public void CancelOtherSale(VenueConnectionConfiguration venue, long saleId, CancelOtherSaleRequest request) =>
+        Observe(CancelOtherSaleAndReportAsync(venue, saleId, request), $"cancel Other Sale {saleId}");
+
+    public void CreateOtherSalesSettlement(VenueConnectionConfiguration venue, CreateOtherSalesSettlementRequest request) =>
+        Observe(CreateOtherSalesSettlementAndReportAsync(venue, request), $"create Other Sales settlement for {venue.VenueCode}");
+
     public void EnsureCourtLoaded(VenueConnectionConfiguration venue)
     {
         if (Court.ShouldLoad(venue))
@@ -1532,6 +1568,7 @@ public sealed class Plugin : IDalamudPlugin
         Vip.RemoveProfile(venue.ProfileId);
         VipPerks.RemoveProfile(venue.ProfileId);
         Photoshoots.RemoveProfile(venue.ProfileId);
+        OtherSales.RemoveProfile(venue.ProfileId);
         Court.RemoveProfile(venue.ProfileId);
         Staff.RemoveProfile(venue.ProfileId);
         Bar.RemoveProfile(venue.ProfileId);
@@ -1664,6 +1701,7 @@ public sealed class Plugin : IDalamudPlugin
         {
             await VipPerks.LoadAsync(venue, true, LifetimeToken);
             await RefreshPhotoshootsIfLoadedAsync(venue);
+            await RefreshOtherSalesIfLoadedAsync(venue);
             ChatGui.Print($"Created VIP package '{request.Name}'.", "PartyPulse");
             return;
         }
@@ -1681,6 +1719,7 @@ public sealed class Plugin : IDalamudPlugin
         {
             await VipPerks.LoadAsync(venue, true, LifetimeToken);
             await RefreshPhotoshootsIfLoadedAsync(venue);
+            await RefreshOtherSalesIfLoadedAsync(venue);
             ChatGui.Print($"Updated VIP package '{request.Name}'.", "PartyPulse");
             return;
         }
@@ -1704,6 +1743,7 @@ public sealed class Plugin : IDalamudPlugin
 
             await VipPerks.LoadAsync(venue, true, LifetimeToken);
             await RefreshPhotoshootsIfLoadedAsync(venue);
+            await RefreshOtherSalesIfLoadedAsync(venue);
 
             if (result.Value.WasNewVip && result.Value.OpeningId is { } openingId)
             {
@@ -1744,6 +1784,7 @@ public sealed class Plugin : IDalamudPlugin
         {
             await VipPerks.LoadAsync(venue, true, LifetimeToken);
             await RefreshPhotoshootsIfLoadedAsync(venue);
+            await RefreshOtherSalesIfLoadedAsync(venue);
             ChatGui.Print(
                 $"Linked {request.CharacterName} @ {request.WorldName} to the VIP player.",
                 "PartyPulse");
@@ -1801,6 +1842,7 @@ public sealed class Plugin : IDalamudPlugin
         {
             await VipPerks.LoadAsync(venue, true, LifetimeToken);
             await RefreshPhotoshootsIfLoadedAsync(venue);
+            await RefreshOtherSalesIfLoadedAsync(venue);
             ChatGui.Print("Unlinked the character from the VIP player.", "PartyPulse");
             return;
         }
@@ -1822,6 +1864,7 @@ public sealed class Plugin : IDalamudPlugin
         {
             await VipPerks.LoadAsync(venue, true, LifetimeToken);
             await RefreshPhotoshootsIfLoadedAsync(venue);
+            await RefreshOtherSalesIfLoadedAsync(venue);
             ChatGui.Print(
                 $"Cancelled VIP subscription #{subscriptionId}. Refunds must be handled separately.",
                 "PartyPulse");
@@ -2509,6 +2552,7 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         await RefreshPhotoshootsIfLoadedAsync(venue);
+        await RefreshOtherSalesIfLoadedAsync(venue);
         ChatGui.Print($"Created VIP perk '{request.Name}'.", "PartyPulse");
     }
 
@@ -2525,6 +2569,7 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         await RefreshPhotoshootsIfLoadedAsync(venue);
+        await RefreshOtherSalesIfLoadedAsync(venue);
         ChatGui.Print($"Updated VIP perk '{request.Name}'.", "PartyPulse");
     }
 
@@ -2547,6 +2592,7 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         await RefreshPhotoshootsIfLoadedAsync(venue);
+        await RefreshOtherSalesIfLoadedAsync(venue);
         ChatGui.Print(
             request.Assigned ? "VIP perk assigned to package." : "VIP perk removed from package.",
             "PartyPulse");
@@ -2616,6 +2662,7 @@ public sealed class Plugin : IDalamudPlugin
         var result = await VipPerks.RedeemAsync(venue, request, LifetimeToken);
         if (!result.Success || result.Value is null) { ReportVipFailure(result.Failure, "The VIP perk could not be redeemed."); return; }
         await Photoshoots.LoadAsync(venue, true, LifetimeToken);
+        await RefreshOtherSalesIfLoadedAsync(venue);
         ChatGui.Print($"Redeemed {result.Value.PerkName} for {request.TargetCharacterName}.", "PartyPulse");
     }
 
@@ -2624,6 +2671,7 @@ public sealed class Plugin : IDalamudPlugin
         var result = await VipPerks.UndoAsync(venue, redemptionId, new UndoVipPerkRedemptionRequest(reason), LifetimeToken);
         if (!result.Success) { ReportVipFailure(result.Failure, "The VIP perk redemption could not be undone."); return; }
         await Photoshoots.LoadAsync(venue, true, LifetimeToken);
+        await RefreshOtherSalesIfLoadedAsync(venue);
         ChatGui.Print($"VIP perk redemption #{redemptionId} was undone.", "PartyPulse");
     }
 
@@ -2689,6 +2737,124 @@ public sealed class Plugin : IDalamudPlugin
                 ? $"Photoshoot sale #{saleId} was cancelled and VIP perk redemption #{redemptionId} was restored."
                 : $"Photoshoot sale #{saleId} was cancelled.",
             "PartyPulse");
+    }
+
+    private async Task CreateOtherSaleItemAndReportAsync(
+        VenueConnectionConfiguration venue,
+        CreateOtherSaleItemRequest request)
+    {
+        var result = await OtherSales.CreateItemAsync(venue, request, LifetimeToken);
+        if (!result.Success)
+        {
+            ReportVipFailure(result.Failure, "The Other Sales item could not be created.");
+            return;
+        }
+
+        ChatGui.Print($"Created Other Sales item '{request.Name}'.", "PartyPulse");
+    }
+
+    private async Task UpdateOtherSaleItemAndReportAsync(
+        VenueConnectionConfiguration venue,
+        int itemId,
+        UpdateOtherSaleItemRequest request)
+    {
+        var result = await OtherSales.UpdateItemAsync(venue, itemId, request, LifetimeToken);
+        if (!result.Success)
+        {
+            ReportVipFailure(result.Failure, "The Other Sales item could not be updated.");
+            return;
+        }
+
+        ChatGui.Print($"Updated Other Sales item '{request.Name}'.", "PartyPulse");
+    }
+
+    private async Task UpdateOtherSaleSellerPercentageAndReportAsync(
+        VenueConnectionConfiguration venue,
+        int itemId,
+        UpdateOtherSaleSellerPercentageRequest request)
+    {
+        var result = await OtherSales.UpdateSellerPercentageAsync(venue, itemId, request, LifetimeToken);
+        if (!result.Success || result.Value is null)
+        {
+            ReportVipFailure(result.Failure, "The seller percentage could not be updated.");
+            return;
+        }
+
+        ChatGui.Print(
+            $"Seller keeps {result.Value.SellerPercentage:0.##}% for Other Sales item #{itemId}.",
+            "PartyPulse");
+    }
+
+    private async Task SellOtherSaleAndReportAsync(
+        VenueConnectionConfiguration venue,
+        SellOtherSaleRequest request)
+    {
+        var result = await OtherSales.SellAsync(venue, request, LifetimeToken);
+        if (!result.Success || result.Value is null)
+        {
+            ReportVipFailure(result.Failure, "The Other Sale could not be recorded.");
+            return;
+        }
+
+        await VipPerks.LoadAsync(venue, true, LifetimeToken);
+        await Finance.LoadAsync(venue, true, LifetimeToken);
+        var price = result.Value.PriceType == "vip_perk"
+            ? $"VIP perk {result.Value.PricePerkName}"
+            : $"{result.Value.TotalGil:N0} gil";
+        ChatGui.Print(
+            $"Recorded Other Sale #{result.Value.SaleId}: {result.Value.Quantity:N0} × {result.Value.ItemName} " +
+            $"to {result.Value.BuyerCharacterName} for {price}. Seller keeps {result.Value.SellerShareGil:N0} gil; " +
+            $"{result.Value.VenueShareGil:N0} gil is owed to the venue.",
+            "PartyPulse");
+    }
+
+    private async Task SetOtherSalePaymentStatusAndReportAsync(
+        VenueConnectionConfiguration venue,
+        long saleId,
+        SetOtherSalePaymentStatusRequest request)
+    {
+        var result = await OtherSales.SetSalePaymentStatusAsync(venue, saleId, request, LifetimeToken);
+        if (!result.Success || result.Value is null)
+        {
+            ReportVipFailure(result.Failure, "The Other Sale payment status could not be updated.");
+            return;
+        }
+
+        await Finance.LoadAsync(venue, true, LifetimeToken);
+        ChatGui.Print(
+            request.Settled
+                ? $"Other Sale #{saleId} was marked settled."
+                : $"Other Sale #{saleId} was marked unpaid.",
+            "PartyPulse");
+    }
+
+    private async Task CancelOtherSaleAndReportAsync(
+        VenueConnectionConfiguration venue,
+        long saleId,
+        CancelOtherSaleRequest request)
+    {
+        var result = await OtherSales.CancelSaleAsync(venue, saleId, request, LifetimeToken);
+        if (!result.Success || result.Value is null)
+        {
+            ReportVipFailure(result.Failure, "The Other Sale could not be cancelled.");
+            return;
+        }
+
+        await VipPerks.LoadAsync(venue, true, LifetimeToken);
+        await Finance.LoadAsync(venue, true, LifetimeToken);
+        ChatGui.Print(
+            result.Value.ReleasedPerkRedemptionId is { } redemptionId
+                ? $"Other Sale #{saleId} was cancelled, the buyer was confirmed refunded, and VIP perk redemption #{redemptionId} was restored."
+                : $"Other Sale #{saleId} was cancelled and the buyer was confirmed refunded.",
+            "PartyPulse");
+    }
+
+    private async Task RefreshOtherSalesIfLoadedAsync(VenueConnectionConfiguration venue)
+    {
+        if (OtherSales.GetSnapshot(venue).Status == OtherSalesManagementStatus.NotLoaded)
+            return;
+
+        await OtherSales.LoadAsync(venue, true, LifetimeToken);
     }
 
     private async Task BarMutationAndReportAsync<T>(
@@ -2833,6 +2999,49 @@ public sealed class Plugin : IDalamudPlugin
         ChatGui.Print($"Created photoshoot settlement #{result.Value.SettlementId} for {result.Value.AmountGil:N0} gil.", "PartyPulse");
     }
 
+    private async Task CreateOtherSalesSettlementAndReportAsync(
+        VenueConnectionConfiguration venue,
+        CreateOtherSalesSettlementRequest request)
+    {
+        var readiness = await settlementTradeService.CheckReadyAsync(
+            request.TargetCharacterName,
+            request.TargetWorldName,
+            LifetimeToken);
+        if (!readiness.Success)
+        {
+            ReportPluginIntegrationFailure(
+                readiness.Failure,
+                "The settlement was not created because Dropbox is unavailable.");
+            return;
+        }
+
+        var result = await Finance.CreateOtherSalesSettlementAsync(venue, request, LifetimeToken);
+        if (!result.Success || result.Value is null)
+        {
+            ReportVipFailure(result.Failure, "The Other Sales settlement could not be created.");
+            return;
+        }
+
+        var trade = await settlementTradeService.InitiateTradeAsync(
+            result.Value.TargetCharacterName,
+            result.Value.TargetWorldName,
+            result.Value.AmountGil,
+            LifetimeToken);
+        await OtherSales.LoadAsync(venue, true, LifetimeToken);
+        Notifications.PollSoon();
+        if (!trade.Success)
+        {
+            ReportPluginIntegrationFailure(
+                trade.Failure,
+                $"Settlement #{result.Value.SettlementId} was created, but Dropbox did not start the trade.");
+            return;
+        }
+
+        ChatGui.Print(
+            $"Created Other Sales settlement #{result.Value.SettlementId} for {result.Value.AmountGil:N0} gil.",
+            "PartyPulse");
+    }
+
     private async Task CreateVipSettlementAndReportAsync(
         VenueConnectionConfiguration venue,
         CreateVipSettlementRequest request)
@@ -2907,6 +3116,7 @@ public sealed class Plugin : IDalamudPlugin
 
         await Vip.LoadAsync(venue, true, LifetimeToken);
         await Photoshoots.LoadAsync(venue, true, LifetimeToken);
+        await RefreshOtherSalesIfLoadedAsync(venue);
         await VipPerks.LoadAsync(venue, true, LifetimeToken);
         Notifications.PollSoon();
         ChatGui.Print(

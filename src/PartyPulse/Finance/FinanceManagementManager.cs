@@ -130,6 +130,25 @@ public sealed class FinanceManagementManager : IDisposable
             },
             cancellationToken);
 
+    public Task<ApiResult<CreateOtherSalesSettlementResponse>> CreateOtherSalesSettlementAsync(
+        VenueConnectionConfiguration venue,
+        CreateOtherSalesSettlementRequest request,
+        CancellationToken cancellationToken) =>
+        WithGateAsync(
+            venue,
+            async () =>
+            {
+                var context = await GetAuthorizedContextAsync(venue, cancellationToken);
+                if (!context.Success)
+                    return ApiResult<CreateOtherSalesSettlementResponse>.Failed(context.Failure!);
+                var result = await apiClient.CreateOtherSalesSettlementAsync(
+                    context.BaseUri!, context.AccessToken!, request, cancellationToken);
+                if (result.Success)
+                    await RefreshAfterMutationAsync(venue, context, cancellationToken);
+                return result;
+            },
+            cancellationToken);
+
     public Task<ApiResult<CreateBarSettlementResponse>> CreateBarSettlementAsync(
         VenueConnectionConfiguration venue,
         CreateBarSettlementRequest request,

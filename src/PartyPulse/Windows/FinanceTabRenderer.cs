@@ -80,6 +80,11 @@ public sealed class FinanceTabRenderer(Plugin plugin)
         ImGui.TextDisabled($"Pending: {view.PersonalPendingPhotoshootGil:N0} gil");
         ImGui.SameLine();
         ImGui.TextUnformatted($"Available: {view.PersonalAvailablePhotoshootGil:N0} gil");
+        ImGui.TextUnformatted($"My unsettled Other Sales: {view.PersonalUnpaidOtherSalesGil:N0} gil");
+        ImGui.SameLine();
+        ImGui.TextDisabled($"Pending: {view.PersonalPendingOtherSalesGil:N0} gil");
+        ImGui.SameLine();
+        ImGui.TextUnformatted($"Available: {view.PersonalAvailableOtherSalesGil:N0} gil");
 
         if (view.Capabilities.CanManageSettlements)
         {

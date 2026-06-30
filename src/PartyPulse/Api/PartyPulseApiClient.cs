@@ -1023,6 +1023,54 @@ public sealed class PartyPulseApiClient : IDisposable
             static payload => payload.SaleId > 0 && payload.VoidedAt != default,
             cancellationToken);
 
+    public Task<ApiResult<OtherSalesManagementViewResponse>> GetOtherSalesAsync(
+        Uri baseUri, string accessToken, CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<OtherSalesManagementViewResponse>(
+            baseUri, HttpMethod.Get, "api/v1/other-sales", accessToken, null,
+            ValidateOtherSalesViewResponse, cancellationToken);
+
+    public Task<ApiResult<OtherSaleItemOperationResponse>> CreateOtherSaleItemAsync(
+        Uri baseUri, string accessToken, CreateOtherSaleItemRequest request, CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<OtherSaleItemOperationResponse>(
+            baseUri, HttpMethod.Post, "api/v1/other-sales/items", accessToken, request,
+            static payload => payload.ItemId > 0, cancellationToken);
+
+    public Task<ApiResult<OtherSaleItemOperationResponse>> UpdateOtherSaleItemAsync(
+        Uri baseUri, string accessToken, int itemId, UpdateOtherSaleItemRequest request, CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<OtherSaleItemOperationResponse>(
+            baseUri, HttpMethod.Put, $"api/v1/other-sales/items/{itemId}", accessToken, request,
+            static payload => payload.ItemId > 0, cancellationToken);
+
+    public Task<ApiResult<UpdateOtherSaleSellerPercentageResponse>> UpdateOtherSaleSellerPercentageAsync(
+        Uri baseUri, string accessToken, int itemId, UpdateOtherSaleSellerPercentageRequest request, CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<UpdateOtherSaleSellerPercentageResponse>(
+            baseUri, HttpMethod.Put, $"api/v1/other-sales/items/{itemId}/seller-percentage", accessToken, request,
+            static payload => payload.ItemId > 0 && payload.SellerPercentage is >= 0m and <= 100m,
+            cancellationToken);
+
+    public Task<ApiResult<SellOtherSaleResponse>> SellOtherSaleAsync(
+        Uri baseUri, string accessToken, SellOtherSaleRequest request, CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<SellOtherSaleResponse>(
+            baseUri, HttpMethod.Post, "api/v1/other-sales/sales", accessToken, request,
+            static payload => payload.SaleId > 0 && payload.ItemId > 0 && payload.Quantity > 0 &&
+                              payload.TotalGil >= 0 && payload.SellerPercentage is >= 0m and <= 100m &&
+                              payload.SellerShareGil >= 0 && payload.VenueShareGil >= 0 &&
+                              payload.SellerShareGil + payload.VenueShareGil == payload.TotalGil &&
+                              payload.SoldAt != default,
+            cancellationToken);
+
+    public Task<ApiResult<OtherSalePaymentStatusResponse>> SetOtherSalePaymentStatusAsync(
+        Uri baseUri, string accessToken, long saleId, SetOtherSalePaymentStatusRequest request, CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<OtherSalePaymentStatusResponse>(
+            baseUri, HttpMethod.Put, $"api/v1/other-sales/sales/{saleId}/payment-status", accessToken, request,
+            static payload => payload.SaleId > 0, cancellationToken);
+
+    public Task<ApiResult<OtherSaleCancellationResponse>> CancelOtherSaleAsync(
+        Uri baseUri, string accessToken, long saleId, CancelOtherSaleRequest request, CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<OtherSaleCancellationResponse>(
+            baseUri, HttpMethod.Post, $"api/v1/other-sales/sales/{saleId}/cancel", accessToken, request,
+            static payload => payload.SaleId > 0 && payload.VoidedAt != default, cancellationToken);
+
     public Task<ApiResult<BarManagementViewResponse>> GetBarAsync(
         Uri baseUri, string accessToken, CancellationToken cancellationToken) =>
         SendAuthorizedAsync<BarManagementViewResponse>(
@@ -1153,6 +1201,27 @@ public sealed class PartyPulseApiClient : IDisposable
             baseUri,
             HttpMethod.Post,
             "api/v1/finance/settlements/photoshoots",
+            accessToken,
+            request,
+            static payload => payload.SettlementId > 0 &&
+                              payload.AmountGil > 0 &&
+                              payload.TargetUserId > 0 &&
+                              payload.TargetCharacterId > 0 &&
+                              !string.IsNullOrWhiteSpace(payload.TargetCharacterName) &&
+                              !string.IsNullOrWhiteSpace(payload.TargetWorldName) &&
+                              !string.IsNullOrWhiteSpace(payload.TargetUserDisplayName) &&
+                              payload.CreatedAt != default,
+            cancellationToken);
+
+    public Task<ApiResult<CreateOtherSalesSettlementResponse>> CreateOtherSalesSettlementAsync(
+        Uri baseUri,
+        string accessToken,
+        CreateOtherSalesSettlementRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<CreateOtherSalesSettlementResponse>(
+            baseUri,
+            HttpMethod.Post,
+            "api/v1/finance/settlements/other-sales",
             accessToken,
             request,
             static payload => payload.SettlementId > 0 &&
@@ -1730,6 +1799,34 @@ public sealed class PartyPulseApiClient : IDisposable
         payload.VipStatuses.All(static value => value.CharacterId > 0 && value.SubscriptionId > 0 && value.VipPackageId > 0) &&
         payload.VipPerkAvailability.All(static value => value.CharacterId > 0 && value.PerkId > 0);
 
+    private static bool ValidateOtherSalesViewResponse(OtherSalesManagementViewResponse payload) =>
+        payload.Capabilities is not null &&
+        payload.PersonalGrossGil >= 0 && payload.PersonalSellerShareGil >= 0 &&
+        payload.PersonalUnpaidGil >= 0 && payload.PersonalPendingGil >= 0 &&
+        payload.PersonalAvailableGil >= 0 &&
+        payload.Items is not null && payload.Perks is not null && payload.Sales is not null &&
+        payload.VipStatuses is not null && payload.VipPerkAvailability is not null &&
+        payload.Items.All(static item =>
+            item.ItemId > 0 && !string.IsNullOrWhiteSpace(item.Name) &&
+            item.SellerPercentage is >= 0m and <= 100m &&
+            ((item.PricePerUnitGil is >= 0 && item.PricePerkId is null) ||
+             (item.PricePerUnitGil is null && item.PricePerkId is > 0))) &&
+        payload.Sales.All(static sale =>
+            sale.SaleId > 0 && sale.ItemId > 0 && sale.Quantity > 0 &&
+            !string.IsNullOrWhiteSpace(sale.PriceType) &&
+            !string.IsNullOrWhiteSpace(sale.ItemName) &&
+            !string.IsNullOrWhiteSpace(sale.SellerDisplayName) &&
+            !string.IsNullOrWhiteSpace(sale.BuyerCharacterName) &&
+            !string.IsNullOrWhiteSpace(sale.BuyerWorldName) &&
+            sale.UnitPriceGil >= 0 && sale.TotalGil >= 0 &&
+            sale.SellerPercentage is >= 0m and <= 100m &&
+            sale.SellerShareGil >= 0 && sale.VenueShareGil >= 0 &&
+            sale.SellerShareGil + sale.VenueShareGil == sale.TotalGil &&
+            ((sale.PriceType == "gil" && sale.PricePerkId is null) ||
+             (sale.PriceType == "vip_perk" && sale.PricePerkId is > 0 && sale.Quantity == 1))) &&
+        payload.VipStatuses.All(static value => value.CharacterId > 0 && value.SubscriptionId > 0 && value.VipPackageId > 0) &&
+        payload.VipPerkAvailability.All(static value => value.CharacterId > 0 && value.PerkId > 0);
+
     private static bool ValidateFinanceViewResponse(FinanceViewResponse payload) =>
         payload.Capabilities is not null &&
         payload.PersonalUnpaidVipGil >= 0 &&
@@ -1738,6 +1835,9 @@ public sealed class PartyPulseApiClient : IDisposable
         payload.PersonalUnpaidPhotoshootGil >= 0 &&
         payload.PersonalPendingPhotoshootGil >= 0 &&
         payload.PersonalAvailablePhotoshootGil >= 0 &&
+        payload.PersonalUnpaidOtherSalesGil >= 0 &&
+        payload.PersonalPendingOtherSalesGil >= 0 &&
+        payload.PersonalAvailableOtherSalesGil >= 0 &&
         payload.VenuePendingCount >= 0 &&
         payload.Settlements is not null &&
         payload.Items is not null &&

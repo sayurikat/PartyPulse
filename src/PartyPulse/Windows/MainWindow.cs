@@ -18,6 +18,7 @@ public sealed class MainWindow : Window, IDisposable
     private readonly Plugin plugin;
     private readonly VipTabRenderer vipTab;
     private readonly PhotoshootsTabRenderer photoshootsTab;
+    private readonly OtherSalesTabRenderer otherSalesTab;
     private readonly BarTabRenderer barTab;
     private readonly CourtTabRenderer courtTab;
     private readonly StaffTabRenderer staffTab;
@@ -48,6 +49,7 @@ public sealed class MainWindow : Window, IDisposable
         this.plugin = plugin;
         vipTab = new VipTabRenderer(plugin);
         photoshootsTab = new PhotoshootsTabRenderer(plugin);
+        otherSalesTab = new OtherSalesTabRenderer(plugin);
         barTab = new BarTabRenderer(plugin);
         courtTab = new CourtTabRenderer(plugin);
         staffTab = new StaffTabRenderer(plugin);
@@ -238,6 +240,7 @@ public sealed class MainWindow : Window, IDisposable
             partyFinderTab.Draw(selectedVenue);
             vipTab.Draw(selectedVenue);
             photoshootsTab.Draw(selectedVenue);
+            otherSalesTab.Draw(selectedVenue);
             barTab.Draw(selectedVenue);
             courtTab.Draw(selectedVenue);
             staffTab.Draw(selectedVenue);
