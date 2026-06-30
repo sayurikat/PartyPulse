@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Numerics;
@@ -15,6 +16,8 @@ public sealed class StaffTabRenderer(Plugin plugin)
     private const string TimeFormat = "yyyy-MM-dd HH:mm";
     private const string ProxyPayoutPopupName = "Confirm proxy Staff payout###PartyPulseStaffProxyPayout";
     private const string RepaymentPopupName = "Confirm Staff repayment###PartyPulseStaffRepayment";
+    private const string OvertimePopupName = "Confirm Staff overtime###PartyPulseStaffOvertime";
+    private const string CancelAbsencePopupName = "Cancel Staff absence###PartyPulseStaffCancelAbsence";
 
     private static readonly Vector4 PositiveBalanceColor = new(1f, 0.72f, 0.25f, 1f);
     private static readonly Vector4 NegativeBalanceColor = new(0.95f, 0.25f, 0.25f, 1f);
@@ -22,7 +25,6 @@ public sealed class StaffTabRenderer(Plugin plugin)
 
     private Guid activeProfileId;
     private long selectedOpeningId;
-    private long selectedStaffId;
     private long selectedCharacterLinkStaffId;
     private long selectedPayoutStaffId;
 
@@ -41,10 +43,15 @@ public sealed class StaffTabRenderer(Plugin plugin)
     private string staffNote = string.Empty;
     private bool staffArchived;
 
-    private string clockInText = string.Empty;
-    private string clockOutText = string.Empty;
-    private bool includeClockOut;
-    private string timeError = string.Empty;
+    private readonly Dictionary<long, AttendanceRowState> attendanceRows = new();
+    private readonly Dictionary<long, string> clockOutTextByEntry = new();
+    private readonly Dictionary<long, string> clockOutErrorByEntry = new();
+    private readonly HashSet<long> additionalEntryStaffIds = new();
+    private PendingStaffTimeEntry? pendingOvertimeEntry;
+    private bool openOvertimePopup;
+    private long pendingCancelAbsenceId;
+    private bool openCancelAbsencePopup;
+    private string absenceCancelReason = string.Empty;
 
     private long pendingCancelEntryId;
     private long pendingCancelTransactionId;
@@ -119,6 +126,8 @@ public sealed class StaffTabRenderer(Plugin plugin)
         }
 
         DrawTimeEntryCancellationPopup(venue, busy);
+        DrawAbsenceCancellationPopup(venue, busy);
+        DrawOvertimePopup(venue, busy);
         DrawTransactionCancellationPopup(venue, busy);
         DrawProxyPayoutPopup(venue, view, busy);
         DrawRepaymentPopup(venue, view, busy);
@@ -169,141 +178,230 @@ public sealed class StaffTabRenderer(Plugin plugin)
         bool busy)
     {
         if (!ImGui.CollapsingHeader(
-                "Clock-ins / clock-outs",
+                "Clock-ins / absences",
                 ImGuiTreeNodeFlags.DefaultOpen))
         {
             return;
         }
 
-        var staff = view.StaffMembers
-            .Where(member => member.ArchivedAt is null)
-            .OrderBy(member => member.DisplayName)
-            .ToArray();
         var opening = view.Openings.FirstOrDefault(
             candidate => candidate.OpeningId == selectedOpeningId);
-        if (staff.Length == 0 || opening is null)
+        var activeStaff = view.StaffMembers
+            .Where(static member => member.ArchivedAt is null)
+            .OrderBy(static member => member.DisplayName)
+            .ToArray();
+        if (opening is null || activeStaff.Length == 0)
         {
             ImGui.TextDisabled("An active staff listing and opening are required.");
             return;
         }
 
-        EnsureSelectedStaff(staff);
-        var selected = staff.First(member => member.StaffMemberId == selectedStaffId);
-        if (ImGui.BeginCombo("Staff member##Clock", selected.DisplayName))
-        {
-            foreach (var member in staff)
-            {
-                var isSelected = member.StaffMemberId == selectedStaffId;
-                if (ImGui.Selectable(member.DisplayName, isSelected))
-                {
-                    selectedStaffId = member.StaffMemberId;
-                }
-
-                if (isSelected)
-                {
-                    ImGui.SetItemDefaultFocus();
-                }
-            }
-
-            ImGui.EndCombo();
-        }
+        var activeAbsenceStaffIds = view.Absences
+            .Where(item => item.OpeningId == opening.OpeningId && item.CancelledAt is null)
+            .Select(static item => item.StaffMemberId)
+            .ToHashSet();
+        var activeStaffIds = activeStaff
+            .Select(static member => member.StaffMemberId)
+            .ToHashSet();
+        var accountedStaffIds = view.TimeEntries
+            .Where(item => item.OpeningId == opening.OpeningId && item.Status != "cancelled")
+            .Select(static item => item.StaffMemberId)
+            .Concat(activeAbsenceStaffIds)
+            .Where(activeStaffIds.Contains)
+            .ToHashSet();
+        var pendingStaff = activeStaff
+            .Where(member =>
+                !accountedStaffIds.Contains(member.StaffMemberId) ||
+                additionalEntryStaffIds.Contains(member.StaffMemberId))
+            .ToArray();
 
         ImGui.TextDisabled(
-            $"Rate {selected.EffectiveHourlyRateGil:N0}/hour + " +
-            $"{selected.CustomFixedAmountGil:N0} fixed");
-
-        ImGui.InputText("Clock in##StaffTime", ref clockInText, 32);
-        ImGui.SameLine();
-        if (ImGui.SmallButton("Now##ClockIn"))
-        {
-            clockInText = FormatInputTime(venue, DateTimeOffset.UtcNow);
-        }
-        ImGui.SameLine();
-        if (ImGui.SmallButton("Opening start"))
-        {
-            clockInText = FormatInputTime(venue, opening.OpensAt);
-        }
-
-        ImGui.Checkbox("Set clock-out now##StaffTime", ref includeClockOut);
-        if (includeClockOut)
-        {
-            ImGui.InputText("Clock out##StaffTime", ref clockOutText, 32);
-            ImGui.SameLine();
-            if (ImGui.SmallButton("Now##ClockOut"))
-            {
-                clockOutText = FormatInputTime(venue, DateTimeOffset.UtcNow);
-            }
-            ImGui.SameLine();
-            if (ImGui.SmallButton("Opening end"))
-            {
-                clockOutText = FormatInputTime(venue, opening.ClosesAt);
-            }
-        }
-
+            $"{accountedStaffIds.Count} accounted for; {pendingStaff.Length} awaiting a clock-in or absence.");
         ImGui.TextDisabled(
             $"Input timezone: {VenueTimeZone.Resolve(venue).DisplayName}; format {TimeFormat}");
-        if (timeError.Length > 0)
+
+        if (pendingStaff.Length == 0)
         {
-            ImGui.TextWrapped(timeError);
+            ImGui.TextUnformatted("All listed staff are accounted for this opening.");
+            return;
         }
 
-        ImGui.BeginDisabled(busy);
-        if (ImGui.Button("Record clock entry"))
+        foreach (var member in pendingStaff)
         {
-            RecordClockEntry(venue, opening);
+            ImGui.PushID($"staff-attendance-{member.StaffMemberId}");
+            var state = GetAttendanceRowState(venue, member.StaffMemberId);
+            var firstSeen = view.FirstSeen
+                .Where(item =>
+                    item.OpeningId == opening.OpeningId &&
+                    item.StaffMemberId == member.StaffMemberId)
+                .OrderBy(static item => item.FirstSeenAt)
+                .FirstOrDefault();
+
+            ImGui.Separator();
+            ImGui.TextUnformatted(member.DisplayName);
+            ImGui.SameLine();
+            ImGui.TextDisabled(
+                $"{member.JobName} | {member.EffectiveHourlyRateGil:N0}/hour + " +
+                $"{member.CustomFixedAmountGil:N0} fixed");
+
+            ImGui.SameLine();
+            ImGui.SetNextItemWidth(180f);
+            if (ImGui.InputText("Clock in", ref state.ClockInText, 32))
+            {
+                state.ClockInSource = "manual";
+                state.ExactFirstSeenAt = null;
+                state.Error = string.Empty;
+            }
+
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Now"))
+            {
+                state.ClockInText = FormatInputTime(venue, DateTimeOffset.UtcNow);
+                state.ClockInSource = "now";
+                state.ExactFirstSeenAt = null;
+                state.Error = string.Empty;
+            }
+
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Opening start"))
+            {
+                state.ClockInText = FormatInputTime(venue, opening.OpensAt);
+                state.ClockInSource = "opening_start";
+                state.ExactFirstSeenAt = null;
+                state.Error = string.Empty;
+            }
+
+            if (firstSeen is not null)
+            {
+                ImGui.SameLine();
+                if (ImGui.SmallButton("First seen"))
+                {
+                    state.ClockInText = FormatInputTime(venue, firstSeen.FirstSeenAt);
+                    state.ClockInSource = "first_seen";
+                    state.ExactFirstSeenAt = firstSeen.FirstSeenAt;
+                    state.Error = string.Empty;
+                }
+
+                ImGui.SameLine();
+                ImGui.TextDisabled(
+                    $"{VenueTimeZone.Format(venue, firstSeen.FirstSeenAt, "t")} via " +
+                    $"{firstSeen.CharacterName} @ {firstSeen.WorldName}");
+            }
+
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Round down 15 min"))
+            {
+                if (TryParseTime(venue, state.ClockInText, out var parsed, out var error))
+                {
+                    state.ClockInText = FormatInputTime(venue, RoundDownQuarterHour(parsed));
+                    state.ClockInSource = "manual";
+                    state.ExactFirstSeenAt = null;
+                    state.Error = string.Empty;
+                }
+                else
+                {
+                    state.Error = error;
+                }
+            }
+
+            ImGui.SameLine();
+            ImGui.BeginDisabled(busy);
+            if (ImGui.Button("Check in"))
+            {
+                SubmitClockIn(venue, opening, member, state);
+            }
+            ImGui.EndDisabled();
+
+            ImGui.SameLine();
+            ImGui.SetNextItemWidth(145f);
+            if (ImGui.BeginCombo(
+                    "##absence-reason",
+                    state.AbsenceReasonCode == "unplanned"
+                        ? "Unplanned absent"
+                        : "Planned absent"))
+            {
+                if (ImGui.Selectable("Planned absent", state.AbsenceReasonCode == "planned"))
+                {
+                    state.AbsenceReasonCode = "planned";
+                }
+
+                if (ImGui.Selectable("Unplanned absent", state.AbsenceReasonCode == "unplanned"))
+                {
+                    state.AbsenceReasonCode = "unplanned";
+                }
+
+                ImGui.EndCombo();
+            }
+
+            ImGui.SameLine();
+            ImGui.BeginDisabled(busy);
+            if (ImGui.Button("Confirm absent"))
+            {
+                plugin.SetStaffAbsence(
+                    venue,
+                    opening.OpeningId,
+                    new SetStaffAbsenceRequest(member.StaffMemberId, state.AbsenceReasonCode));
+                additionalEntryStaffIds.Remove(member.StaffMemberId);
+            }
+            ImGui.EndDisabled();
+
+            if (state.Error.Length > 0)
+            {
+                ImGui.TextWrapped(state.Error);
+            }
+
+            ImGui.PopID();
         }
-        ImGui.EndDisabled();
     }
 
-    private void RecordClockEntry(
+    private AttendanceRowState GetAttendanceRowState(
         VenueConnectionConfiguration venue,
-        StaffOpeningSummary opening)
+        long staffMemberId)
     {
-        if (!VenueTimeZone.TryParseExact(
-                venue,
-                clockInText,
-                TimeFormat,
-                CultureInfo.InvariantCulture,
-                out var clockIn,
-                out timeError))
+        if (!attendanceRows.TryGetValue(staffMemberId, out var state))
         {
+            state = new AttendanceRowState
+            {
+                ClockInText = FormatInputTime(venue, DateTimeOffset.UtcNow)
+            };
+            attendanceRows[staffMemberId] = state;
+        }
+
+        return state;
+    }
+
+    private void SubmitClockIn(
+        VenueConnectionConfiguration venue,
+        StaffOpeningSummary opening,
+        StaffMemberSummary member,
+        AttendanceRowState state)
+    {
+        if (!TryParseTime(venue, state.ClockInText, out var clockIn, out var error))
+        {
+            state.Error = error;
             return;
         }
 
-        if (!includeClockOut)
-        {
-            plugin.SaveStaffTimeEntry(
-                venue,
-                null,
-                new SaveStaffTimeEntryRequest(
-                    selectedStaffId,
-                    opening.OpeningId,
-                    clockIn,
-                    null));
-            timeError = string.Empty;
-            return;
-        }
-
-        if (!VenueTimeZone.TryParseExact(
-                venue,
-                clockOutText,
-                TimeFormat,
-                CultureInfo.InvariantCulture,
-                out var clockOut,
-                out timeError))
-        {
-            return;
-        }
-
-        plugin.SaveStaffTimeEntry(
-            venue,
+        state.Error = string.Empty;
+        var effectiveClockIn = state.ClockInSource == "first_seen" &&
+                               state.ExactFirstSeenAt is { } exactFirstSeenAt
+            ? exactFirstSeenAt
+            : clockIn;
+        var pending = new PendingStaffTimeEntry(
             null,
-            new SaveStaffTimeEntryRequest(
-                selectedStaffId,
-                opening.OpeningId,
-                clockIn,
-                clockOut));
-        timeError = string.Empty;
+            member.StaffMemberId,
+            opening.OpeningId,
+            effectiveClockIn,
+            null,
+            state.ClockInSource);
+        if (IsOvertime(opening, effectiveClockIn, null))
+        {
+            QueueOvertimeConfirmation(pending);
+            return;
+        }
+
+        SubmitTimeEntry(venue, pending, false);
+        additionalEntryStaffIds.Remove(member.StaffMemberId);
     }
 
     private void DrawStaffListings(
@@ -617,6 +715,49 @@ public sealed class StaffTabRenderer(Plugin plugin)
             return;
         }
 
+        var opening = view.Openings.FirstOrDefault(
+            candidate => candidate.OpeningId == selectedOpeningId);
+        if (opening is null)
+        {
+            ImGui.TextDisabled("Select an opening to view its attendance history.");
+            return;
+        }
+
+        foreach (var absence in view.Absences
+                     .Where(item => item.OpeningId == selectedOpeningId)
+                     .OrderBy(static item => item.StaffDisplayName)
+                     .ThenBy(static item => item.RecordedAt))
+        {
+            ImGui.PushID($"staff-absence-{absence.AbsenceId}");
+            var reason = absence.ReasonCode == "unplanned"
+                ? "Unplanned absent"
+                : "Planned absent";
+            var status = absence.CancelledAt is null
+                ? "confirmed"
+                : $"cancelled {VenueTimeZone.Format(venue, absence.CancelledAt.Value, "g")}";
+            ImGui.TextUnformatted(
+                $"{absence.StaffDisplayName}: {reason} | {status}");
+            if (absence.CancelledAt is not null && !string.IsNullOrWhiteSpace(absence.CancelReason))
+            {
+                ImGui.TextDisabled($"Cancellation: {absence.CancelReason}");
+            }
+
+            if (absence.CancelledAt is null && view.Capabilities.CanManage)
+            {
+                ImGui.SameLine();
+                ImGui.BeginDisabled(busy);
+                if (ImGui.SmallButton("Cancel absence"))
+                {
+                    pendingCancelAbsenceId = absence.AbsenceId;
+                    absenceCancelReason = string.Empty;
+                    openCancelAbsencePopup = true;
+                }
+                ImGui.EndDisabled();
+            }
+
+            ImGui.PopID();
+        }
+
         foreach (var entry in view.TimeEntries
                      .Where(entry => entry.OpeningId == selectedOpeningId)
                      .OrderBy(entry => entry.StaffDisplayName)
@@ -632,10 +773,20 @@ public sealed class StaffTabRenderer(Plugin plugin)
             var status = entry.Status == "cancelled"
                 ? entry.PaidAt is not null ? "cancelled (was paid)" : "cancelled"
                 : entry.PaidAt is not null ? "paid" : entry.Status;
+            var source = entry.ClockInSource switch
+            {
+                "first_seen" => "first seen",
+                "opening_start" => "opening start",
+                _ => entry.ClockInSource
+            };
             ImGui.TextUnformatted(
                 $"{entry.StaffDisplayName}: " +
                 $"{VenueTimeZone.Format(venue, entry.ClockInAt, "g")} – {clockOut} | " +
-                $"{salary} | {status}");
+                $"{salary} | {status} | source: {source}");
+            if (entry.IsOvertime)
+            {
+                ImGui.TextDisabled("Overtime explicitly confirmed; standard pay rate applies.");
+            }
             if (entry.PaidAt is not null && entry.PaidToCharacterName is not null)
             {
                 ImGui.TextDisabled(
@@ -644,12 +795,27 @@ public sealed class StaffTabRenderer(Plugin plugin)
                         : $"Paid to {entry.PaidToCharacterName} @ {entry.PaidToWorldName}");
             }
 
-            if (entry.Status == "open")
+            if (entry.Status == "open" && view.Capabilities.CanManage)
             {
-                DrawClockOutActions(venue, view, entry, busy);
+                DrawClockOutActions(venue, opening, entry, busy);
+            }
+            else if (entry.Status != "cancelled" && view.Capabilities.CanManage)
+            {
+                ImGui.BeginDisabled(busy);
+                if (ImGui.SmallButton("Add another work entry"))
+                {
+                    additionalEntryStaffIds.Add(entry.StaffMemberId);
+                    var row = GetAttendanceRowState(venue, entry.StaffMemberId);
+                    row.ClockInText = FormatInputTime(venue, DateTimeOffset.UtcNow);
+                    row.ClockInSource = "manual";
+                    row.ExactFirstSeenAt = null;
+                    row.Error = string.Empty;
+                }
+                ImGui.EndDisabled();
             }
 
-            if (entry.Status != "cancelled" &&
+            if (view.Capabilities.CanManage &&
+                entry.Status != "cancelled" &&
                 (entry.FinancialTransactionId is null || entry.PaidAt is not null))
             {
                 ImGui.SameLine();
@@ -663,6 +829,12 @@ public sealed class StaffTabRenderer(Plugin plugin)
                 ImGui.EndDisabled();
             }
 
+            if (clockOutErrorByEntry.TryGetValue(entry.TimeEntryId, out var entryError) &&
+                entryError.Length > 0)
+            {
+                ImGui.TextWrapped(entryError);
+            }
+
             ImGui.PopID();
         }
 
@@ -672,46 +844,267 @@ public sealed class StaffTabRenderer(Plugin plugin)
                 "Cancel Staff time entry###PartyPulseStaffCancelEntry");
             openCancelEntryPopup = false;
         }
+
+        if (openCancelAbsencePopup)
+        {
+            ImGui.OpenPopup(CancelAbsencePopupName);
+            openCancelAbsencePopup = false;
+        }
     }
 
     private void DrawClockOutActions(
         VenueConnectionConfiguration venue,
-        StaffManagementViewResponse view,
+        StaffOpeningSummary opening,
         StaffTimeEntrySummary entry,
         bool busy)
     {
-        var opening = view.Openings.First(
-            candidate => candidate.OpeningId == entry.OpeningId);
+        if (!clockOutTextByEntry.TryGetValue(entry.TimeEntryId, out var clockOutText))
+        {
+            clockOutText = FormatInputTime(venue, DateTimeOffset.UtcNow);
+        }
+
+        ImGui.SetNextItemWidth(180f);
+        if (ImGui.InputText("Clock out", ref clockOutText, 32))
+        {
+            clockOutErrorByEntry.Remove(entry.TimeEntryId);
+        }
+        clockOutTextByEntry[entry.TimeEntryId] = clockOutText;
+
+        ImGui.SameLine();
+        if (ImGui.SmallButton("Now"))
+        {
+            clockOutTextByEntry[entry.TimeEntryId] =
+                FormatInputTime(venue, DateTimeOffset.UtcNow);
+        }
+
+        ImGui.SameLine();
+        if (ImGui.SmallButton("Opening end"))
+        {
+            clockOutTextByEntry[entry.TimeEntryId] =
+                FormatInputTime(venue, opening.ClosesAt);
+        }
+
+        ImGui.SameLine();
+        if (ImGui.SmallButton("Round up 15 min"))
+        {
+            if (TryParseTime(
+                    venue,
+                    clockOutTextByEntry[entry.TimeEntryId],
+                    out var parsed,
+                    out var error))
+            {
+                clockOutTextByEntry[entry.TimeEntryId] =
+                    FormatInputTime(venue, RoundUpQuarterHour(parsed));
+                clockOutErrorByEntry.Remove(entry.TimeEntryId);
+            }
+            else
+            {
+                clockOutErrorByEntry[entry.TimeEntryId] = error;
+            }
+        }
 
         ImGui.SameLine();
         ImGui.BeginDisabled(busy);
-        if (ImGui.SmallButton("Clock out now"))
+        if (ImGui.Button("Clock out"))
         {
-            plugin.SaveStaffTimeEntry(
+            SubmitClockOut(venue, opening, entry);
+        }
+        ImGui.EndDisabled();
+    }
+
+    private void SubmitClockOut(
+        VenueConnectionConfiguration venue,
+        StaffOpeningSummary opening,
+        StaffTimeEntrySummary entry)
+    {
+        if (!TryParseTime(
                 venue,
-                entry.TimeEntryId,
-                new SaveStaffTimeEntryRequest(
-                    entry.StaffMemberId,
-                    entry.OpeningId,
-                    entry.ClockInAt,
-                    DateTimeOffset.UtcNow));
+                clockOutTextByEntry[entry.TimeEntryId],
+                out var clockOut,
+                out var error))
+        {
+            clockOutErrorByEntry[entry.TimeEntryId] = error;
+            return;
+        }
+
+        if (clockOut <= entry.ClockInAt)
+        {
+            clockOutErrorByEntry[entry.TimeEntryId] =
+                "Clock-out must be after clock-in.";
+            return;
+        }
+
+        clockOutErrorByEntry.Remove(entry.TimeEntryId);
+        var pending = new PendingStaffTimeEntry(
+            entry.TimeEntryId,
+            entry.StaffMemberId,
+            entry.OpeningId,
+            entry.ClockInAt,
+            clockOut,
+            entry.ClockInSource);
+        if (IsOvertime(opening, entry.ClockInAt, clockOut))
+        {
+            QueueOvertimeConfirmation(pending);
+            return;
+        }
+
+        SubmitTimeEntry(venue, pending, false);
+    }
+
+    private void QueueOvertimeConfirmation(PendingStaffTimeEntry pending)
+    {
+        pendingOvertimeEntry = pending;
+        openOvertimePopup = true;
+    }
+
+    private void SubmitTimeEntry(
+        VenueConnectionConfiguration venue,
+        PendingStaffTimeEntry pending,
+        bool overtimeConfirmed)
+    {
+        plugin.SaveStaffTimeEntry(
+            venue,
+            pending.TimeEntryId,
+            new SaveStaffTimeEntryRequest(
+                pending.StaffMemberId,
+                pending.OpeningId,
+                pending.ClockInAt,
+                pending.ClockOutAt,
+                pending.ClockInSource,
+                overtimeConfirmed));
+    }
+
+    private void DrawOvertimePopup(
+        VenueConnectionConfiguration venue,
+        bool busy)
+    {
+        if (openOvertimePopup)
+        {
+            ImGui.OpenPopup(OvertimePopupName);
+            openOvertimePopup = false;
+        }
+
+        if (!ImGui.BeginPopupModal(
+                OvertimePopupName,
+                ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            return;
+        }
+
+        if (pendingOvertimeEntry is not { } pending)
+        {
+            ImGui.CloseCurrentPopup();
+            ImGui.EndPopup();
+            return;
+        }
+
+        ImGui.TextWrapped(
+            "This work interval is before or after the selected opening hours. " +
+            "Overtime uses the normal Staff pay rate and requires explicit confirmation.");
+        ImGui.TextUnformatted(
+            $"Clock in: {VenueTimeZone.Format(venue, pending.ClockInAt, "g")}");
+        if (pending.ClockOutAt is { } clockOut)
+        {
+            ImGui.TextUnformatted(
+                $"Clock out: {VenueTimeZone.Format(venue, clockOut, "g")}");
+        }
+
+        ImGui.BeginDisabled(busy);
+        if (ImGui.Button("Confirm overtime"))
+        {
+            SubmitTimeEntry(venue, pending, true);
+            additionalEntryStaffIds.Remove(pending.StaffMemberId);
+            pendingOvertimeEntry = null;
+            ImGui.CloseCurrentPopup();
         }
         ImGui.EndDisabled();
 
         ImGui.SameLine();
-        ImGui.BeginDisabled(busy);
-        if (ImGui.SmallButton("Clock out at opening end"))
+        if (ImGui.Button("Go back"))
         {
-            plugin.SaveStaffTimeEntry(
+            pendingOvertimeEntry = null;
+            ImGui.CloseCurrentPopup();
+        }
+
+        ImGui.EndPopup();
+    }
+
+    private void DrawAbsenceCancellationPopup(
+        VenueConnectionConfiguration venue,
+        bool busy)
+    {
+        if (!ImGui.BeginPopupModal(
+                CancelAbsencePopupName,
+                ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            return;
+        }
+
+        ImGui.TextWrapped(
+            "Cancel this absence record? The cancellation remains visible in Clock-in history.");
+        ImGui.InputText("Reason (optional)", ref absenceCancelReason, 255);
+        ImGui.BeginDisabled(busy);
+        if (ImGui.Button("Cancel absence record"))
+        {
+            plugin.CancelStaffAbsence(
                 venue,
-                entry.TimeEntryId,
-                new SaveStaffTimeEntryRequest(
-                    entry.StaffMemberId,
-                    entry.OpeningId,
-                    entry.ClockInAt,
-                    opening.ClosesAt));
+                pendingCancelAbsenceId,
+                absenceCancelReason);
+            pendingCancelAbsenceId = 0;
+            absenceCancelReason = string.Empty;
+            ImGui.CloseCurrentPopup();
         }
         ImGui.EndDisabled();
+
+        ImGui.SameLine();
+        if (ImGui.Button("Keep absence"))
+        {
+            pendingCancelAbsenceId = 0;
+            absenceCancelReason = string.Empty;
+            ImGui.CloseCurrentPopup();
+        }
+
+        ImGui.EndPopup();
+    }
+
+    private static bool TryParseTime(
+        VenueConnectionConfiguration venue,
+        string text,
+        out DateTimeOffset value,
+        out string error) =>
+        VenueTimeZone.TryParseExact(
+            venue,
+            text,
+            TimeFormat,
+            CultureInfo.InvariantCulture,
+            out value,
+            out error);
+
+    private static bool IsOvertime(
+        StaffOpeningSummary opening,
+        DateTimeOffset clockIn,
+        DateTimeOffset? clockOut) =>
+        clockIn < opening.OpensAt ||
+        clockIn >= opening.ClosesAt ||
+        (clockOut is { } value && value > opening.ClosesAt);
+
+    private static DateTimeOffset RoundDownQuarterHour(DateTimeOffset value)
+    {
+        var minute = value.Minute - value.Minute % 15;
+        return new DateTimeOffset(
+            value.Year,
+            value.Month,
+            value.Day,
+            value.Hour,
+            minute,
+            0,
+            value.Offset);
+    }
+
+    private static DateTimeOffset RoundUpQuarterHour(DateTimeOffset value)
+    {
+        var rounded = RoundDownQuarterHour(value);
+        return rounded == value ? rounded : rounded.AddMinutes(15);
     }
 
     private void DrawPayout(
@@ -1142,9 +1535,6 @@ public sealed class StaffTabRenderer(Plugin plugin)
         }
     }
 
-    private void EnsureSelectedStaff(StaffMemberSummary[] staff) =>
-        EnsureSelectedStaff(staff, ref selectedStaffId);
-
     private void LoadMember(StaffMemberSummary member)
     {
         editingStaffId = member.StaffMemberId;
@@ -1184,27 +1574,17 @@ public sealed class StaffTabRenderer(Plugin plugin)
                                 0;
         }
 
-        var opening = view.Openings.FirstOrDefault(
-            candidate => candidate.OpeningId == selectedOpeningId);
-        if (clockInText.Length == 0)
-        {
-            clockInText = FormatInputTime(venue, DateTimeOffset.UtcNow);
-        }
-        if (clockOutText.Length == 0)
-        {
-            clockOutText = opening is null
-                ? clockInText
-                : FormatInputTime(venue, opening.ClosesAt);
-        }
     }
 
     private void ResetTimeSuggestions(
         VenueConnectionConfiguration venue,
         StaffOpeningSummary opening)
     {
-        clockInText = FormatInputTime(venue, DateTimeOffset.UtcNow);
-        clockOutText = FormatInputTime(venue, opening.ClosesAt);
-        timeError = string.Empty;
+        attendanceRows.Clear();
+        clockOutTextByEntry.Clear();
+        clockOutErrorByEntry.Clear();
+        additionalEntryStaffIds.Clear();
+        pendingOvertimeEntry = null;
     }
 
     private void ResetForVenue(VenueConnectionConfiguration venue)
@@ -1216,7 +1596,6 @@ public sealed class StaffTabRenderer(Plugin plugin)
 
         activeProfileId = venue.ProfileId;
         selectedOpeningId = 0;
-        selectedStaffId = 0;
         selectedCharacterLinkStaffId = 0;
         selectedPayoutStaffId = 0;
         editingJobId = 0;
@@ -1224,10 +1603,15 @@ public sealed class StaffTabRenderer(Plugin plugin)
         jobRate = 0;
         jobArchived = false;
         ClearMember();
-        clockInText = string.Empty;
-        clockOutText = string.Empty;
-        includeClockOut = false;
-        timeError = string.Empty;
+        attendanceRows.Clear();
+        clockOutTextByEntry.Clear();
+        clockOutErrorByEntry.Clear();
+        additionalEntryStaffIds.Clear();
+        pendingOvertimeEntry = null;
+        openOvertimePopup = false;
+        pendingCancelAbsenceId = 0;
+        openCancelAbsencePopup = false;
+        absenceCancelReason = string.Empty;
         pendingCancelEntryId = 0;
         pendingCancelTransactionId = 0;
         openCancelEntryPopup = false;
@@ -1235,4 +1619,21 @@ public sealed class StaffTabRenderer(Plugin plugin)
         ClearPayoutConfirmation();
         cancelReason = string.Empty;
     }
+
+    private sealed class AttendanceRowState
+    {
+        public string ClockInText = string.Empty;
+        public string ClockInSource = "manual";
+        public DateTimeOffset? ExactFirstSeenAt;
+        public string AbsenceReasonCode = "planned";
+        public string Error = string.Empty;
+    }
+
+    private sealed record PendingStaffTimeEntry(
+        long? TimeEntryId,
+        long StaffMemberId,
+        long OpeningId,
+        DateTimeOffset ClockInAt,
+        DateTimeOffset? ClockOutAt,
+        string ClockInSource);
 }

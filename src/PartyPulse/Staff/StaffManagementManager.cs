@@ -90,6 +90,42 @@ public sealed class StaffManagementManager : IDisposable
             },
             cancellationToken);
 
+    public Task<ApiResult<StaffManagementViewResponse>> RefreshQuietlyAsync(
+        VenueConnectionConfiguration venue,
+        CancellationToken cancellationToken) =>
+        WithGateAsync(
+            venue,
+            async () =>
+            {
+                var attemptedAt = DateTimeOffset.UtcNow;
+                var context = await GetAuthorizedContextAsync(venue, cancellationToken);
+                if (!context.Success)
+                {
+                    TouchSnapshotAttempt(venue.ProfileId, attemptedAt);
+                    return ApiResult<StaffManagementViewResponse>.Failed(context.Failure!);
+                }
+
+                var result = await apiClient.GetStaffAsync(
+                    context.BaseUri!,
+                    context.AccessToken!,
+                    cancellationToken);
+                if (result.Success && result.Value is not null)
+                {
+                    snapshots[venue.ProfileId] = new StaffManagementSnapshot(
+                        StaffManagementStatus.Ready,
+                        "Staff loaded.",
+                        result.Value,
+                        attemptedAt);
+                }
+                else
+                {
+                    TouchSnapshotAttempt(venue.ProfileId, attemptedAt);
+                }
+
+                return result;
+            },
+            cancellationToken);
+
     public Task<ApiResult<StaffJobOperationResponse>> SaveJobAsync(
         VenueConnectionConfiguration venue,
         long? jobId,
@@ -177,6 +213,49 @@ public sealed class StaffManagementManager : IDisposable
                 baseUri,
                 accessToken,
                 timeEntryId,
+                request,
+                cancellationToken),
+            cancellationToken);
+
+    public Task<ApiResult<ObserveStaffFirstSeenResponse>> ObserveFirstSeenAsync(
+        VenueConnectionConfiguration venue,
+        ObserveStaffFirstSeenRequest request,
+        CancellationToken cancellationToken) =>
+        MutateAsync(
+            venue,
+            (baseUri, accessToken) => apiClient.ObserveStaffFirstSeenAsync(
+                baseUri,
+                accessToken,
+                request,
+                cancellationToken),
+            cancellationToken);
+
+    public Task<ApiResult<StaffAbsenceOperationResponse>> SetAbsenceAsync(
+        VenueConnectionConfiguration venue,
+        long openingId,
+        SetStaffAbsenceRequest request,
+        CancellationToken cancellationToken) =>
+        MutateAsync(
+            venue,
+            (baseUri, accessToken) => apiClient.SetStaffAbsenceAsync(
+                baseUri,
+                accessToken,
+                openingId,
+                request,
+                cancellationToken),
+            cancellationToken);
+
+    public Task<ApiResult<StaffAbsenceCancellationResponse>> CancelAbsenceAsync(
+        VenueConnectionConfiguration venue,
+        long absenceId,
+        CancelStaffAbsenceRequest request,
+        CancellationToken cancellationToken) =>
+        MutateAsync(
+            venue,
+            (baseUri, accessToken) => apiClient.CancelStaffAbsenceAsync(
+                baseUri,
+                accessToken,
+                absenceId,
                 request,
                 cancellationToken),
             cancellationToken);
@@ -294,6 +373,14 @@ public sealed class StaffManagementManager : IDisposable
             {
                 Message = "Staff changed. Refresh to load the latest state."
             };
+    }
+
+    private void TouchSnapshotAttempt(Guid profileId, DateTimeOffset attemptedAt)
+    {
+        if (snapshots.TryGetValue(profileId, out var existing))
+        {
+            snapshots[profileId] = existing with { LastAttemptAt = attemptedAt };
+        }
     }
 
     private async Task<AuthorizedContext> GetAuthorizedContextAsync(

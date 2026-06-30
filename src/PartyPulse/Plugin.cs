@@ -40,6 +40,7 @@ namespace PartyPulse;
 public sealed class Plugin : IDalamudPlugin
 {
     private const string CommandName = "/pulse";
+    private static readonly TimeSpan StaffFirstSeenRefreshInterval = TimeSpan.FromMinutes(1);
 
     [PluginService] internal static IDalamudPluginInterface PluginInterface { get; private set; } = null!;
     [PluginService] internal static ICommandManager CommandManager { get; private set; } = null!;
@@ -156,6 +157,7 @@ public sealed class Plugin : IDalamudPlugin
         NearbyVipPlayers = new NearbyVipPlayerTracker(ObjectTable, TargetManager);
         VipArrivalNearby = new VipArrivalNearbyTracker(ObjectTable);
         GreeterNearby = new GreeterNearbyTracker(ObjectTable);
+        StaffFirstSeen = new StaffFirstSeenTracker(ObjectTable);
         gameMacroExecutionService = new GameMacroExecutionService(
             Framework,
             ObjectTable,
@@ -266,6 +268,8 @@ public sealed class Plugin : IDalamudPlugin
     public VipArrivalNearbyTracker VipArrivalNearby { get; }
 
     public GreeterNearbyTracker GreeterNearby { get; }
+
+    public StaffFirstSeenTracker StaffFirstSeen { get; }
 
     public FinanceManagementManager Finance { get; }
 
@@ -482,6 +486,7 @@ public sealed class Plugin : IDalamudPlugin
         Purchases.RemoveProfile(venue.ProfileId);
         Court.RemoveProfile(venue.ProfileId);
         Staff.RemoveProfile(venue.ProfileId);
+        StaffFirstSeen.RemoveProfile(venue.ProfileId);
         Bar.RemoveProfile(venue.ProfileId);
         VipArrivals.ClearProfile(venue.ProfileId);
         Greeter.ClearProfile(venue.ProfileId);
@@ -1305,6 +1310,32 @@ public sealed class Plugin : IDalamudPlugin
     public void CancelStaffTimeEntry(VenueConnectionConfiguration venue, long timeEntryId, string? reason) =>
         Observe(CancelStaffTimeEntryAndReportAsync(venue, timeEntryId, reason), "cancel Staff time entry");
 
+    public void SetStaffAbsence(
+        VenueConnectionConfiguration venue,
+        long openingId,
+        SetStaffAbsenceRequest request) =>
+        Observe(
+            ReportApiResultAsync(
+                Staff.SetAbsenceAsync(venue, openingId, request, LifetimeToken),
+                request.ReasonCode == "planned"
+                    ? "Planned absence recorded."
+                    : "Unplanned absence recorded."),
+            "record Staff absence");
+
+    public void CancelStaffAbsence(
+        VenueConnectionConfiguration venue,
+        long absenceId,
+        string? reason) =>
+        Observe(
+            ReportApiResultAsync(
+                Staff.CancelAbsenceAsync(
+                    venue,
+                    absenceId,
+                    new CancelStaffAbsenceRequest(reason),
+                    LifetimeToken),
+                "Staff absence cancelled."),
+            "cancel Staff absence");
+
     public void CreateStaffPayout(VenueConnectionConfiguration venue, CreateStaffPayoutRequest request) =>
         Observe(ReportStaffPayoutAsync(venue, Staff.CreatePayoutAsync(venue, request, LifetimeToken)), "create Staff payout");
 
@@ -1452,6 +1483,63 @@ public sealed class Plugin : IDalamudPlugin
         ToggleMainUi();
     }
 
+    private void TickStaffFirstSeen()
+    {
+        foreach (var venue in Configuration.VenueConnections.Where(
+                     venue => venue.IsRegistered &&
+                              Authentication.GetSnapshot(venue).Status is
+                                  AuthenticationStatus.Connected or AuthenticationStatus.Expired))
+        {
+            EnsureStaffLoaded(venue);
+            var snapshot = Staff.GetSnapshot(venue);
+            var view = snapshot.View;
+            if (snapshot.Status != StaffManagementStatus.Ready ||
+                view is null ||
+                !view.Capabilities.CanObserveFirstSeen ||
+                Staff.IsBusy(venue.ProfileId))
+            {
+                continue;
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            if (snapshot.LastAttemptAt is null ||
+                snapshot.LastAttemptAt <= now.Subtract(StaffFirstSeenRefreshInterval))
+            {
+                Observe(
+                    Staff.RefreshQuietlyAsync(venue, LifetimeToken),
+                    $"refresh Staff first-seen state for {venue.VenueCode}");
+                continue;
+            }
+
+            var opening = view.Openings.FirstOrDefault(item =>
+                item.OpensAt <= now &&
+                item.ClosesAt > now &&
+                LocationProvider.IsAtAddress(
+                    item.AddressWorldName,
+                    item.AddressCityName,
+                    item.AddressWard,
+                    item.AddressPlot,
+                    out _));
+            if (opening is null)
+            {
+                continue;
+            }
+
+            StaffFirstSeen.Prepare(venue.ProfileId, opening.OpeningId, view);
+            StaffFirstSeen.ScanIfDue(venue.ProfileId);
+            var observations = StaffFirstSeen.TakeUnsubmittedObservations(venue.ProfileId);
+            if (observations.Count > 0)
+            {
+                Observe(
+                    SubmitStaffFirstSeenObservationsAsync(
+                        venue,
+                        opening.OpeningId,
+                        observations),
+                    "record Staff first seen");
+            }
+        }
+    }
+
     private void OnFrameworkUpdate(IFramework framework)
     {
         notificationToastWindow.Tick();
@@ -1487,6 +1575,7 @@ public sealed class Plugin : IDalamudPlugin
                 NearbyVipPlayers.Clear();
                 VipArrivalNearby.Clear();
                 GreeterNearby.Clear();
+                StaffFirstSeen.Clear();
                 Finance.Clear("Character logged out or changed.");
                 Notifications.Clear();
             }
@@ -1512,6 +1601,7 @@ public sealed class Plugin : IDalamudPlugin
             NearbyVipPlayers.Clear();
             VipArrivalNearby.Clear();
             GreeterNearby.Clear();
+            StaffFirstSeen.Clear();
             Finance.Clear("Character changed; finance data was cleared.");
             Notifications.Clear();
         }
@@ -1528,6 +1618,8 @@ public sealed class Plugin : IDalamudPlugin
                 Notifications.PollDueAsync(notificationVenues, LifetimeToken),
                 "poll PartyPulse notifications");
         }
+
+        TickStaffFirstSeen();
 
         if (!Configuration.AutoConnect)
         {
@@ -1657,6 +1749,7 @@ public sealed class Plugin : IDalamudPlugin
         Purchases.RemoveProfile(venue.ProfileId);
         Court.RemoveProfile(venue.ProfileId);
         Staff.RemoveProfile(venue.ProfileId);
+        StaffFirstSeen.RemoveProfile(venue.ProfileId);
         Bar.RemoveProfile(venue.ProfileId);
         VipArrivals.ClearProfile(venue.ProfileId);
         Greeter.ClearProfile(venue.ProfileId);
@@ -1990,6 +2083,28 @@ public sealed class Plugin : IDalamudPlugin
         ReportVipFailure(result.Failure, "The VIP payment status could not be updated.");
     }
 
+    private async Task SubmitStaffFirstSeenObservationsAsync(
+        VenueConnectionConfiguration venue,
+        long openingId,
+        IReadOnlyList<StaffFirstSeenObservationRequest> observations)
+    {
+        var result = await Staff.ObserveFirstSeenAsync(
+            venue,
+            new ObserveStaffFirstSeenRequest(openingId, observations),
+            LifetimeToken);
+        if (result.Success)
+        {
+            StaffFirstSeen.MarkSubmitted(venue.ProfileId, observations);
+            return;
+        }
+
+        StaffFirstSeen.ReleaseSubmission(venue.ProfileId, observations);
+        Log.Warning(
+            "Staff first-seen upload failed: {Code} {Message}",
+            result.Failure?.Code,
+            result.Failure?.Message);
+    }
+
     private async Task SubmitGreeterObservationsAsync(
         VenueConnectionConfiguration venue,
         long openingId,
@@ -2201,6 +2316,7 @@ public sealed class Plugin : IDalamudPlugin
         {
             VipArrivalNearby.Clear();
             GreeterNearby.Clear();
+            StaffFirstSeen.RemoveProfile(venue.ProfileId);
             await Greeter.LoadAsync(venue, true, LifetimeToken);
             await TimedMacros.LoadAsync(venue, true, LifetimeToken);
             await OpeningPublications.LoadAsync(venue, true, LifetimeToken);
@@ -2222,6 +2338,7 @@ public sealed class Plugin : IDalamudPlugin
         {
             VipArrivalNearby.Clear();
             GreeterNearby.Clear();
+            StaffFirstSeen.RemoveProfile(venue.ProfileId);
             await Greeter.LoadAsync(venue, true, LifetimeToken);
             await TimedMacros.LoadAsync(venue, true, LifetimeToken);
             await OpeningPublications.LoadAsync(venue, true, LifetimeToken);
@@ -2345,6 +2462,7 @@ public sealed class Plugin : IDalamudPlugin
         {
             VipArrivalNearby.Clear();
             GreeterNearby.Clear();
+            StaffFirstSeen.RemoveProfile(venue.ProfileId);
             await VipArrivals.LoadAsync(venue, true, LifetimeToken);
             await Greeter.LoadAsync(venue, true, LifetimeToken);
             await TimedMacros.LoadAsync(venue, true, LifetimeToken);
@@ -2367,6 +2485,7 @@ public sealed class Plugin : IDalamudPlugin
         {
             VipArrivalNearby.Clear();
             GreeterNearby.Clear();
+            StaffFirstSeen.RemoveProfile(venue.ProfileId);
             await VipArrivals.LoadAsync(venue, true, LifetimeToken);
             await Greeter.LoadAsync(venue, true, LifetimeToken);
             await TimedMacros.LoadAsync(venue, true, LifetimeToken);
@@ -2387,6 +2506,7 @@ public sealed class Plugin : IDalamudPlugin
         {
             VipArrivalNearby.Clear();
             GreeterNearby.Clear();
+            StaffFirstSeen.RemoveProfile(venue.ProfileId);
             await VipArrivals.LoadAsync(venue, true, LifetimeToken);
             await Greeter.LoadAsync(venue, true, LifetimeToken);
             await TimedMacros.LoadAsync(venue, true, LifetimeToken);

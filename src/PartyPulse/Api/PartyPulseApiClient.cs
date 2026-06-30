@@ -1590,6 +1590,59 @@ public sealed class PartyPulseApiClient : IDisposable
                 payload.CancelledAt != default,
             cancellationToken);
 
+    public Task<ApiResult<ObserveStaffFirstSeenResponse>> ObserveStaffFirstSeenAsync(
+        Uri baseUri,
+        string accessToken,
+        ObserveStaffFirstSeenRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<ObserveStaffFirstSeenResponse>(
+            baseUri,
+            HttpMethod.Post,
+            "api/v1/staff/first-seen",
+            accessToken,
+            request,
+            static payload =>
+                payload.OpeningId > 0 &&
+                payload.MatchedCount >= 0 &&
+                payload.InsertedCount >= 0 &&
+                payload.InsertedCount <= payload.MatchedCount,
+            cancellationToken);
+
+    public Task<ApiResult<StaffAbsenceOperationResponse>> SetStaffAbsenceAsync(
+        Uri baseUri,
+        string accessToken,
+        long openingId,
+        SetStaffAbsenceRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<StaffAbsenceOperationResponse>(
+            baseUri,
+            HttpMethod.Post,
+            $"api/v1/staff/openings/{openingId}/absences",
+            accessToken,
+            request,
+            static payload =>
+                payload.AbsenceId > 0 &&
+                payload.OpeningId > 0 &&
+                payload.StaffMemberId > 0 &&
+                payload.RecordedAt != default &&
+                payload.ReasonCode is "planned" or "unplanned",
+            cancellationToken);
+
+    public Task<ApiResult<StaffAbsenceCancellationResponse>> CancelStaffAbsenceAsync(
+        Uri baseUri,
+        string accessToken,
+        long absenceId,
+        CancelStaffAbsenceRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<StaffAbsenceCancellationResponse>(
+            baseUri,
+            HttpMethod.Post,
+            $"api/v1/staff/absences/{absenceId}/cancel",
+            accessToken,
+            request,
+            static payload => payload.AbsenceId > 0 && payload.CancelledAt != default,
+            cancellationToken);
+
     public Task<ApiResult<StaffPayoutResponse>> CreateStaffPayoutAsync(
         Uri baseUri,
         string accessToken,
@@ -1806,9 +1859,18 @@ public sealed class PartyPulseApiClient : IDisposable
         payload.VenueUsers is not null &&
         payload.StaffMembers is not null &&
         payload.Characters is not null &&
+        payload.FirstSeen is not null &&
+        payload.Absences is not null &&
         payload.TimeEntries is not null &&
         payload.Openings.All(static opening =>
-            opening.OpeningId > 0 && opening.ClosesAt > opening.OpensAt) &&
+            opening.OpeningId > 0 &&
+            opening.ClosesAt > opening.OpensAt &&
+            opening.AddressWorldId > 0 &&
+            !string.IsNullOrWhiteSpace(opening.AddressWorldName) &&
+            opening.AddressCityId > 0 &&
+            !string.IsNullOrWhiteSpace(opening.AddressCityName) &&
+            opening.AddressWard > 0 &&
+            opening.AddressPlot > 0) &&
         payload.Jobs.All(static job =>
             job.JobDefinitionId > 0 &&
             !string.IsNullOrWhiteSpace(job.Name) &&
@@ -1822,11 +1884,24 @@ public sealed class PartyPulseApiClient : IDisposable
             staff.UnpaidSalaryGil >= 0 &&
             staff.SalaryDeductionGil >= 0 &&
             staff.UnsettledCourtGil >= 0) &&
+        payload.FirstSeen.All(static item =>
+            item.FirstSeenId > 0 &&
+            item.OpeningId > 0 &&
+            item.StaffMemberId > 0 &&
+            item.CharacterId > 0 &&
+            item.FirstSeenAt != default) &&
+        payload.Absences.All(static item =>
+            item.AbsenceId > 0 &&
+            item.OpeningId > 0 &&
+            item.StaffMemberId > 0 &&
+            item.ReasonCode is "planned" or "unplanned" &&
+            item.RecordedAt != default) &&
         payload.TimeEntries.All(static entry =>
             entry.TimeEntryId > 0 &&
             entry.StaffMemberId > 0 &&
             entry.OpeningId > 0 &&
-            !string.IsNullOrWhiteSpace(entry.Status));
+            !string.IsNullOrWhiteSpace(entry.Status) &&
+            !string.IsNullOrWhiteSpace(entry.ClockInSource));
 
     private static bool ValidateCourtViewResponse(CourtManagementViewResponse payload) =>
         payload.Capabilities is not null &&
