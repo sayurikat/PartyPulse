@@ -22,6 +22,7 @@ using PartyPulse.PartyFinder;
 using PartyPulse.Photoshoots;
 using PartyPulse.OtherSales;
 using PartyPulse.OtherGames;
+using PartyPulse.Purchases;
 using PartyPulse.Models;
 using PartyPulse.SelfService;
 using PartyPulse.Staff;
@@ -99,6 +100,7 @@ public sealed class Plugin : IDalamudPlugin
         Photoshoots = new PhotoshootManagementManager(Configuration, Authentication, apiClient, IdentityProvider);
         OtherSales = new OtherSalesManagementManager(Configuration, Authentication, apiClient, IdentityProvider);
         OtherGames = new OtherGamesManagementManager(Configuration, Authentication, apiClient, IdentityProvider);
+        Purchases = new PurchaseManagementManager(Configuration, Authentication, apiClient, IdentityProvider);
         Court = new CourtManagementManager(Configuration, Authentication, apiClient, IdentityProvider);
         Staff = new StaffManagementManager(Configuration, Authentication, apiClient, IdentityProvider);
         Bar = new BarManagementManager(Configuration, Authentication, apiClient, IdentityProvider);
@@ -236,6 +238,8 @@ public sealed class Plugin : IDalamudPlugin
 
     public OtherGamesManagementManager OtherGames { get; }
 
+    public PurchaseManagementManager Purchases { get; }
+
     public CourtManagementManager Court { get; }
 
     public StaffManagementManager Staff { get; }
@@ -301,6 +305,7 @@ public sealed class Plugin : IDalamudPlugin
         Photoshoots.Dispose();
         OtherSales.Dispose();
         OtherGames.Dispose();
+        Purchases.Dispose();
         Court.Dispose();
         Staff.Dispose();
         Bar.Dispose();
@@ -474,6 +479,7 @@ public sealed class Plugin : IDalamudPlugin
         Photoshoots.RemoveProfile(venue.ProfileId);
         OtherSales.RemoveProfile(venue.ProfileId);
         OtherGames.RemoveProfile(venue.ProfileId);
+        Purchases.RemoveProfile(venue.ProfileId);
         Court.RemoveProfile(venue.ProfileId);
         Staff.RemoveProfile(venue.ProfileId);
         Bar.RemoveProfile(venue.ProfileId);
@@ -1148,6 +1154,33 @@ public sealed class Plugin : IDalamudPlugin
     public void CreateOtherSalesSettlement(VenueConnectionConfiguration venue, CreateOtherSalesSettlementRequest request) =>
         Observe(CreateOtherSalesSettlementAndReportAsync(venue, request), $"create Other Sales settlement for {venue.VenueCode}");
 
+    public void EnsurePurchasesLoaded(VenueConnectionConfiguration venue)
+    {
+        if (Purchases.ShouldLoad(venue))
+            Observe(Purchases.LoadAsync(venue, false, LifetimeToken), $"load Purchases for {venue.VenueCode}");
+    }
+
+    public void RefreshPurchases(VenueConnectionConfiguration venue) =>
+        Observe(Purchases.LoadAsync(venue, true, LifetimeToken), $"refresh Purchases for {venue.VenueCode}");
+
+    public void CreatePurchase(VenueConnectionConfiguration venue, CreatePurchaseRequest request) =>
+        Observe(CreatePurchaseAndReportAsync(venue, request), $"create purchase for {venue.VenueCode}");
+
+    public void ApprovePurchase(VenueConnectionConfiguration venue, long purchaseId) =>
+        Observe(ApprovePurchaseAndReportAsync(venue, purchaseId), $"approve purchase {purchaseId}");
+
+    public void StartPurchasePayment(VenueConnectionConfiguration venue, PurchaseSummary purchase) =>
+        Observe(StartPurchasePaymentAndReportAsync(venue, purchase), $"pay purchase {purchase.PurchaseId}");
+
+    public void ConfirmPurchasePaid(VenueConnectionConfiguration venue, long purchaseId) =>
+        Observe(ConfirmPurchasePaidAndReportAsync(venue, purchaseId), $"confirm purchase {purchaseId} paid");
+
+    public void RejectPurchase(
+        VenueConnectionConfiguration venue,
+        long purchaseId,
+        RejectPurchaseRequest request) =>
+        Observe(RejectPurchaseAndReportAsync(venue, purchaseId, request), $"reject purchase {purchaseId}");
+
     public void EnsureOtherGamesLoaded(VenueConnectionConfiguration venue)
     {
         if (OtherGames.ShouldLoad(venue))
@@ -1615,6 +1648,7 @@ public sealed class Plugin : IDalamudPlugin
         Photoshoots.RemoveProfile(venue.ProfileId);
         OtherSales.RemoveProfile(venue.ProfileId);
         OtherGames.RemoveProfile(venue.ProfileId);
+        Purchases.RemoveProfile(venue.ProfileId);
         Court.RemoveProfile(venue.ProfileId);
         Staff.RemoveProfile(venue.ProfileId);
         Bar.RemoveProfile(venue.ProfileId);
@@ -2912,6 +2946,109 @@ public sealed class Plugin : IDalamudPlugin
             return;
 
         await OtherSales.LoadAsync(venue, true, LifetimeToken);
+    }
+
+    private async Task CreatePurchaseAndReportAsync(
+        VenueConnectionConfiguration venue,
+        CreatePurchaseRequest request)
+    {
+        var result = await Purchases.CreateAsync(venue, request, LifetimeToken);
+        if (!result.Success || result.Value is null)
+        {
+            ReportVipFailure(result.Failure, "The purchase could not be recorded.");
+            return;
+        }
+
+        ChatGui.Print(
+            string.Equals(result.Value.Status, "settled", StringComparison.Ordinal)
+                ? $"Recorded purchase #{result.Value.PurchaseId} as approved and settled."
+                : $"Submitted purchase #{result.Value.PurchaseId} for finance approval.",
+            "PartyPulse");
+    }
+
+    private async Task ApprovePurchaseAndReportAsync(
+        VenueConnectionConfiguration venue,
+        long purchaseId)
+    {
+        var result = await Purchases.ApproveAsync(venue, purchaseId, LifetimeToken);
+        if (!result.Success || result.Value is null)
+        {
+            ReportVipFailure(result.Failure, "The purchase could not be approved.");
+            return;
+        }
+
+        ChatGui.Print(
+            $"Approved purchase #{purchaseId}. Target the purchaser and use Pay with Dropbox from Purchases.",
+            "PartyPulse");
+    }
+
+    private async Task StartPurchasePaymentAndReportAsync(
+        VenueConnectionConfiguration venue,
+        PurchaseSummary purchase)
+    {
+        if (!string.Equals(purchase.Status, "approved", StringComparison.Ordinal))
+        {
+            ChatGui.PrintError("Only approved, unpaid purchases can be paid.", "PartyPulse");
+            return;
+        }
+
+        var readiness = await settlementTradeService.CheckReadyAsync(
+            purchase.CreatedByCharacterName,
+            purchase.CreatedByWorldName,
+            LifetimeToken);
+        if (!readiness.Success)
+        {
+            ReportPluginIntegrationFailure(
+                readiness.Failure,
+                "Dropbox is unavailable or the purchaser is not currently targeted.");
+            return;
+        }
+
+        var trade = await settlementTradeService.InitiateTradeAsync(
+            purchase.CreatedByCharacterName,
+            purchase.CreatedByWorldName,
+            purchase.TotalPriceGil,
+            LifetimeToken);
+        if (!trade.Success)
+        {
+            ReportPluginIntegrationFailure(
+                trade.Failure,
+                "Dropbox did not start the purchase reimbursement trade.");
+            return;
+        }
+
+        ChatGui.Print(
+            $"Started a {purchase.TotalPriceGil:N0} gil reimbursement to {purchase.CreatedByCharacterName}. Confirm trade success from Purchases after it completes.",
+            "PartyPulse");
+    }
+
+    private async Task ConfirmPurchasePaidAndReportAsync(
+        VenueConnectionConfiguration venue,
+        long purchaseId)
+    {
+        var result = await Purchases.ConfirmPaidAsync(venue, purchaseId, LifetimeToken);
+        if (!result.Success || result.Value is null)
+        {
+            ReportVipFailure(result.Failure, "The purchase could not be marked settled.");
+            return;
+        }
+
+        ChatGui.Print($"Purchase #{purchaseId} was confirmed paid and settled.", "PartyPulse");
+    }
+
+    private async Task RejectPurchaseAndReportAsync(
+        VenueConnectionConfiguration venue,
+        long purchaseId,
+        RejectPurchaseRequest request)
+    {
+        var result = await Purchases.RejectAsync(venue, purchaseId, request, LifetimeToken);
+        if (!result.Success || result.Value is null)
+        {
+            ReportVipFailure(result.Failure, "The purchase could not be rejected.");
+            return;
+        }
+
+        ChatGui.Print($"Purchase #{purchaseId} was rejected.", "PartyPulse");
     }
 
     private async Task CreateOtherGameItemAndReportAsync(

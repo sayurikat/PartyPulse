@@ -2282,6 +2282,110 @@ public sealed class PartyPulseApiClient : IDisposable
         }
     }
 
+    public Task<ApiResult<PurchasesManagementViewResponse>> GetPurchasesAsync(
+        Uri baseUri,
+        string accessToken,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<PurchasesManagementViewResponse>(
+            baseUri,
+            HttpMethod.Get,
+            "api/v1/purchases",
+            accessToken,
+            null,
+            ValidatePurchasesViewResponse,
+            cancellationToken);
+
+    public Task<ApiResult<CreatePurchaseResponse>> CreatePurchaseAsync(
+        Uri baseUri,
+        string accessToken,
+        CreatePurchaseRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<CreatePurchaseResponse>(
+            baseUri,
+            HttpMethod.Post,
+            "api/v1/purchases",
+            accessToken,
+            request,
+            static payload =>
+                payload.PurchaseId > 0 &&
+                !string.IsNullOrWhiteSpace(payload.Status) &&
+                payload.CreatedAt != default,
+            cancellationToken);
+
+    public Task<ApiResult<PurchaseStateChangeResponse>> ApprovePurchaseAsync(
+        Uri baseUri,
+        string accessToken,
+        long purchaseId,
+        CancellationToken cancellationToken) =>
+        SendPurchaseStateChangeAsync(
+            baseUri,
+            accessToken,
+            purchaseId,
+            "approve",
+            null,
+            cancellationToken);
+
+    public Task<ApiResult<PurchaseStateChangeResponse>> ConfirmPurchasePaidAsync(
+        Uri baseUri,
+        string accessToken,
+        long purchaseId,
+        CancellationToken cancellationToken) =>
+        SendPurchaseStateChangeAsync(
+            baseUri,
+            accessToken,
+            purchaseId,
+            "confirm-paid",
+            null,
+            cancellationToken);
+
+    public Task<ApiResult<PurchaseStateChangeResponse>> RejectPurchaseAsync(
+        Uri baseUri,
+        string accessToken,
+        long purchaseId,
+        RejectPurchaseRequest request,
+        CancellationToken cancellationToken) =>
+        SendPurchaseStateChangeAsync(
+            baseUri,
+            accessToken,
+            purchaseId,
+            "reject",
+            request,
+            cancellationToken);
+
+    private Task<ApiResult<PurchaseStateChangeResponse>> SendPurchaseStateChangeAsync(
+        Uri baseUri,
+        string accessToken,
+        long purchaseId,
+        string action,
+        object? body,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<PurchaseStateChangeResponse>(
+            baseUri,
+            HttpMethod.Post,
+            $"api/v1/purchases/{purchaseId}/{action}",
+            accessToken,
+            body,
+            static payload =>
+                payload.PurchaseId > 0 &&
+                !string.IsNullOrWhiteSpace(payload.Status) &&
+                payload.ChangedAt != default,
+            cancellationToken);
+
+    private static bool ValidatePurchasesViewResponse(PurchasesManagementViewResponse payload) =>
+        payload.Capabilities is not null &&
+        payload.Purchases is not null &&
+        payload.Purchases.All(static purchase =>
+            purchase.PurchaseId > 0 &&
+            purchase.TotalPriceGil > 0 &&
+            purchase.TotalPriceGil <= int.MaxValue &&
+            !string.IsNullOrWhiteSpace(purchase.Title) &&
+            !string.IsNullOrWhiteSpace(purchase.Details) &&
+            !string.IsNullOrWhiteSpace(purchase.Status) &&
+            !string.IsNullOrWhiteSpace(purchase.CreatedByDisplayName) &&
+            !string.IsNullOrWhiteSpace(purchase.CreatedByCharacterName) &&
+            !string.IsNullOrWhiteSpace(purchase.CreatedByWorldName) &&
+            purchase.CreatedAt != default);
+
     private static bool ValidatePublicVenueResponse(PublicVenueResponse payload) =>
         payload.VenueId > 0 &&
         VenueConnectionConfiguration.TryNormalizeVenueCode(payload.VenueCode, out _) &&

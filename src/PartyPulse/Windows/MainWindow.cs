@@ -20,6 +20,7 @@ public sealed class MainWindow : Window, IDisposable
     private readonly PhotoshootsTabRenderer photoshootsTab;
     private readonly OtherSalesTabRenderer otherSalesTab;
     private readonly OtherGamesTabRenderer otherGamesTab;
+    private readonly PurchasesTabRenderer purchasesTab;
     private readonly BarTabRenderer barTab;
     private readonly CourtTabRenderer courtTab;
     private readonly StaffTabRenderer staffTab;
@@ -52,6 +53,7 @@ public sealed class MainWindow : Window, IDisposable
         photoshootsTab = new PhotoshootsTabRenderer(plugin);
         otherSalesTab = new OtherSalesTabRenderer(plugin);
         otherGamesTab = new OtherGamesTabRenderer(plugin);
+        purchasesTab = new PurchasesTabRenderer(plugin);
         barTab = new BarTabRenderer(plugin);
         courtTab = new CourtTabRenderer(plugin);
         staffTab = new StaffTabRenderer(plugin);
@@ -244,6 +246,7 @@ public sealed class MainWindow : Window, IDisposable
             photoshootsTab.Draw(selectedVenue);
             otherSalesTab.Draw(selectedVenue);
             otherGamesTab.Draw(selectedVenue);
+            purchasesTab.Draw(selectedVenue);
             barTab.Draw(selectedVenue);
             courtTab.Draw(selectedVenue);
             staffTab.Draw(selectedVenue);
