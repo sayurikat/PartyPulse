@@ -262,7 +262,7 @@ public sealed class OtherSalesTabRenderer(Plugin plugin)
             ImGui.TextUnformatted($"Seller keeps: {current?.SellerPercentage:0.##}%");
             if (view.Capabilities.CanManageCommission)
             {
-                ImGui.SliderFloat("Seller percentage", ref sellerPercentage, 0f, 100f, "%.2f%%");
+                ImGui.InputFloat("Seller percentage (%)", ref sellerPercentage, 0.25f, 1f, "%.2f");
                 ImGui.BeginDisabled(busy || current is null || Math.Abs(sellerPercentage - (float)current.SellerPercentage) < 0.005f);
                 if (ImGui.Button("Save seller percentage"))
                     plugin.UpdateOtherSaleSellerPercentage(venue, editingItemId, new UpdateOtherSaleSellerPercentageRequest(Math.Round((decimal)sellerPercentage, 2)));
