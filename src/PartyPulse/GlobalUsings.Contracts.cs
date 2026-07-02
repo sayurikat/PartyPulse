@@ -1,0 +1,22 @@
+// Shared HTTP contracts.
+global using PartyPulse.Contracts.Auth;
+global using PartyPulse.Contracts.Bar;
+global using PartyPulse.Contracts.Court;
+global using PartyPulse.Contracts.Djs;
+global using PartyPulse.Contracts.Finance;
+global using PartyPulse.Contracts.Greeter;
+global using PartyPulse.Contracts.Notifications;
+global using PartyPulse.Contracts.OpeningPublications;
+global using PartyPulse.Contracts.OtherGames;
+global using PartyPulse.Contracts.OtherSales;
+global using PartyPulse.Contracts.Photoshoots;
+global using PartyPulse.Contracts.Purchases;
+global using PartyPulse.Contracts.SelfService;
+global using PartyPulse.Contracts.Staff;
+global using PartyPulse.Contracts.TimedMacros;
+global using PartyPulse.Contracts.VenueOpenings;
+global using PartyPulse.Contracts.VenueUsers;
+global using PartyPulse.Contracts.Venues;
+global using PartyPulse.Contracts.Vip;
+global using PartyPulse.Contracts.VipArrivals;
+global using PartyPulse.Contracts.VipPerks;

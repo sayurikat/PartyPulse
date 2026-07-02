@@ -2962,7 +2962,7 @@ public sealed class Plugin : IDalamudPlugin
         await RefreshOtherSalesIfLoadedAsync(venue);
         await RefreshOtherGamesIfLoadedAsync(venue);
         ChatGui.Print(
-            request.Assigned ? "VIP perk assigned to package." : "VIP perk removed from package.",
+            (bool)request.Assigned ? "VIP perk assigned to package." : "VIP perk removed from package.",
             "PartyPulse");
     }
 
@@ -3078,7 +3078,7 @@ public sealed class Plugin : IDalamudPlugin
 
         await Finance.LoadAsync(venue, true, LifetimeToken);
         ChatGui.Print(
-            request.Settled
+            (bool)request.Settled
                 ? $"Photoshoot sale #{saleId} was marked settled."
                 : $"Photoshoot sale #{saleId} was marked unpaid.",
             "PartyPulse");
@@ -3192,7 +3192,7 @@ public sealed class Plugin : IDalamudPlugin
 
         await Finance.LoadAsync(venue, true, LifetimeToken);
         ChatGui.Print(
-            request.Settled
+            (bool)request.Settled
                 ? $"Other Sale #{saleId} was marked settled."
                 : $"Other Sale #{saleId} was marked unpaid.",
             "PartyPulse");
@@ -3420,7 +3420,7 @@ public sealed class Plugin : IDalamudPlugin
         var result = await OtherGames.SetSaleSettlementStatusAsync(venue, saleId, request, LifetimeToken);
         if (!result.Success || result.Value is null) { ReportVipFailure(result.Failure, "The Other Game settlement status could not be updated."); return; }
         await Finance.LoadAsync(venue, true, LifetimeToken);
-        ChatGui.Print(request.Settled ? $"Other Game sale #{saleId} was marked settled." : $"Other Game sale #{saleId} was marked unsettled.", "PartyPulse");
+        ChatGui.Print((bool)request.Settled ? $"Other Game sale #{saleId} was marked settled." : $"Other Game sale #{saleId} was marked unsettled.", "PartyPulse");
     }
 
     private async Task CancelOtherGameAndReportAsync(
