@@ -204,7 +204,10 @@ public sealed class TimedMacrosTabRenderer(Plugin plugin)
                      .OrderBy(value => value.TypeCode == TimedMacroTypeCodes.VipAdvertisement ? 0
                          : value.TypeCode == TimedMacroTypeCodes.PhotoshootAdvertisement ? 1
                          : value.TypeCode == TimedMacroTypeCodes.CourtAdvertisement ? 2
-                         : 3)
+                         : value.TypeCode == TimedMacroTypeCodes.BarAdvertisement ? 3
+                         : value.TypeCode == TimedMacroTypeCodes.BarBuyout ? 4
+                         : value.TypeCode == TimedMacroTypeCodes.BarGamba ? 5
+                         : 6)
                      .ThenBy(value => value.DisplayName, StringComparer.OrdinalIgnoreCase))
         {
             var draft = GetDraft(macro);

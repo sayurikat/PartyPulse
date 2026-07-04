@@ -72,6 +72,7 @@ public sealed class BarTabRenderer(Plugin plugin)
         }
 
         SyncDefaults(view);
+        DrawBarAdvertisementMacro(venue, busy);
         DrawActiveBuyout(venue, view, busy);
         DrawGamba(venue, view, busy);
         DrawSettlement(venue, view, busy);
@@ -87,6 +88,13 @@ public sealed class BarTabRenderer(Plugin plugin)
         ImGui.Separator();
         DrawHistory(venue, view, busy);
         DrawPopups(venue, view, busy);
+    }
+
+    private void DrawBarAdvertisementMacro(VenueConnectionConfiguration venue, bool busy)
+    {
+        ImGui.Spacing();
+        ImGui.TextUnformatted("Bar advertisement");
+        DrawMacroButton(venue, TimedMacroTypeCodes.BarAdvertisement, "Execute bar advertisement", busy);
     }
 
     private void DrawActiveBuyout(VenueConnectionConfiguration venue, BarManagementViewResponse view, bool busy)
