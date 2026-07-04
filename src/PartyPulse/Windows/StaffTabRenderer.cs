@@ -891,7 +891,7 @@ public sealed class StaffTabRenderer(Plugin plugin)
         }
 
         ImGui.SetNextItemWidth(180f);
-        if (ImGui.InputText("Clock out", ref clockOutText, 32))
+        if (ImGui.InputText("Clock out##Time", ref clockOutText, 32))
         {
             clockOutErrorByEntry.Remove(entry.TimeEntryId);
         }
@@ -932,7 +932,7 @@ public sealed class StaffTabRenderer(Plugin plugin)
 
         ImGui.SameLine();
         ImGui.BeginDisabled(busy);
-        if (ImGui.Button("Clock out"))
+        if (ImGui.Button("Clock out##Submit"))
         {
             SubmitClockOut(venue, opening, entry);
         }
