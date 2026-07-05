@@ -486,29 +486,79 @@ public sealed class BarTabRenderer(Plugin plugin)
 
     private void DrawMacroButton(VenueConnectionConfiguration venue, string typeCode, string label, bool busy)
     {
-        var timedView = plugin.TimedMacros.GetSnapshot(venue).View;
+        var snapshot = plugin.TimedMacros.GetSnapshot(venue);
+        var timedView = snapshot.View;
         var macro = timedView?.Macros.FirstOrDefault(value =>
             string.Equals(value.TypeCode, typeCode, StringComparison.OrdinalIgnoreCase) &&
             !value.IsTemplate);
-        var opening = timedView?.CurrentOpening;
-        var locationOk = macro is not { RequiresActiveOpening: true } ||
-                         opening is not null && plugin.LocationProvider.IsAtAddress(
-                             opening.AddressWorldName,
-                             opening.AddressCityName,
-                             opening.AddressWard,
-                             opening.AddressPlot,
-                             out _);
-        var canExecute = macro is { CanExecute: true, Enabled: true, IsConfigured: true } && locationOk;
-        ImGui.BeginDisabled(busy || !canExecute);
-        if (ImGui.Button(label) && macro is not null)
+        if (timedView is null || macro is null)
+        {
+            ImGui.TextDisabled("Timed macro unavailable.");
+            return;
+        }
+
+        var opening = timedView.CurrentOpening;
+        var locationMessage = string.Empty;
+        var atAddress = !macro.RequiresActiveOpening ||
+                        opening is not null && plugin.LocationProvider.IsAtAddress(
+                            opening.AddressWorldName,
+                            opening.AddressCityName,
+                            opening.AddressWard,
+                            opening.AddressPlot,
+                            out locationMessage);
+        var now = snapshot.EstimatedServerNow;
+        var stateText = macro.RequiresActiveOpening && opening is null
+            ? "Paused: no active opening"
+            : !atAddress
+                ? "Paused: not at opening address"
+                : macro.NextDueAt is not { } dueAt || dueAt <= now
+                    ? "Due now"
+                    : $"Next in {FormatTimedMacroRemaining(dueAt - now)}";
+
+        if (string.Equals(stateText, "Due now", StringComparison.Ordinal))
+        {
+            ImGui.TextColored(WarningColor, stateText);
+            ImGui.SameLine();
+            ImGui.TextDisabled($"· every {macro.IntervalMinutes} minutes · shared across users");
+        }
+        else
+        {
+            ImGui.TextDisabled($"{stateText} · every {macro.IntervalMinutes} minutes · shared across users");
+        }
+
+        ImGui.SameLine();
+        var canExecute = macro is { CanExecute: true, Enabled: true, IsConfigured: true } && atAddress;
+        ImGui.BeginDisabled(
+            busy ||
+            plugin.TimedMacros.IsBusy(venue.ProfileId) ||
+            plugin.IsGameMacroBusy ||
+            !canExecute);
+        if (ImGui.SmallButton(label))
             plugin.RunTimedMacro(venue, macro, macro.RequiresActiveOpening ? opening : null);
         ImGui.EndDisabled();
-        if (!canExecute)
+        if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled) && !canExecute)
         {
-            ImGui.SameLine();
-            ImGui.TextDisabled(macro is null ? "Macro unavailable." : "Configure or enable this macro in Timed Macros.");
+            var reason = macro.RequiresActiveOpening && opening is null
+                ? "There is no active opening."
+                : !atAddress
+                    ? locationMessage
+                    : !macro.Enabled
+                        ? "This timed macro is disabled."
+                        : !macro.IsConfigured
+                            ? "This timed macro has not been configured."
+                            : "You do not have permission to execute this timed macro.";
+            ImGui.SetTooltip(reason);
+        }
+        else if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip("Running early is allowed and resets the shared timer.");
         }
     }
+
+    private static string FormatTimedMacroRemaining(TimeSpan remaining) =>
+        remaining.TotalHours >= 1
+            ? $"{(int)remaining.TotalHours:00}:{remaining.Minutes:00}:{remaining.Seconds:00}"
+            : $"{remaining.Minutes:00}:{remaining.Seconds:00}";
 
     private void DrawPopups(VenueConnectionConfiguration venue, BarManagementViewResponse view, bool busy)
     {
