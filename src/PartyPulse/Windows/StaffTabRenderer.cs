@@ -95,12 +95,18 @@ public sealed class StaffTabRenderer(Plugin plugin)
         }
 
         var view = snapshot.View;
+        var canManageAttendance =
+            view.Capabilities.CanManage || view.Capabilities.CanManageCourtAttendance;
         SelectDefaults(view, venue);
         DrawOpeningSelector(venue, view);
 
-        if (view.Capabilities.CanManage)
+        if (canManageAttendance)
         {
             DrawClocking(venue, view, busy);
+        }
+
+        if (view.Capabilities.CanManage)
+        {
             ImGui.Separator();
             DrawStaffListings(venue, view, busy);
             ImGui.Separator();
@@ -114,7 +120,7 @@ public sealed class StaffTabRenderer(Plugin plugin)
         }
 
         ImGui.Separator();
-        DrawTimeEntries(venue, view, busy);
+        DrawTimeEntries(venue, view, busy, canManageAttendance);
 
         if (view.Capabilities.CanPay)
         {
@@ -735,7 +741,8 @@ public sealed class StaffTabRenderer(Plugin plugin)
     private void DrawTimeEntries(
         VenueConnectionConfiguration venue,
         StaffManagementViewResponse view,
-        bool busy)
+        bool busy,
+        bool canManageAttendance)
     {
         if (!ImGui.CollapsingHeader("Clock-in history", ImGuiTreeNodeFlags.DefaultOpen))
         {
@@ -769,7 +776,7 @@ public sealed class StaffTabRenderer(Plugin plugin)
                 ImGui.TextDisabled($"Cancellation: {absence.CancelReason}");
             }
 
-            if (absence.CancelledAt is null && view.Capabilities.CanManage)
+            if (absence.CancelledAt is null && canManageAttendance)
             {
                 ImGui.SameLine();
                 ImGui.BeginDisabled(busy);
@@ -822,11 +829,11 @@ public sealed class StaffTabRenderer(Plugin plugin)
                         : $"Paid to {entry.PaidToCharacterName} @ {entry.PaidToWorldName}");
             }
 
-            if (entry.Status == "open" && view.Capabilities.CanManage)
+            if (entry.Status == "open" && canManageAttendance)
             {
                 DrawClockOutActions(venue, opening, entry, busy);
             }
-            else if (entry.Status != "cancelled" && view.Capabilities.CanManage)
+            else if (entry.Status != "cancelled" && canManageAttendance)
             {
                 ImGui.BeginDisabled(busy);
                 if (ImGui.SmallButton("Add another work entry"))
@@ -841,7 +848,7 @@ public sealed class StaffTabRenderer(Plugin plugin)
                 ImGui.EndDisabled();
             }
 
-            if (view.Capabilities.CanManage &&
+            if (canManageAttendance &&
                 entry.Status != "cancelled" &&
                 (entry.FinancialTransactionId is null || entry.PaidAt is not null))
             {

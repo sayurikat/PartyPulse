@@ -19,6 +19,7 @@ public sealed class CourtTabRenderer(Plugin plugin)
     private static readonly Vector4 AvailableColor = new(0.35f, 0.85f, 0.45f, 1f);
     private static readonly Vector4 UnavailableColor = new(0.95f, 0.25f, 0.25f, 1f);
     private static readonly Vector4 DueColor = new(1f, 0.72f, 0.25f, 1f);
+    private static readonly Vector4 ZeroBalanceColor = new(0.25f, 1f, 0.46f, 1f);
 
     private Guid activeProfileId;
     private long selectedOfferId;
@@ -95,6 +96,7 @@ public sealed class CourtTabRenderer(Plugin plugin)
 
         if (view.Capabilities.CanFinance || view.Capabilities.CanAccount)
         {
+            DrawUnsettledCourtStaff(venue, view);
             DrawSettlement(venue, view, busy);
         }
 
@@ -197,6 +199,131 @@ public sealed class CourtTabRenderer(Plugin plugin)
         remaining.TotalHours >= 1
             ? $"{(int)remaining.TotalHours:00}:{remaining.Minutes:00}:{remaining.Seconds:00}"
             : $"{remaining.Minutes:00}:{remaining.Seconds:00}";
+
+
+    private void DrawUnsettledCourtStaff(
+        VenueConnectionConfiguration venue,
+        CourtManagementViewResponse view)
+    {
+        if (!ImGui.CollapsingHeader(
+                "Unsettled Courts",
+                ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            return;
+        }
+
+        var rows = view.UnsettledStaff
+            .OrderByDescending(static row => row.RequiresSettlement)
+            .ThenByDescending(static row => row.OpenTimeEntryCount)
+            .ThenBy(static row => row.StaffDisplayName)
+            .ToArray();
+        if (rows.Length == 0)
+        {
+            ImGui.TextDisabled("No Court sellers, open Court clock-ins, unpaid salaries, or unsettled Court balances need attention.");
+            return;
+        }
+
+        ImGui.TextDisabled(
+            "Open clock-ins are reminders only; Court staff can still be settled before they clock out.");
+
+        var flags = ImGuiTableFlags.Borders |
+                    ImGuiTableFlags.RowBg |
+                    ImGuiTableFlags.Resizable |
+                    ImGuiTableFlags.ScrollX |
+                    ImGuiTableFlags.SizingFixedFit;
+        if (!ImGui.BeginTable("CourtUnsettledStaffTable", 8, flags))
+        {
+            return;
+        }
+
+        ImGui.TableSetupColumn("Staff", ImGuiTableColumnFlags.WidthFixed, 180f);
+        ImGui.TableSetupColumn("Character", ImGuiTableColumnFlags.WidthFixed, 190f);
+        ImGui.TableSetupColumn("Court sell", ImGuiTableColumnFlags.WidthFixed, 80f);
+        ImGui.TableSetupColumn("Sales", ImGuiTableColumnFlags.WidthFixed, 110f);
+        ImGui.TableSetupColumn("Salary", ImGuiTableColumnFlags.WidthFixed, 110f);
+        ImGui.TableSetupColumn("Adjustments", ImGuiTableColumnFlags.WidthFixed, 110f);
+        ImGui.TableSetupColumn("Open", ImGuiTableColumnFlags.WidthFixed, 115f);
+        ImGui.TableSetupColumn("Net", ImGuiTableColumnFlags.WidthFixed, 110f);
+        ImGui.TableHeadersRow();
+
+        foreach (var row in rows)
+        {
+            ImGui.TableNextRow();
+
+            ImGui.TableNextColumn();
+            ImGui.TextUnformatted(row.StaffDisplayName);
+
+            ImGui.TableNextColumn();
+            if (!string.IsNullOrWhiteSpace(row.StaffCharacterName) &&
+                !string.IsNullOrWhiteSpace(row.StaffWorldName))
+            {
+                ImGui.TextUnformatted($"{row.StaffCharacterName} @ {row.StaffWorldName}");
+            }
+            else
+            {
+                ImGui.TextDisabled("No linked character");
+            }
+
+            ImGui.TableNextColumn();
+            if (row.HasCourtSellPermission)
+            {
+                ImGui.TextColored(AvailableColor, "Yes");
+            }
+            else
+            {
+                ImGui.TextColored(DueColor, "Former");
+            }
+
+            ImGui.TableNextColumn();
+            ImGui.TextUnformatted($"{row.UnsettledCourtGil:N0}");
+            if (row.UnsettledSaleCount > 0)
+            {
+                ImGui.TextDisabled($"{row.UnsettledSaleCount:N0} sale{(row.UnsettledSaleCount == 1 ? string.Empty : "s")}");
+            }
+
+            ImGui.TableNextColumn();
+            ImGui.TextUnformatted($"{row.UnpaidSalaryGil:N0}");
+            if (row.UnpaidSalaryEntryCount > 0)
+            {
+                ImGui.TextDisabled($"{row.UnpaidSalaryEntryCount:N0} unpaid");
+            }
+
+            ImGui.TableNextColumn();
+            ImGui.TextUnformatted($"{row.UnsettledAdjustmentGil:+#,0;-#,0;0}");
+            if (row.UnsettledAdjustmentCount > 0)
+            {
+                ImGui.TextDisabled($"{row.UnsettledAdjustmentCount:N0} adjustment{(row.UnsettledAdjustmentCount == 1 ? string.Empty : "s")}");
+            }
+
+            ImGui.TableNextColumn();
+            if (row.OpenTimeEntryCount > 0)
+            {
+                ImGui.TextColored(DueColor, $"{row.OpenTimeEntryCount:N0} open");
+                if (row.FirstOpenClockInAt is { } firstOpen)
+                {
+                    ImGui.TextDisabled(VenueTimeZone.Format(venue, firstOpen, "g"));
+                }
+            }
+            else
+            {
+                ImGui.TextDisabled("None");
+            }
+
+            ImGui.TableNextColumn();
+            var netColor = row.NetGil > 0
+                ? AvailableColor
+                : row.NetGil < 0
+                    ? UnavailableColor
+                    : ZeroBalanceColor;
+            ImGui.TextColored(netColor, $"{row.NetGil:+#,0;-#,0;0}");
+            if (row.RequiresSettlement)
+            {
+                ImGui.TextDisabled("ready");
+            }
+        }
+
+        ImGui.EndTable();
+    }
 
     private void DrawCommissionSettings(
         VenueConnectionConfiguration venue,

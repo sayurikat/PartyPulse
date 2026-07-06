@@ -1980,6 +1980,7 @@ public sealed class PartyPulseApiClient : IDisposable
         payload.Offers is not null &&
         payload.Sales is not null &&
         payload.AccountantAccounts is not null &&
+        payload.UnsettledStaff is not null &&
         payload.Transactions is not null &&
         payload.VipStatuses is not null &&
         payload.VipPerkAvailability is not null &&
@@ -2003,6 +2004,13 @@ public sealed class PartyPulseApiClient : IDisposable
             sale.SellerShareGil >= 0 &&
             sale.VenueShareGil >= 0 &&
             sale.SellerShareGil + sale.VenueShareGil == sale.TotalPriceGil) &&
+        payload.UnsettledStaff.All(static staff =>
+            !string.IsNullOrWhiteSpace(staff.StaffDisplayName) &&
+            staff.UnsettledCourtGil >= 0 &&
+            staff.UnsettledSaleCount >= 0 &&
+            staff.UnpaidSalaryGil >= 0 &&
+            staff.UnpaidSalaryEntryCount >= 0 &&
+            staff.OpenTimeEntryCount >= 0) &&
         payload.Transactions.All(static transaction =>
             transaction.TransactionId > 0 &&
             !string.IsNullOrWhiteSpace(transaction.TransactionType) &&
