@@ -11,6 +11,27 @@ public sealed class VenueLocationProvider(
     IClientState clientState,
     IDataManager dataManager)
 {
+    private static readonly string[] HousingDistrictNames =
+    [
+        "Mist",
+        "The Lavender Beds",
+        "The Goblet",
+        "Shirogane",
+        "Empyreum"
+    ];
+
+    private static readonly string[] HousingInteriorPrefixes =
+    [
+        "Cottage",
+        "House",
+        "Mansion",
+        "Private ",
+        "Company ",
+        "Estate ",
+        "Apartment",
+        "Chambers"
+    ];
+
     public unsafe bool TryGetCurrentHousingAddress(out VenueAddress? address, out string reason)
     {
         address = null;
@@ -158,7 +179,10 @@ public sealed class VenueLocationProvider(
     private bool TryGetCurrentLocationName(out string locationName, out string reason)
     {
         var territory = dataManager.GetExcelSheet<TerritoryType>().GetRow(clientState.TerritoryType);
-        locationName = territory.PlaceName.Value.Name.ToString().Trim() ?? string.Empty;
+        locationName = ResolveTerritoryLocationName(
+            territory.PlaceName.Value.Name.ToString(),
+            territory.PlaceNameZone.Value.Name.ToString(),
+            territory.PlaceNameRegion.Value.Name.ToString());
         if (locationName.Length == 0)
         {
             reason = "The current location name could not be determined.";
@@ -167,6 +191,34 @@ public sealed class VenueLocationProvider(
 
         reason = string.Empty;
         return true;
+    }
+
+    private static string ResolveTerritoryLocationName(
+        string? placeName,
+        string? zoneName,
+        string? regionName)
+    {
+        var normalizedPlaceName = NormalizeHousingDistrictName(placeName ?? string.Empty);
+        if (IsHousingDistrictName(normalizedPlaceName, out var canonicalDistrictName))
+        {
+            return canonicalDistrictName;
+        }
+
+        if (!IsHousingInteriorName(placeName))
+        {
+            return normalizedPlaceName;
+        }
+
+        foreach (var candidate in new[] { zoneName, regionName })
+        {
+            var normalizedCandidate = NormalizeHousingDistrictName(candidate ?? string.Empty);
+            if (IsHousingDistrictName(normalizedCandidate, out canonicalDistrictName))
+            {
+                return canonicalDistrictName;
+            }
+        }
+
+        return normalizedPlaceName;
     }
 
     private static string NormalizeHousingDistrictName(string placeName)
@@ -190,5 +242,39 @@ public sealed class VenueLocationProvider(
         }
 
         return normalized;
+    }
+
+    private static bool IsHousingInteriorName(string? placeName)
+    {
+        var normalized = placeName?.Trim() ?? string.Empty;
+        if (normalized.Length == 0)
+        {
+            return false;
+        }
+
+        foreach (var prefix in HousingInteriorPrefixes)
+        {
+            if (normalized.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsHousingDistrictName(string locationName, out string canonicalName)
+    {
+        foreach (var districtName in HousingDistrictNames)
+        {
+            if (string.Equals(locationName.Trim(), districtName, StringComparison.OrdinalIgnoreCase))
+            {
+                canonicalName = districtName;
+                return true;
+            }
+        }
+
+        canonicalName = string.Empty;
+        return false;
     }
 }
