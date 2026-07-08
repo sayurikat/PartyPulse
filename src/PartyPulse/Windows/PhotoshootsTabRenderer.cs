@@ -132,13 +132,14 @@ public sealed class PhotoshootsTabRenderer(Plugin plugin)
         ImGui.TextUnformatted("Photoshoot advertisement");
         var opening = view.CurrentOpening;
         var locationMessage = string.Empty;
-        var atAddress = opening is not null && plugin.LocationProvider.IsAtAddress(
-            opening.AddressWorldName, opening.AddressCityName, opening.AddressWard, opening.AddressPlot, out locationMessage);
+        var atAddress = opening is not null && plugin.LocationProvider.IsAtOpeningLocation(
+            opening.AddressWorldName, opening.AddressCityName, opening.AddressWard, opening.AddressPlot,
+            opening.LocationType, opening.OutdoorLocationName, out locationMessage);
         var now = snapshot.EstimatedServerNow;
         var stateText = opening is null
             ? "Paused: no active opening"
             : !atAddress
-                ? "Paused: not at opening address"
+                ? "Paused: not at opening location"
                 : macro.NextDueAt is not { } dueAt || dueAt <= now
                     ? "Due now"
                     : $"Next in {FormatTimedMacroRemaining(dueAt - now)}";

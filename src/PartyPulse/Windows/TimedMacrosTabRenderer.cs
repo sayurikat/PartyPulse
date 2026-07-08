@@ -49,11 +49,13 @@ public sealed class TimedMacrosTabRenderer(Plugin plugin)
 
         var opening = view.CurrentOpening;
         var locationMessage = string.Empty;
-        var atAddress = opening is not null && plugin.LocationProvider.IsAtAddress(
+        var atAddress = opening is not null && plugin.LocationProvider.IsAtOpeningLocation(
             opening.AddressWorldName,
             opening.AddressCityName,
             opening.AddressWard,
             opening.AddressPlot,
+            opening.LocationType,
+            opening.OutdoorLocationName,
             out locationMessage);
 
         DrawOpeningStatus(venue, opening, atAddress, locationMessage);
@@ -92,7 +94,7 @@ public sealed class TimedMacrosTabRenderer(Plugin plugin)
         {
             ImGui.TextColored(
                 new Vector4(1f, 0.72f, 0.25f, 1f),
-                "Opening-bound timers are paused because you are not at this opening's address. Global timers remain available.");
+                "Opening-bound timers are paused because you are not at this opening's location. Global timers remain available.");
             ImGui.TextWrapped(locationMessage);
         }
     }
@@ -176,7 +178,7 @@ public sealed class TimedMacrosTabRenderer(Plugin plugin)
                             : macro.RequiresActiveOpening && opening is null
                                 ? "There is no active opening."
                                 : macro.RequiresActiveOpening
-                                    ? "You must be at the opening address."
+                                    ? "You must be at the opening location."
                                     : "This macro is not currently available.";
                 ImGui.SetTooltip(reason);
             }

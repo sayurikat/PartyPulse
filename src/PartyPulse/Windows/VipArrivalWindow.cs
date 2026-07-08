@@ -82,13 +82,13 @@ public sealed class VipArrivalWindow : Window, IDisposable
         ImGui.TextDisabled($"{VenueTimeZone.Format(venue, opening.OpensAt, "g")} – {VenueTimeZone.Format(venue, opening.ClosesAt, "g")}");
         ImGui.TextDisabled(opening.AddressDisplay);
 
-        if (!IsAtOpeningAddress(opening, out var locationMessage))
+        if (!IsAtOpeningLocation(opening, out var locationMessage))
         {
             plugin.VipArrivalNearby.Clear();
             ImGui.Spacing();
             ImGui.TextColored(
                 new Vector4(1f, 0.72f, 0.25f, 1f),
-                "Arrival tracking is paused because you are not at this opening's venue address.");
+                "Arrival tracking is paused because you are not at this opening's location.");
             ImGui.TextWrapped(locationMessage);
             return;
         }
@@ -264,24 +264,15 @@ public sealed class VipArrivalWindow : Window, IDisposable
         ImGui.Separator();
     }
 
-    private bool IsAtOpeningAddress(VenueOpeningSummary opening, out string message)
-    {
-        if (!plugin.LocationProvider.TryGetCurrentHousingAddress(out var current, out var reason) || current is null)
-        {
-            message = reason;
-            return false;
-        }
-
-        var matches =
-            string.Equals(current.WorldName, opening.AddressWorldName, StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(current.CityName, opening.AddressCityName, StringComparison.OrdinalIgnoreCase) &&
-            current.Ward == opening.AddressWard &&
-            current.Plot == opening.AddressPlot;
-        message = matches
-            ? string.Empty
-            : $"Current: {current.DisplayText}\nRequired: {opening.AddressDisplay}";
-        return matches;
-    }
+    private bool IsAtOpeningLocation(VenueOpeningSummary opening, out string message) =>
+        plugin.LocationProvider.IsAtOpeningLocation(
+            opening.AddressWorldName,
+            opening.AddressCityName,
+            opening.AddressWard,
+            opening.AddressPlot,
+            opening.LocationType,
+            opening.OutdoorLocationName,
+            out message);
 
     private static void DrawActionState(VenueConnectionConfiguration venue, DateTimeOffset? completedAt, string pendingText)
     {

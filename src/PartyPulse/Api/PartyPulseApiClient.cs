@@ -1937,12 +1937,15 @@ public sealed class PartyPulseApiClient : IDisposable
         payload.Openings.All(static opening =>
             opening.OpeningId > 0 &&
             opening.ClosesAt > opening.OpensAt &&
-            opening.AddressWorldId > 0 &&
-            !string.IsNullOrWhiteSpace(opening.AddressWorldName) &&
-            opening.AddressCityId > 0 &&
-            !string.IsNullOrWhiteSpace(opening.AddressCityName) &&
-            opening.AddressWard > 0 &&
-            opening.AddressPlot > 0) &&
+            ValidateOpeningLocation(
+                opening.LocationType,
+                opening.AddressWorldId,
+                opening.AddressWorldName,
+                opening.AddressCityId,
+                opening.AddressCityName,
+                opening.AddressWard,
+                opening.AddressPlot,
+                opening.OutdoorLocationName)) &&
         payload.Jobs.All(static job =>
             job.JobDefinitionId > 0 &&
             !string.IsNullOrWhiteSpace(job.Name) &&
@@ -2169,13 +2172,37 @@ public sealed class PartyPulseApiClient : IDisposable
         opening.CreatedAt != default;
 
     private static bool ValidateVenueOpeningAddress(VenueOpeningAddressSummary address) =>
-        address.WorldId > 0 &&
-        !string.IsNullOrWhiteSpace(address.WorldName) &&
-        address.CityId > 0 &&
-        !string.IsNullOrWhiteSpace(address.CityName) &&
-        address.Ward is >= 1 and <= 30 &&
-        address.Plot is >= 1 and <= 60;
+        ValidateOpeningLocation(
+            address.LocationType,
+            address.WorldId,
+            address.WorldName,
+            address.CityId,
+            address.CityName,
+            address.Ward,
+            address.Plot,
+            address.OutdoorLocationName);
 
+    private static bool ValidateOpeningLocation(
+        string locationType,
+        int worldId,
+        string worldName,
+        int cityId,
+        string cityName,
+        int ward,
+        int plot,
+        string? outdoorLocationName)
+    {
+        if (worldId <= 0 || string.IsNullOrWhiteSpace(worldName))
+            return false;
+
+        if (string.Equals(locationType, VenueOpeningLocationTypes.Outdoor, StringComparison.OrdinalIgnoreCase))
+            return !string.IsNullOrWhiteSpace(outdoorLocationName);
+
+        return cityId > 0 &&
+               !string.IsNullOrWhiteSpace(cityName) &&
+               ward is >= 1 and <= 30 &&
+               plot is >= 1 and <= 60;
+    }
 
     private static bool ValidateDjViewResponse(DjViewResponse payload) =>
         payload.Capabilities is not null &&
@@ -2233,12 +2260,15 @@ public sealed class PartyPulseApiClient : IDisposable
         (payload.CurrentOpening is null ||
          (payload.CurrentOpening.OpeningId > 0 &&
           payload.CurrentOpening.ClosesAt > payload.CurrentOpening.OpensAt &&
-          payload.CurrentOpening.AddressWorldId > 0 &&
-          !string.IsNullOrWhiteSpace(payload.CurrentOpening.AddressWorldName) &&
-          payload.CurrentOpening.AddressCityId > 0 &&
-          !string.IsNullOrWhiteSpace(payload.CurrentOpening.AddressCityName) &&
-          payload.CurrentOpening.AddressWard is >= 1 and <= 30 &&
-          payload.CurrentOpening.AddressPlot is >= 1 and <= 60)) &&
+          ValidateOpeningLocation(
+              payload.CurrentOpening.LocationType,
+              payload.CurrentOpening.AddressWorldId,
+              payload.CurrentOpening.AddressWorldName,
+              payload.CurrentOpening.AddressCityId,
+              payload.CurrentOpening.AddressCityName,
+              payload.CurrentOpening.AddressWard,
+              payload.CurrentOpening.AddressPlot,
+              payload.CurrentOpening.OutdoorLocationName))) &&
         (payload.CurrentOpening is not null ||
          payload.Macros.All(static macro => !macro.RequiresActiveOpening || macro.NextDueAt is null)) &&
         payload.Macros.All(static macro =>
@@ -2271,12 +2301,15 @@ public sealed class PartyPulseApiClient : IDisposable
     private static bool ValidateVenueOpening(VenueOpeningSummary opening) =>
         opening.OpeningId > 0 &&
         opening.ClosesAt > opening.OpensAt &&
-        opening.AddressWorldId > 0 &&
-        !string.IsNullOrWhiteSpace(opening.AddressWorldName) &&
-        opening.AddressCityId > 0 &&
-        !string.IsNullOrWhiteSpace(opening.AddressCityName) &&
-        opening.AddressWard > 0 &&
-        opening.AddressPlot > 0 &&
+        ValidateOpeningLocation(
+            opening.LocationType,
+            opening.AddressWorldId,
+            opening.AddressWorldName,
+            opening.AddressCityId,
+            opening.AddressCityName,
+            opening.AddressWard,
+            opening.AddressPlot,
+            opening.OutdoorLocationName) &&
         !string.IsNullOrWhiteSpace(opening.SourceType);
 
     private static bool ValidateOpeningPublicationContextResponse(OpeningPublicationContextResponse payload) =>
@@ -2313,12 +2346,15 @@ public sealed class PartyPulseApiClient : IDisposable
         (payload.CurrentOpening is null ||
          (payload.CurrentOpening.OpeningId > 0 &&
           payload.CurrentOpening.ClosesAt > payload.CurrentOpening.OpensAt &&
-          payload.CurrentOpening.AddressWorldId > 0 &&
-          !string.IsNullOrWhiteSpace(payload.CurrentOpening.AddressWorldName) &&
-          payload.CurrentOpening.AddressCityId > 0 &&
-          !string.IsNullOrWhiteSpace(payload.CurrentOpening.AddressCityName) &&
-          payload.CurrentOpening.AddressWard is >= 1 and <= 30 &&
-          payload.CurrentOpening.AddressPlot is >= 1 and <= 60)) &&
+          ValidateOpeningLocation(
+              payload.CurrentOpening.LocationType,
+              payload.CurrentOpening.AddressWorldId,
+              payload.CurrentOpening.AddressWorldName,
+              payload.CurrentOpening.AddressCityId,
+              payload.CurrentOpening.AddressCityName,
+              payload.CurrentOpening.AddressWard,
+              payload.CurrentOpening.AddressPlot,
+              payload.CurrentOpening.OutdoorLocationName))) &&
         (payload.CurrentDj is null ||
          (payload.CurrentDj.BookingId > 0 &&
           !string.IsNullOrWhiteSpace(payload.CurrentDj.Name) &&

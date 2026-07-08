@@ -28,6 +28,8 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
     private string addressCityName = string.Empty;
     private int addressWard = 1;
     private int addressPlot = 1;
+    private string locationType = VenueOpeningLocationTypes.Housing;
+    private string outdoorLocationName = string.Empty;
     private string themeName = string.Empty;
     private string openingTitle = string.Empty;
     private long? pendingCancelOpeningId;
@@ -219,24 +221,52 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
         ImGui.SetNextItemWidth(360 * ImGuiHelpers.GlobalScale);
         ImGui.InputText("Title (optional)", ref openingTitle, 100);
 
-        ImGui.TextUnformatted("Address");
+        ImGui.TextUnformatted("Event location");
+        var outdoorEvent = string.Equals(locationType, VenueOpeningLocationTypes.Outdoor, StringComparison.OrdinalIgnoreCase);
+        if (ImGui.Checkbox("Outdoor event (world + location name only)", ref outdoorEvent))
+        {
+            locationType = outdoorEvent ? VenueOpeningLocationTypes.Outdoor : VenueOpeningLocationTypes.Housing;
+            if (!outdoorEvent && addressWard <= 0)
+                addressWard = 1;
+            if (!outdoorEvent && addressPlot <= 0)
+                addressPlot = 1;
+        }
+
         ImGui.SetNextItemWidth(220 * ImGuiHelpers.GlobalScale);
         ImGui.InputText("World", ref addressWorldName, 50);
-        ImGui.SetNextItemWidth(220 * ImGuiHelpers.GlobalScale);
-        ImGui.InputText("Housing district", ref addressCityName, 50);
-        ImGui.SetNextItemWidth(120 * ImGuiHelpers.GlobalScale);
-        ImGui.InputInt("Ward", ref addressWard);
-        addressWard = Math.Clamp(addressWard, 1, 30);
-        ImGui.SetNextItemWidth(120 * ImGuiHelpers.GlobalScale);
-        ImGui.InputInt("Plot", ref addressPlot);
-        addressPlot = Math.Clamp(addressPlot, 1, 60);
 
-        if (view.DefaultAddress is not null)
+        if (outdoorEvent)
         {
-            if (ImGui.SmallButton("Use registered venue address"))
-                LoadAddress(view.DefaultAddress);
+            ImGui.SetNextItemWidth(320 * ImGuiHelpers.GlobalScale);
+            ImGui.InputText("Location name", ref outdoorLocationName, 100);
+            if (ImGui.SmallButton("Use current location"))
+                LoadCurrentOutdoorLocation();
             ImGui.SameLine();
-            ImGui.TextDisabled(view.DefaultAddress.DisplayText);
+            ImGui.TextDisabled("Uses your current world and map/place name. Good for beaches and other outdoor parties.");
+        }
+        else
+        {
+            ImGui.SetNextItemWidth(220 * ImGuiHelpers.GlobalScale);
+            ImGui.InputText("Housing district", ref addressCityName, 50);
+            ImGui.SetNextItemWidth(120 * ImGuiHelpers.GlobalScale);
+            ImGui.InputInt("Ward", ref addressWard);
+            addressWard = Math.Clamp(addressWard, 1, 30);
+            ImGui.SetNextItemWidth(120 * ImGuiHelpers.GlobalScale);
+            ImGui.InputInt("Plot", ref addressPlot);
+            addressPlot = Math.Clamp(addressPlot, 1, 60);
+
+            if (view.DefaultAddress is not null)
+            {
+                if (ImGui.SmallButton("Use registered venue address"))
+                    LoadAddress(view.DefaultAddress);
+                ImGui.SameLine();
+                ImGui.TextDisabled(view.DefaultAddress.DisplayText);
+            }
+
+            if (ImGui.SmallButton("Use current address"))
+                LoadCurrentHousingAddress();
+            ImGui.SameLine();
+            ImGui.TextDisabled("Reads your current housing ward and plot.");
         }
 
         var validStart = TryParseLocalDateTime(venue, startsAtLocal, out var startsAt, out var dateError);
@@ -244,15 +274,19 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
         var actualDurationMinutes = validStart && validEnd
             ? (closesAt - startsAt).TotalMinutes
             : 0;
+        var isOutdoorEvent = string.Equals(locationType, VenueOpeningLocationTypes.Outdoor, StringComparison.OrdinalIgnoreCase);
+        var locationValid = !string.IsNullOrWhiteSpace(addressWorldName) &&
+                            (isOutdoorEvent
+                                ? !string.IsNullOrWhiteSpace(outdoorLocationName)
+                                : !string.IsNullOrWhiteSpace(addressCityName) &&
+                                  addressWard is >= 1 and <= 30 &&
+                                  addressPlot is >= 1 and <= 60);
         var valid = validStart &&
                     validEnd &&
                     closesAt > startsAt &&
                     actualDurationMinutes is >= 30 and <= 2880 &&
                     !string.IsNullOrWhiteSpace(themeName) &&
-                    !string.IsNullOrWhiteSpace(addressWorldName) &&
-                    !string.IsNullOrWhiteSpace(addressCityName) &&
-                    addressWard is >= 1 and <= 30 &&
-                    addressPlot is >= 1 and <= 60;
+                    locationValid;
 
         if (!validStart)
             ImGui.TextColored(new Vector4(1f, 0.45f, 0.4f, 1f), dateError);
@@ -272,15 +306,19 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
             plugin.SaveVenueOpening(
                 venue,
                 editingOpeningId,
-                new SaveVenueOpeningRequest(
-                    startsAt.ToUniversalTime(),
-                    closesAt.ToUniversalTime(),
-                    addressWorldName.Trim(),
-                    addressCityName.Trim(),
-                    addressWard,
-                    addressPlot,
-                    themeName.Trim(),
-                    string.IsNullOrWhiteSpace(openingTitle) ? null : openingTitle.Trim()));
+                new SaveVenueOpeningRequest
+                {
+                    OpensAt = startsAt.ToUniversalTime(),
+                    ClosesAt = closesAt.ToUniversalTime(),
+                    AddressWorldName = addressWorldName.Trim(),
+                    AddressCityName = isOutdoorEvent ? string.Empty : addressCityName.Trim(),
+                    AddressWard = isOutdoorEvent ? 0 : addressWard,
+                    AddressPlot = isOutdoorEvent ? 0 : addressPlot,
+                    LocationType = isOutdoorEvent ? VenueOpeningLocationTypes.Outdoor : VenueOpeningLocationTypes.Housing,
+                    OutdoorLocationName = isOutdoorEvent ? outdoorLocationName.Trim() : null,
+                    ThemeName = themeName.Trim(),
+                    Title = string.IsNullOrWhiteSpace(openingTitle) ? null : openingTitle.Trim()
+                });
             editingOpeningId = null;
         }
         ImGui.EndDisabled();
@@ -1360,6 +1398,12 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
             .FirstOrDefault()
             ?? view.Themes.OrderBy(value => value.Name, StringComparer.OrdinalIgnoreCase).FirstOrDefault()?.Name
             ?? string.Empty;
+        locationType = VenueOpeningLocationTypes.Housing;
+        outdoorLocationName = string.Empty;
+        addressWorldName = string.Empty;
+        addressCityName = string.Empty;
+        addressWard = 1;
+        addressPlot = 1;
         if (view.DefaultAddress is not null)
             LoadAddress(view.DefaultAddress);
     }
@@ -1373,18 +1417,51 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
         endsAtLocal = VenueTimeZone.Format(venue, opening.ClosesAt, LocalDateTimeFormat, CultureInfo.InvariantCulture);
         addressWorldName = opening.Address.WorldName;
         addressCityName = opening.Address.CityName;
-        addressWard = opening.Address.Ward;
-        addressPlot = opening.Address.Plot;
+        addressWard = opening.Address.Ward <= 0 ? 1 : opening.Address.Ward;
+        addressPlot = opening.Address.Plot <= 0 ? 1 : opening.Address.Plot;
+        locationType = opening.Address.LocationType;
+        outdoorLocationName = opening.Address.OutdoorLocationName ?? string.Empty;
         themeName = opening.ThemeName ?? string.Empty;
         openingTitle = opening.Title ?? string.Empty;
     }
 
     private void LoadAddress(VenueOpeningAddressSummary address)
     {
+        locationType = VenueOpeningLocationTypes.Housing;
+        outdoorLocationName = string.Empty;
+        addressWorldName = address.WorldName;
+        addressCityName = address.CityName;
+        addressWard = address.Ward <= 0 ? 1 : address.Ward;
+        addressPlot = address.Plot <= 0 ? 1 : address.Plot;
+    }
+
+    private void LoadCurrentHousingAddress()
+    {
+        if (!plugin.LocationProvider.TryGetCurrentHousingAddress(out var address, out var reason) || address is null)
+        {
+            Plugin.ChatGui.PrintError(reason, "PartyPulse");
+            return;
+        }
+
+        locationType = VenueOpeningLocationTypes.Housing;
         addressWorldName = address.WorldName;
         addressCityName = address.CityName;
         addressWard = address.Ward;
         addressPlot = address.Plot;
+        outdoorLocationName = string.Empty;
+    }
+
+    private void LoadCurrentOutdoorLocation()
+    {
+        if (!plugin.LocationProvider.TryGetCurrentLocation(out var current, out var reason) || current is null)
+        {
+            Plugin.ChatGui.PrintError(reason, "PartyPulse");
+            return;
+        }
+
+        locationType = VenueOpeningLocationTypes.Outdoor;
+        addressWorldName = current.WorldName;
+        outdoorLocationName = current.LocationName;
     }
 
     private void ResetForVenueChange(VenueConnectionConfiguration venue)

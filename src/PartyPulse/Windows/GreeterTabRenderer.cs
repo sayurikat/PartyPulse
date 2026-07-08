@@ -48,11 +48,13 @@ public sealed class GreeterTabRenderer(Plugin plugin)
         var opening = context.CurrentOpening;
         var locationMessage = string.Empty;
         var atAddress = opening is not null &&
-                        plugin.LocationProvider.IsAtAddress(
+                        plugin.LocationProvider.IsAtOpeningLocation(
                             opening.AddressWorldName,
                             opening.AddressCityName,
                             opening.AddressWard,
                             opening.AddressPlot,
+                            opening.LocationType,
+                            opening.OutdoorLocationName,
                             out locationMessage);
 
         if (context.Capabilities.CanUse)
@@ -69,7 +71,7 @@ public sealed class GreeterTabRenderer(Plugin plugin)
                 ImGui.Spacing();
                 ImGui.TextColored(
                     new Vector4(1f, 0.72f, 0.25f, 1f),
-                    "Greeter tracking is paused because you are not at this opening's address.");
+                    "Greeter tracking is paused because you are not at this opening's location.");
                 ImGui.TextWrapped(locationMessage);
             }
             else

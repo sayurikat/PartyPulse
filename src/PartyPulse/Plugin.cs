@@ -1555,11 +1555,13 @@ public sealed class Plugin : IDalamudPlugin
             var opening = view.Openings.FirstOrDefault(item =>
                 item.OpensAt <= now &&
                 item.ClosesAt > now &&
-                LocationProvider.IsAtAddress(
+                LocationProvider.IsAtOpeningLocation(
                     item.AddressWorldName,
                     item.AddressCityName,
                     item.AddressWard,
                     item.AddressPlot,
+                    item.LocationType,
+                    item.OutdoorLocationName,
                     out _));
             if (opening is null)
             {
@@ -2865,14 +2867,16 @@ public sealed class Plugin : IDalamudPlugin
                 return;
             }
 
-            if (!LocationProvider.IsAtAddress(
+            if (!LocationProvider.IsAtOpeningLocation(
                     currentOpening.AddressWorldName,
                     currentOpening.AddressCityName,
                     currentOpening.AddressWard,
                     currentOpening.AddressPlot,
+                    currentOpening.LocationType,
+                    currentOpening.OutdoorLocationName,
                     out var locationMessage))
             {
-                ChatGui.PrintError($"This timed macro only runs at the active opening address. {locationMessage}", "PartyPulse");
+                ChatGui.PrintError($"This timed macro only runs at the active opening location. {locationMessage}", "PartyPulse");
                 return;
             }
         }
