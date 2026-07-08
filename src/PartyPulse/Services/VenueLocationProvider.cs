@@ -54,12 +54,24 @@ public sealed class VenueLocationProvider(
             return false;
         }
 
-        if (!TryGetCurrentLocationName(out var cityName, out reason))
+        var territoryId = HousingManager.GetOriginalHouseTerritoryTypeId();
+        if (territoryId == 0)
+        {
+            territoryId = clientState.TerritoryType;
+        }
+
+        var territory = dataManager.GetExcelSheet<TerritoryType>().GetRow(territoryId);
+        var placeName = territory.PlaceName.Value.Name.ToString().Trim() ?? string.Empty;
+        var cityName = NormalizeHousingDistrictName(placeName);
+        if (cityName.Length == 0)
+        {
+            reason = "The current housing district name could not be determined.";
             return false;
+        }
 
         address = new VenueAddress(
             worldName,
-            NormalizeHousingDistrictName(cityName),
+            cityName,
             wardIndex + 1,
             plotIndex + 1);
         reason = string.Empty;
@@ -179,10 +191,10 @@ public sealed class VenueLocationProvider(
     private bool TryGetCurrentLocationName(out string locationName, out string reason)
     {
         var territory = dataManager.GetExcelSheet<TerritoryType>().GetRow(clientState.TerritoryType);
-        locationName = ResolveTerritoryLocationName(
-            territory.PlaceName.Value.Name.ToString(),
-            territory.PlaceNameZone.Value.Name.ToString(),
-            territory.PlaceNameRegion.Value.Name.ToString());
+        var placeName = territory.PlaceName.Value.Name.ToString();
+        var zoneName = territory.PlaceNameZone.Value.Name.ToString();
+        var regionName = territory.PlaceNameRegion.Value.Name.ToString();
+        locationName = ResolveTerritoryLocationName(placeName, zoneName, regionName);
         if (locationName.Length == 0)
         {
             reason = "The current location name could not be determined.";
@@ -198,13 +210,23 @@ public sealed class VenueLocationProvider(
         string? zoneName,
         string? regionName)
     {
-        var normalizedPlaceName = NormalizeHousingDistrictName(placeName ?? string.Empty);
-        if (IsHousingDistrictName(normalizedPlaceName, out var canonicalDistrictName))
+        var normalizedPlaceName = string.Empty;
+
+        foreach (var candidate in new[] { placeName, zoneName, regionName })
         {
-            return canonicalDistrictName;
+            var normalizedCandidate = NormalizeHousingDistrictName(candidate ?? string.Empty);
+            if (IsHousingDistrictName(normalizedCandidate, out var canonicalDistrictName))
+            {
+                return canonicalDistrictName;
+            }
+
+            if (normalizedPlaceName.Length == 0)
+            {
+                normalizedPlaceName = normalizedCandidate;
+            }
         }
 
-        if (!IsHousingInteriorName(placeName))
+        if (normalizedPlaceName.Length == 0 || !IsHousingInteriorName(normalizedPlaceName))
         {
             return normalizedPlaceName;
         }
@@ -212,7 +234,7 @@ public sealed class VenueLocationProvider(
         foreach (var candidate in new[] { zoneName, regionName })
         {
             var normalizedCandidate = NormalizeHousingDistrictName(candidate ?? string.Empty);
-            if (IsHousingDistrictName(normalizedCandidate, out canonicalDistrictName))
+            if (IsHousingDistrictName(normalizedCandidate, out string canonicalDistrictName))
             {
                 return canonicalDistrictName;
             }
