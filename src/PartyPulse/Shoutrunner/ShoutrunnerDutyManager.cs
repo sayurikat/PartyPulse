@@ -30,7 +30,7 @@ public sealed class ShoutrunnerDutyManager(
     IDataManager dataManager,
     GameMacroExecutionService macroExecutionService)
 {
-    private static readonly TimeSpan PostShoutTravelDelay = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan PostShoutTravelDelay = TimeSpan.FromSeconds(3);
     private readonly object syncRoot = new();
 
     public ShoutrunnerProfileConfiguration GetProfile(VenueConnectionConfiguration venue) =>
