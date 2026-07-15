@@ -920,6 +920,36 @@ public sealed class Plugin : IDalamudPlugin
                 new StartDjPaymentRequest(targetCharacterName, targetWorldName, proxyConfirmed)),
             $"start DJ payment for booking {bookingId} at {venue.VenueCode}");
 
+    public void StartDjBalancePayment(
+        VenueConnectionConfiguration venue,
+        long djId,
+        string targetCharacterName,
+        string targetWorldName,
+        bool proxyConfirmed) =>
+        Observe(
+            StartDjBalancePaymentAndReportAsync(
+                venue,
+                new StartDjBalancePaymentRequest(
+                    djId,
+                    targetCharacterName,
+                    targetWorldName,
+                    proxyConfirmed)),
+            $"start DJ balance payment for DJ {djId} at {venue.VenueCode}");
+
+    public void ConfirmDjPayments(
+        VenueConnectionConfiguration venue,
+        IReadOnlyList<long> paymentIds) =>
+        Observe(
+            ConfirmDjPaymentsAndReportAsync(venue, paymentIds),
+            $"confirm DJ payment batch for {venue.VenueCode}");
+
+    public void CancelDjPayments(
+        VenueConnectionConfiguration venue,
+        IReadOnlyList<long> paymentIds) =>
+        Observe(
+            CancelDjPaymentsAndReportAsync(venue, paymentIds),
+            $"cancel DJ payment batch for {venue.VenueCode}");
+
     public void ConfirmDjPayment(
         VenueConnectionConfiguration venue,
         long paymentId) =>
@@ -2701,9 +2731,92 @@ public sealed class Plugin : IDalamudPlugin
             return;
         }
 
+        await RefreshOpeningHistoryIfLoadedAsync(venue);
         ChatGui.Print(
             $"Started DJ payment #{result.Value.PaymentId} for {result.Value.AmountGil:N0} gil. Confirm it after the trade completes.",
             "PartyPulse");
+    }
+
+    private async Task StartDjBalancePaymentAndReportAsync(
+        VenueConnectionConfiguration venue,
+        StartDjBalancePaymentRequest request)
+    {
+        var readiness = await settlementTradeService.CheckReadyAsync(
+            request.TargetCharacterName,
+            request.TargetWorldName,
+            LifetimeToken);
+        if (!readiness.Success)
+        {
+            ReportPluginIntegrationFailure(
+                readiness.Failure,
+                "The DJ balance payment was not started because Dropbox is unavailable.");
+            return;
+        }
+
+        var result = await Djs.StartBalancePaymentAsync(venue, request, LifetimeToken);
+        if (!result.Success || result.Value is null)
+        {
+            ReportVipFailure(result.Failure, "The DJ balance payment could not be started.");
+            return;
+        }
+
+        var trade = await settlementTradeService.InitiateTradeAsync(
+            result.Value.TargetCharacterName,
+            result.Value.TargetWorldName,
+            result.Value.AmountGil,
+            LifetimeToken);
+        if (!trade.Success)
+        {
+            ReportPluginIntegrationFailure(
+                trade.Failure,
+                $"The {result.Value.AmountGil:N0} gil DJ payout was recorded as started, but Dropbox did not start the trade. Cancel the payout attempt before retrying.");
+            return;
+        }
+
+        await RefreshOpeningHistoryIfLoadedAsync(venue);
+        ChatGui.Print(
+            $"Started {result.Value.DjName}'s {result.Value.AmountGil:N0} gil payout across {result.Value.Payments.Count} booking(s). Confirm it after the trade completes.",
+            "PartyPulse");
+    }
+
+    private async Task ConfirmDjPaymentsAndReportAsync(
+        VenueConnectionConfiguration venue,
+        IReadOnlyList<long> paymentIds)
+    {
+        if (paymentIds.Count == 0)
+            return;
+
+        var result = await Djs.ConfirmPaymentsAsync(venue, paymentIds, LifetimeToken);
+        if (result.Success && result.Value is not null)
+        {
+            await RefreshOpeningHistoryIfLoadedAsync(venue);
+            ChatGui.Print(
+                $"Confirmed {result.Value.Sum(payment => payment.AmountGil):N0} gil across {result.Value.Count} DJ booking payment(s).",
+                "PartyPulse");
+            return;
+        }
+
+        ReportVipFailure(result.Failure, "The DJ payment batch could not be fully confirmed. Refresh before retrying.");
+    }
+
+    private async Task CancelDjPaymentsAndReportAsync(
+        VenueConnectionConfiguration venue,
+        IReadOnlyList<long> paymentIds)
+    {
+        if (paymentIds.Count == 0)
+            return;
+
+        var result = await Djs.CancelPaymentsAsync(venue, paymentIds, LifetimeToken);
+        if (result.Success && result.Value is not null)
+        {
+            await RefreshOpeningHistoryIfLoadedAsync(venue);
+            ChatGui.Print(
+                $"Cancelled {result.Value.Count} DJ booking payment(s); refund confirmation was recorded.",
+                "PartyPulse");
+            return;
+        }
+
+        ReportVipFailure(result.Failure, "The DJ payment batch could not be fully cancelled. Refresh before retrying.");
     }
 
     private async Task ConfirmDjPaymentAndReportAsync(
@@ -2713,6 +2826,7 @@ public sealed class Plugin : IDalamudPlugin
         var result = await Djs.ConfirmPaymentAsync(venue, paymentId, LifetimeToken);
         if (result.Success && result.Value is not null)
         {
+            await RefreshOpeningHistoryIfLoadedAsync(venue);
             ChatGui.Print(
                 $"Confirmed DJ payment #{paymentId} as complete ({result.Value.AmountGil:N0} gil).",
                 "PartyPulse");
@@ -2733,6 +2847,7 @@ public sealed class Plugin : IDalamudPlugin
             LifetimeToken);
         if (result.Success && result.Value is not null)
         {
+            await RefreshOpeningHistoryIfLoadedAsync(venue);
             ChatGui.Print(
                 $"Cancelled DJ payment #{paymentId}; the {result.Value.AmountGil:N0} gil refund was confirmed.",
                 "PartyPulse");
@@ -2740,6 +2855,21 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         ReportVipFailure(result.Failure, "The DJ payment could not be cancelled.");
+    }
+
+    private async Task RefreshOpeningHistoryIfLoadedAsync(VenueConnectionConfiguration venue)
+    {
+        if (VenueOpenings.GetHistorySnapshot(venue).Status == VenueOpeningHistoryStatus.NotLoaded)
+            return;
+
+        var refresh = await VenueOpenings.LoadHistoryAsync(venue, false, LifetimeToken);
+        if (!refresh.Success)
+        {
+            Log.Warning(
+                "DJ payment changed but opening history refresh failed: {Code} {Message}",
+                refresh.Failure?.Code,
+                refresh.Failure?.Message);
+        }
     }
 
     private async Task RunNewVipMacroAndReportAsync(
@@ -2882,7 +3012,7 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         var execution = await gameMacroExecutionService.ExecuteUntargetedAsync(
-            currentMacro.MacroText!,
+            currentMacro.EffectiveExecutionText!,
             LifetimeToken);
         if (!execution.Success)
         {

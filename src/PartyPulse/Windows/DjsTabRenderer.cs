@@ -22,6 +22,10 @@ public sealed class DjsTabRenderer(Plugin plugin)
     private bool settingsInitialized;
     private string defaultHourlyRateGil = "0";
     private long selectedLinkDjId;
+    private long selectedPayoutDjId;
+    private bool proxyPayoutConfirmed;
+    private bool balanceRefundConfirmed;
+    private string payoutTargetKey = string.Empty;
 
     public void Draw(VenueConnectionConfiguration venue)
     {
@@ -58,6 +62,10 @@ public sealed class DjsTabRenderer(Plugin plugin)
         ImGui.Separator();
         ImGui.Spacing();
         DrawCharacterLinks(venue, view, isBusy);
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+        DrawBalancePayout(venue, view, isBusy);
         ImGui.Spacing();
         ImGui.Separator();
         ImGui.Spacing();
@@ -229,6 +237,158 @@ public sealed class DjsTabRenderer(Plugin plugin)
         ImGui.EndTable();
     }
 
+    private void DrawBalancePayout(
+        VenueConnectionConfiguration venue,
+        DjViewResponse view,
+        bool isBusy)
+    {
+        ImGui.TextUnformatted("DJ balance payout");
+        ImGui.TextDisabled("Completed unpaid bookings are combined into one Dropbox trade. Confirm the payment after the trade succeeds.");
+
+        if (!view.Capabilities.CanManagePayments)
+        {
+            ImGui.TextDisabled("You do not have venue.djs.manage permission to pay DJs.");
+            return;
+        }
+
+        var hasTarget = plugin.TargetProvider.TryGetCurrentTarget(out var target, out var targetReason);
+        var currentTargetKey = target is null
+            ? string.Empty
+            : $"{target.CharacterName}@{target.WorldName}";
+        if (!string.Equals(currentTargetKey, payoutTargetKey, StringComparison.Ordinal))
+        {
+            payoutTargetKey = currentTargetKey;
+            proxyPayoutConfirmed = false;
+            balanceRefundConfirmed = false;
+        }
+
+        var linkedTarget = target is null
+            ? null
+            : view.Characters.FirstOrDefault(character =>
+                string.Equals(character.CharacterName, target.CharacterName, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(character.WorldName, target.WorldName, StringComparison.OrdinalIgnoreCase));
+
+        if (linkedTarget is not null)
+            selectedPayoutDjId = linkedTarget.DjId;
+        else if (selectedPayoutDjId <= 0 || view.Djs.All(dj => dj.DjId != selectedPayoutDjId))
+            selectedPayoutDjId = view.Djs.FirstOrDefault(dj => GetOutstandingBalance(view, dj.DjId) > 0)?.DjId
+                                 ?? view.Djs.FirstOrDefault()?.DjId
+                                 ?? 0;
+
+        var selectedDj = view.Djs.FirstOrDefault(dj => dj.DjId == selectedPayoutDjId);
+        ImGui.TextUnformatted("Current target");
+        ImGui.SameLine();
+        ImGui.TextDisabled(hasTarget && target is not null ? target.DisplayName : targetReason);
+
+        if (linkedTarget is not null && selectedDj is not null)
+        {
+            ImGui.TextUnformatted($"Recognized DJ: {selectedDj.Name}");
+            proxyPayoutConfirmed = false;
+        }
+        else
+        {
+            ImGui.SetNextItemWidth(300 * ImGuiHelpers.GlobalScale);
+            if (ImGui.BeginCombo("Collecting for DJ", selectedDj?.Name ?? "Select DJ"))
+            {
+                foreach (var dj in view.Djs.OrderBy(value => value.Name, StringComparer.OrdinalIgnoreCase))
+                {
+                    var selected = dj.DjId == selectedPayoutDjId;
+                    var outstanding = GetOutstandingBalance(view, dj.DjId);
+                    if (ImGui.Selectable($"{dj.Name} — {outstanding:N0} gil##DjPayout{dj.DjId}", selected))
+                    {
+                        selectedPayoutDjId = dj.DjId;
+                        proxyPayoutConfirmed = false;
+                    }
+                    if (selected)
+                        ImGui.SetItemDefaultFocus();
+                }
+                ImGui.EndCombo();
+            }
+
+            ImGui.Checkbox("I confirm the target is collecting for the selected DJ", ref proxyPayoutConfirmed);
+        }
+
+        if (selectedDj is null)
+        {
+            ImGui.TextDisabled("Register a DJ before starting a payout.");
+            return;
+        }
+
+        var outstandingBalance = GetOutstandingBalance(view, selectedDj.DjId);
+        var startedPayments = view.Bookings
+            .Where(booking => booking.DjId == selectedDj.DjId &&
+                              booking.PaymentId is not null &&
+                              string.Equals(booking.PaymentStatus, DjPaymentStatusCodes.Started, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(booking => booking.PaymentStartedAt)
+            .ThenBy(booking => booking.PaymentId)
+            .ToArray();
+        var pendingBalance = startedPayments.Sum(booking => booking.PriceGil);
+
+        ImGui.TextUnformatted($"Outstanding: {outstandingBalance:N0} gil");
+        ImGui.SameLine();
+        ImGui.TextDisabled($"Trade awaiting confirmation: {pendingBalance:N0} gil");
+
+        if (startedPayments.Length > 0)
+        {
+            var paymentIds = startedPayments.Select(booking => booking.PaymentId!.Value).Distinct().ToArray();
+            var targetLabel = startedPayments[0].PaymentTargetCharacterName is { Length: > 0 } targetName
+                ? $"{targetName} @ {startedPayments[0].PaymentTargetWorldName}"
+                : "recorded target";
+            ImGui.TextDisabled($"Dropbox target: {targetLabel}{(startedPayments[0].PaymentViaProxy ? " (proxy)" : string.Empty)}");
+            ImGui.BeginDisabled(isBusy);
+            if (ImGui.Button($"Confirm {pendingBalance:N0} gil paid"))
+            {
+                balanceRefundConfirmed = false;
+                plugin.ConfirmDjPayments(venue, paymentIds);
+            }
+            ImGui.EndDisabled();
+
+            ImGui.Checkbox("I confirm any gil already traded was refunded", ref balanceRefundConfirmed);
+            ImGui.BeginDisabled(isBusy || !balanceRefundConfirmed);
+            if (ImGui.Button("Cancel payout attempt"))
+            {
+                balanceRefundConfirmed = false;
+                plugin.CancelDjPayments(venue, paymentIds);
+            }
+            ImGui.EndDisabled();
+            return;
+        }
+
+        var proxyRequired = linkedTarget is null;
+        ImGui.BeginDisabled(
+            isBusy ||
+            !hasTarget ||
+            target is null ||
+            outstandingBalance <= 0 ||
+            (proxyRequired && !proxyPayoutConfirmed));
+        if (ImGui.Button($"Pay {outstandingBalance:N0} gil via Dropbox") && target is not null)
+        {
+            plugin.StartDjBalancePayment(
+                venue,
+                selectedDj.DjId,
+                target.CharacterName,
+                target.WorldName,
+                proxyRequired);
+        }
+        ImGui.EndDisabled();
+    }
+
+    private static long GetOutstandingBalance(DjViewResponse view, long djId) =>
+        view.Bookings
+            .Where(booking => booking.DjId == djId &&
+                              booking.EndsAt <= view.ServerNow &&
+                              booking.PriceGil > 0 &&
+                              !booking.HasActivePayment &&
+                              !string.Equals(booking.StatusCode, DjBookingStatusCodes.Unavailable, StringComparison.OrdinalIgnoreCase) &&
+                              !string.Equals(booking.StatusCode, DjBookingStatusCodes.Cancelled, StringComparison.OrdinalIgnoreCase))
+            .Sum(booking => booking.PriceGil);
+
+    private static long GetPendingBalance(DjViewResponse view, long djId) =>
+        view.Bookings
+            .Where(booking => booking.DjId == djId &&
+                              string.Equals(booking.PaymentStatus, DjPaymentStatusCodes.Started, StringComparison.OrdinalIgnoreCase))
+            .Sum(booking => booking.PriceGil);
+
     private void DrawDirectory(
         VenueConnectionConfiguration venue,
         DjViewResponse view,
@@ -240,12 +400,14 @@ public sealed class DjsTabRenderer(Plugin plugin)
                     ImGuiTableFlags.Resizable |
                     ImGuiTableFlags.SizingStretchProp |
                     ImGuiTableFlags.ScrollY;
-        if (!ImGui.BeginTable("DjDirectoryTable", 5, flags, new Vector2(0, 300 * ImGuiHelpers.GlobalScale)))
+        if (!ImGui.BeginTable("DjDirectoryTable", 7, flags, new Vector2(0, 300 * ImGuiHelpers.GlobalScale)))
             return;
 
         ImGui.TableSetupColumn("Name");
         ImGui.TableSetupColumn("Resident", ImGuiTableColumnFlags.WidthFixed, 80 * ImGuiHelpers.GlobalScale);
         ImGui.TableSetupColumn("Twitch");
+        ImGui.TableSetupColumn("Outstanding", ImGuiTableColumnFlags.WidthFixed, 110 * ImGuiHelpers.GlobalScale);
+        ImGui.TableSetupColumn("In trade", ImGuiTableColumnFlags.WidthFixed, 100 * ImGuiHelpers.GlobalScale);
         ImGui.TableSetupColumn("Note");
         ImGui.TableSetupColumn("Actions", ImGuiTableColumnFlags.WidthFixed, 125 * ImGuiHelpers.GlobalScale);
         ImGui.TableHeadersRow();
@@ -263,8 +425,12 @@ public sealed class DjsTabRenderer(Plugin plugin)
             ImGui.TableSetColumnIndex(2);
             ImGui.TextWrapped(dj.TwitchUrl ?? "Not recorded");
             ImGui.TableSetColumnIndex(3);
-            ImGui.TextWrapped(dj.Note ?? string.Empty);
+            ImGui.TextUnformatted($"{GetOutstandingBalance(view, dj.DjId):N0}");
             ImGui.TableSetColumnIndex(4);
+            ImGui.TextUnformatted($"{GetPendingBalance(view, dj.DjId):N0}");
+            ImGui.TableSetColumnIndex(5);
+            ImGui.TextWrapped(dj.Note ?? string.Empty);
+            ImGui.TableSetColumnIndex(6);
             ImGui.BeginDisabled(isBusy);
             if (ImGui.SmallButton("Edit"))
                 LoadDraft(dj);
@@ -352,5 +518,9 @@ public sealed class DjsTabRenderer(Plugin plugin)
         settingsInitialized = false;
         defaultHourlyRateGil = "0";
         selectedLinkDjId = 0;
+        selectedPayoutDjId = 0;
+        proxyPayoutConfirmed = false;
+        balanceRefundConfirmed = false;
+        payoutTargetKey = string.Empty;
     }
 }

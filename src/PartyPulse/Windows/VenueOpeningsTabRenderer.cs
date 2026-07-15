@@ -116,17 +116,37 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
         ImGui.Spacing();
         ImGui.Separator();
         ImGui.Spacing();
-        DrawPreviousOpenings(venue, historySnapshot, isBusy || djsBusy);
+        DrawPreviousOpenings(venue, historySnapshot, djView, isBusy || djsBusy);
 
         if (selectedDjOpeningId is { } openingId)
         {
             var opening = view.Openings.FirstOrDefault(value => value.OpeningId == openingId);
+            IReadOnlyList<DjBookingSummary>? historicalBookings = null;
+            if (opening is null)
+            {
+                opening = historySnapshot.Openings.FirstOrDefault(value => value.OpeningId == openingId);
+                if (opening is not null)
+                {
+                    historicalBookings = historySnapshot.DjBookings
+                        .Where(value => value.OpeningId == openingId)
+                        .Select(value => djView?.Bookings.FirstOrDefault(current => current.BookingId == value.BookingId) ?? value)
+                        .OrderBy(value => value.StartsAt)
+                        .ThenBy(value => value.BookingId)
+                        .ToArray();
+                }
+            }
+
             if (opening is not null)
             {
                 ImGui.Spacing();
                 ImGui.Separator();
                 ImGui.Spacing();
-                DrawDjScheduleEditor(venue, opening, djSnapshot, isBusy || djsBusy);
+                DrawDjScheduleEditor(
+                    venue,
+                    opening,
+                    djSnapshot,
+                    isBusy || djsBusy,
+                    historicalBookings);
             }
             else
             {
@@ -442,6 +462,7 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
     private void DrawPreviousOpenings(
         VenueConnectionConfiguration venue,
         VenueOpeningHistorySnapshot snapshot,
+        DjViewResponse? djView,
         bool isBusy)
     {
         ImGui.TextUnformatted("Previous openings");
@@ -484,7 +505,7 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
                     ImGuiTableFlags.SizingStretchProp;
         if (ImGui.BeginTable(
                 "VenueOpeningHistory",
-                5,
+                6,
                 flags,
                 new Vector2(0, 240 * ImGuiHelpers.GlobalScale)))
         {
@@ -493,6 +514,7 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
             ImGui.TableSetupColumn("Address");
             ImGui.TableSetupColumn("Title");
             ImGui.TableSetupColumn("State", ImGuiTableColumnFlags.WidthFixed, 85 * ImGuiHelpers.GlobalScale);
+            ImGui.TableSetupColumn("DJs", ImGuiTableColumnFlags.WidthFixed, 120 * ImGuiHelpers.GlobalScale);
             ImGui.TableHeadersRow();
 
             foreach (var opening in snapshot.Openings
@@ -511,6 +533,17 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
                 ImGui.TextUnformatted(opening.Title ?? string.Empty);
                 ImGui.TableSetColumnIndex(4);
                 ImGui.TextUnformatted(opening.IsCancelled ? "Cancelled" : "Finished");
+                ImGui.TableSetColumnIndex(5);
+                var bookingCount = snapshot.DjBookings.Count(value => value.OpeningId == opening.OpeningId);
+                ImGui.BeginDisabled(isBusy || djView is null || bookingCount == 0);
+                if (ImGui.SmallButton($"View lineup ({bookingCount})##HistoryDjs{opening.OpeningId}"))
+                {
+                    selectedDjOpeningId = opening.OpeningId;
+                    ClearBookingDraft();
+                }
+                ImGui.EndDisabled();
+                if (bookingCount == 0 && ImGui.IsItemHovered())
+                    ImGui.SetTooltip("No DJ slots were scheduled for this opening.");
             }
 
             ImGui.EndTable();
@@ -529,7 +562,8 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
         VenueConnectionConfiguration venue,
         VenueOpeningScheduleItem opening,
         PartyPulse.Djs.DjManagementSnapshot snapshot,
-        bool isBusy)
+        bool isBusy,
+        IReadOnlyList<DjBookingSummary>? historicalBookings = null)
     {
         ImGui.TextUnformatted($"DJ schedule — opening #{opening.OpeningId}");
         ImGui.TextDisabled($"{VenueTimeZone.Format(venue, opening.OpensAt, "g")} to {VenueTimeZone.Format(venue, opening.ClosesAt, "g")}");
@@ -541,17 +575,22 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
             return;
         }
 
-        var bookings = view.Bookings
+        var bookings = historicalBookings ?? view.Bookings
             .Where(value => value.OpeningId == opening.OpeningId)
             .OrderBy(value => value.StartsAt)
             .ThenBy(value => value.BookingId)
             .ToArray();
+        var allowScheduleEditing = historicalBookings is null;
         var coverage = CalculateCoverage(opening, bookings);
         DrawCoverage(coverage);
         ImGui.SameLine();
         ImGui.TextDisabled($"Confirmed {coverage.ConfirmedMinutes:N0}/{coverage.TotalMinutes:N0} minutes; pending {coverage.PendingMinutes:N0}; gap {coverage.GapMinutes:N0}.");
 
-        if (view.Capabilities.CanManageSchedule)
+        if (!allowScheduleEditing)
+        {
+            ImGui.TextDisabled("Historical lineups are read-only. Payment actions remain available for unpaid DJ slots.");
+        }
+        else if (view.Capabilities.CanManageSchedule)
         {
             if (view.Djs.Count == 0)
                 ImGui.TextWrapped("Register at least one DJ in the DJs tab before adding an opening schedule.");
@@ -570,7 +609,7 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
         }
 
         ImGui.Spacing();
-        DrawDjBookingTable(venue, opening, bookings, view, isBusy);
+        DrawDjBookingTable(venue, opening, bookings, view, isBusy, allowScheduleEditing);
     }
 
     private void DrawDjBookingEditor(
@@ -742,7 +781,8 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
         VenueOpeningScheduleItem opening,
         IReadOnlyList<DjBookingSummary> bookings,
         DjViewResponse view,
-        bool isBusy)
+        bool isBusy,
+        bool allowScheduleEditing)
     {
         var flags = ImGuiTableFlags.Borders |
                     ImGuiTableFlags.RowBg |
@@ -785,12 +825,12 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
             ImGui.TableSetColumnIndex(7);
             DrawDjPaymentActions(venue, booking, view, isBusy);
             ImGui.TableSetColumnIndex(8);
-            ImGui.BeginDisabled(isBusy || !view.Capabilities.CanManageSchedule);
+            ImGui.BeginDisabled(isBusy || !allowScheduleEditing || !view.Capabilities.CanManageSchedule);
             if (ImGui.SmallButton("Edit"))
                 LoadBookingDraft(venue, booking);
             ImGui.EndDisabled();
             ImGui.SameLine();
-            ImGui.BeginDisabled(isBusy || !view.Capabilities.CanManageSchedule || booking.HasActivePayment);
+            ImGui.BeginDisabled(isBusy || !allowScheduleEditing || !view.Capabilities.CanManageSchedule || booking.HasActivePayment);
             if (ImGui.SmallButton("Delete"))
             {
                 pendingDeleteBookingId = booking.BookingId;

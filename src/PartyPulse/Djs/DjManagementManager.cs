@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Dalamud.Plugin.Services;
@@ -213,6 +214,83 @@ public sealed class DjManagementManager : IDisposable
                 return result;
             },
             ApiResult<DjPaymentOperationResponse>.Failed,
+            cancellationToken);
+
+    public Task<ApiResult<DjBalancePaymentResponse>> StartBalancePaymentAsync(
+        VenueConnectionConfiguration venue,
+        StartDjBalancePaymentRequest request,
+        CancellationToken cancellationToken) =>
+        WithMutationAsync(
+            venue,
+            async context =>
+            {
+                var result = await apiClient.StartDjBalancePaymentAsync(
+                    context.BaseUri!, context.AccessToken!, request, cancellationToken);
+                if (result.Success)
+                    await RefreshCoreAsync(venue, context, cancellationToken);
+                return result;
+            },
+            ApiResult<DjBalancePaymentResponse>.Failed,
+            cancellationToken);
+
+    public Task<ApiResult<IReadOnlyList<DjPaymentOperationResponse>>> ConfirmPaymentsAsync(
+        VenueConnectionConfiguration venue,
+        IReadOnlyList<long> paymentIds,
+        CancellationToken cancellationToken) =>
+        WithMutationAsync(
+            venue,
+            async context =>
+            {
+                var confirmed = new List<DjPaymentOperationResponse>(paymentIds.Count);
+                foreach (var paymentId in paymentIds)
+                {
+                    var result = await apiClient.ConfirmDjPaymentAsync(
+                        context.BaseUri!, context.AccessToken!, paymentId, cancellationToken);
+                    if (!result.Success || result.Value is null)
+                    {
+                        if (confirmed.Count > 0)
+                            await RefreshCoreAsync(venue, context, cancellationToken);
+                        return ApiResult<IReadOnlyList<DjPaymentOperationResponse>>.Failed(result.Failure!);
+                    }
+                    confirmed.Add(result.Value);
+                }
+
+                await RefreshCoreAsync(venue, context, cancellationToken);
+                return ApiResult<IReadOnlyList<DjPaymentOperationResponse>>.Succeeded(confirmed);
+            },
+            ApiResult<IReadOnlyList<DjPaymentOperationResponse>>.Failed,
+            cancellationToken);
+
+    public Task<ApiResult<IReadOnlyList<DjPaymentOperationResponse>>> CancelPaymentsAsync(
+        VenueConnectionConfiguration venue,
+        IReadOnlyList<long> paymentIds,
+        CancellationToken cancellationToken) =>
+        WithMutationAsync(
+            venue,
+            async context =>
+            {
+                var cancelled = new List<DjPaymentOperationResponse>(paymentIds.Count);
+                foreach (var paymentId in paymentIds)
+                {
+                    var result = await apiClient.CancelDjPaymentAsync(
+                        context.BaseUri!,
+                        context.AccessToken!,
+                        paymentId,
+                        new CancelDjPaymentRequest(true),
+                        cancellationToken);
+                    if (!result.Success || result.Value is null)
+                    {
+                        if (cancelled.Count > 0)
+                            await RefreshCoreAsync(venue, context, cancellationToken);
+                        return ApiResult<IReadOnlyList<DjPaymentOperationResponse>>.Failed(result.Failure!);
+                    }
+                    cancelled.Add(result.Value);
+                }
+
+                await RefreshCoreAsync(venue, context, cancellationToken);
+                return ApiResult<IReadOnlyList<DjPaymentOperationResponse>>.Succeeded(cancelled);
+            },
+            ApiResult<IReadOnlyList<DjPaymentOperationResponse>>.Failed,
             cancellationToken);
 
     public Task<ApiResult<DjPaymentOperationResponse>> ConfirmPaymentAsync(

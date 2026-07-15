@@ -737,6 +737,20 @@ public sealed class PartyPulseApiClient : IDisposable
             ValidateDjPaymentResponse,
             cancellationToken);
 
+    public Task<ApiResult<DjBalancePaymentResponse>> StartDjBalancePaymentAsync(
+        Uri baseUri,
+        string accessToken,
+        StartDjBalancePaymentRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<DjBalancePaymentResponse>(
+            baseUri,
+            HttpMethod.Post,
+            "api/v1/djs/payments/balance/start",
+            accessToken,
+            request,
+            ValidateDjBalancePaymentResponse,
+            cancellationToken);
+
     public Task<ApiResult<DjPaymentOperationResponse>> ConfirmDjPaymentAsync(
         Uri baseUri,
         string accessToken,
@@ -2162,6 +2176,8 @@ public sealed class PartyPulseApiClient : IDisposable
     private static bool ValidateVenueOpeningHistoryResponse(VenueOpeningHistoryResponse payload) =>
         payload.Openings is not null &&
         payload.Openings.All(ValidateVenueOpeningScheduleItem) &&
+        payload.DjBookings is not null &&
+        payload.DjBookings.All(ValidateDjBookingSummary) &&
         (!payload.HasMore || (payload.NextBeforeOpensAt is not null && payload.NextBeforeOpeningId is > 0));
 
     private static bool ValidateVenueOpeningScheduleItem(VenueOpeningScheduleItem opening) =>
@@ -2253,6 +2269,18 @@ public sealed class PartyPulseApiClient : IDisposable
         !string.IsNullOrWhiteSpace(payment.TargetCharacterName) &&
         !string.IsNullOrWhiteSpace(payment.TargetWorldName) &&
         payment.StartedAt != default;
+
+    private static bool ValidateDjBalancePaymentResponse(DjBalancePaymentResponse payment) =>
+        payment.DjId > 0 &&
+        !string.IsNullOrWhiteSpace(payment.DjName) &&
+        payment.AmountGil > 0 &&
+        !string.IsNullOrWhiteSpace(payment.TargetCharacterName) &&
+        !string.IsNullOrWhiteSpace(payment.TargetWorldName) &&
+        payment.StartedAt != default &&
+        payment.Payments is not null &&
+        payment.Payments.Count > 0 &&
+        payment.Payments.All(ValidateDjPaymentResponse) &&
+        payment.Payments.Sum(item => item.AmountGil) == payment.AmountGil;
 
     private static bool ValidateTimedMacroViewResponse(TimedMacroViewResponse payload) =>
         payload.Capabilities is not null &&

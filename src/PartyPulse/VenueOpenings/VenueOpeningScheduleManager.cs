@@ -165,6 +165,18 @@ public sealed class VenueOpeningScheduleManager : IDisposable
                     .ThenByDescending(value => value.OpeningId)
                     .ToArray();
 
+            var djBookings = append
+                ? existing.DjBookings.Concat(result.Value.DjBookings)
+                    .GroupBy(value => value.BookingId)
+                    .Select(group => group.First())
+                    .OrderByDescending(value => value.StartsAt)
+                    .ThenByDescending(value => value.BookingId)
+                    .ToArray()
+                : result.Value.DjBookings
+                    .OrderByDescending(value => value.StartsAt)
+                    .ThenByDescending(value => value.BookingId)
+                    .ToArray();
+
             historySnapshots[venue.ProfileId] = new VenueOpeningHistorySnapshot(
                 VenueOpeningHistoryStatus.Ready,
                 "Previous openings loaded.",
@@ -172,7 +184,10 @@ public sealed class VenueOpeningScheduleManager : IDisposable
                 result.Value.HasMore,
                 result.Value.NextBeforeOpensAt,
                 result.Value.NextBeforeOpeningId,
-                attemptAt);
+                attemptAt)
+            {
+                DjBookings = djBookings
+            };
             return result;
         }, cancellationToken);
 

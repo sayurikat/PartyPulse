@@ -21,6 +21,8 @@ public sealed record VenueOpeningHistorySnapshot(
     long? NextBeforeOpeningId,
     DateTimeOffset? LastAttemptAt)
 {
+    public IReadOnlyList<DjBookingSummary> DjBookings { get; init; } = Array.Empty<DjBookingSummary>();
+
     public static VenueOpeningHistorySnapshot NotLoaded { get; } = new(
         VenueOpeningHistoryStatus.NotLoaded,
         "Previous openings have not been loaded.",
