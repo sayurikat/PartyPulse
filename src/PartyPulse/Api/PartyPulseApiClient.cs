@@ -1612,6 +1612,52 @@ public sealed class PartyPulseApiClient : IDisposable
             static payload => payload.StaffMemberId > 0,
             cancellationToken);
 
+    public Task<ApiResult<StaffLifecycleTaskOperationResponse>> CreateStaffLifecycleTaskAsync(
+        Uri baseUri,
+        string accessToken,
+        SaveStaffLifecycleTaskRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<StaffLifecycleTaskOperationResponse>(
+            baseUri,
+            HttpMethod.Post,
+            "api/v1/staff/lifecycle-tasks",
+            accessToken,
+            request,
+            static payload => payload.TaskDefinitionId > 0,
+            cancellationToken);
+
+    public Task<ApiResult<StaffLifecycleTaskOperationResponse>> UpdateStaffLifecycleTaskAsync(
+        Uri baseUri,
+        string accessToken,
+        long taskDefinitionId,
+        SaveStaffLifecycleTaskRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<StaffLifecycleTaskOperationResponse>(
+            baseUri,
+            HttpMethod.Put,
+            $"api/v1/staff/lifecycle-tasks/{taskDefinitionId}",
+            accessToken,
+            request,
+            static payload => payload.TaskDefinitionId > 0,
+            cancellationToken);
+
+    public Task<ApiResult<StaffLifecycleProgressResponse>> SaveStaffLifecycleProgressAsync(
+        Uri baseUri,
+        string accessToken,
+        long staffMemberId,
+        SaveStaffLifecycleProgressRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<StaffLifecycleProgressResponse>(
+            baseUri,
+            HttpMethod.Put,
+            $"api/v1/staff/members/{staffMemberId}/lifecycle-progress",
+            accessToken,
+            request,
+            static payload =>
+                payload.StaffMemberId > 0 &&
+                payload.UpdatedCount >= 0,
+            cancellationToken);
+
     public Task<ApiResult<StaffCharacterLinkResponse>> LinkStaffCharacterAsync(
         Uri baseUri,
         string accessToken,
@@ -1948,6 +1994,8 @@ public sealed class PartyPulseApiClient : IDisposable
         payload.FirstSeen is not null &&
         payload.Absences is not null &&
         payload.TimeEntries is not null &&
+        payload.LifecycleTaskDefinitions is not null &&
+        payload.LifecycleTaskAssignments is not null &&
         payload.Openings.All(static opening =>
             opening.OpeningId > 0 &&
             opening.ClosesAt > opening.OpensAt &&
@@ -1990,7 +2038,21 @@ public sealed class PartyPulseApiClient : IDisposable
             entry.StaffMemberId > 0 &&
             entry.OpeningId > 0 &&
             !string.IsNullOrWhiteSpace(entry.Status) &&
-            !string.IsNullOrWhiteSpace(entry.ClockInSource));
+            !string.IsNullOrWhiteSpace(entry.ClockInSource)) &&
+        payload.LifecycleTaskDefinitions.All(static task =>
+            task.TaskDefinitionId > 0 &&
+            StaffLifecycleTypes.IsValid(task.LifecycleType) &&
+            !string.IsNullOrWhiteSpace(task.Name) &&
+            task.CreatedAt != default &&
+            task.UpdatedAt != default) &&
+        payload.LifecycleTaskAssignments.All(static task =>
+            task.AssignmentId > 0 &&
+            task.StaffMemberId > 0 &&
+            task.TaskDefinitionId > 0 &&
+            StaffLifecycleTypes.IsValid(task.LifecycleType) &&
+            !string.IsNullOrWhiteSpace(task.TaskName) &&
+            task.CreatedAt != default &&
+            (task.CompletedAt is null) == (task.CompletedByUserId is null));
 
     private static bool ValidateCourtViewResponse(CourtManagementViewResponse payload) =>
         payload.Capabilities is not null &&

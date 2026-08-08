@@ -62,6 +62,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly MainWindow mainWindow;
     private readonly VenueUserEditWindow venueUserEditWindow;
     private readonly VipPlayerEditWindow vipPlayerEditWindow;
+    private readonly StaffLifecycleWindow staffLifecycleWindow;
     private readonly VipArrivalWindow vipArrivalWindow;
     private readonly NotificationToastWindow notificationToastWindow;
     private readonly SettlementTradeService settlementTradeService;
@@ -192,12 +193,14 @@ public sealed class Plugin : IDalamudPlugin
         mainWindow = new MainWindow(this);
         venueUserEditWindow = new VenueUserEditWindow(this);
         vipPlayerEditWindow = new VipPlayerEditWindow(this);
+        staffLifecycleWindow = new StaffLifecycleWindow(this);
         vipArrivalWindow = new VipArrivalWindow(this);
         notificationToastWindow = new NotificationToastWindow(this);
         WindowSystem.AddWindow(configWindow);
         WindowSystem.AddWindow(mainWindow);
         WindowSystem.AddWindow(venueUserEditWindow);
         WindowSystem.AddWindow(vipPlayerEditWindow);
+        WindowSystem.AddWindow(staffLifecycleWindow);
         WindowSystem.AddWindow(vipArrivalWindow);
         WindowSystem.AddWindow(notificationToastWindow);
 
@@ -302,6 +305,7 @@ public sealed class Plugin : IDalamudPlugin
         mainWindow.Dispose();
         venueUserEditWindow.Dispose();
         vipPlayerEditWindow.Dispose();
+        staffLifecycleWindow.Dispose();
         vipArrivalWindow.Dispose();
         notificationToastWindow.Dispose();
         Notifications.Dispose();
@@ -1364,13 +1368,48 @@ public sealed class Plugin : IDalamudPlugin
     }
 
     public void RefreshStaff(VenueConnectionConfiguration venue) =>
-        Observe(Staff.LoadAsync(venue, true, LifetimeToken), $"refresh Staff for {venue.VenueCode}");
+        Observe(Staff.RefreshQuietlyAsync(venue, LifetimeToken), $"refresh Staff for {venue.VenueCode}");
 
     public void SaveStaffJob(VenueConnectionConfiguration venue, long? jobId, SaveStaffJobRequest request) =>
         Observe(ReportApiResultAsync(Staff.SaveJobAsync(venue, jobId, request, LifetimeToken), jobId is null ? "Staff job created." : "Staff job updated."), "save Staff job");
 
     public void SaveStaffMember(VenueConnectionConfiguration venue, long? staffId, SaveStaffMemberRequest request) =>
         Observe(ReportApiResultAsync(Staff.SaveMemberAsync(venue, staffId, request, LifetimeToken), staffId is null ? "Staff listing created." : "Staff listing updated."), "save Staff listing");
+
+    public void SaveStaffLifecycleTask(
+        VenueConnectionConfiguration venue,
+        long? taskDefinitionId,
+        SaveStaffLifecycleTaskRequest request) =>
+        Observe(
+            ReportApiResultAsync(
+                Staff.SaveLifecycleTaskAsync(
+                    venue,
+                    taskDefinitionId,
+                    request,
+                    LifetimeToken),
+                taskDefinitionId is null
+                    ? "Staff lifecycle task created."
+                    : "Staff lifecycle task updated."),
+            "save Staff lifecycle task");
+
+    public void OpenStaffLifecycle(
+        VenueConnectionConfiguration venue,
+        StaffMemberSummary staffMember) =>
+        staffLifecycleWindow.Open(venue.ProfileId, staffMember.StaffMemberId);
+
+    public void SaveStaffLifecycleProgress(
+        VenueConnectionConfiguration venue,
+        long staffMemberId,
+        SaveStaffLifecycleProgressRequest request) =>
+        Observe(
+            ReportApiResultAsync(
+                Staff.SaveLifecycleProgressAsync(
+                    venue,
+                    staffMemberId,
+                    request,
+                    LifetimeToken),
+                "Staff lifecycle progress saved."),
+            "save Staff lifecycle progress");
 
     public void LinkStaffCharacter(VenueConnectionConfiguration venue, LinkStaffCharacterRequest request) =>
         Observe(ReportApiResultAsync(Staff.LinkCharacterAsync(venue, request, LifetimeToken), request.StaffMemberId is null ? "Target character unlinked from Staff." : "Target character linked to Staff."), "link Staff character");

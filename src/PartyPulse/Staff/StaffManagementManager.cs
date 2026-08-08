@@ -168,6 +168,42 @@ public sealed class StaffManagementManager : IDisposable
                     cancellationToken),
             cancellationToken);
 
+    public Task<ApiResult<StaffLifecycleTaskOperationResponse>> SaveLifecycleTaskAsync(
+        VenueConnectionConfiguration venue,
+        long? taskDefinitionId,
+        SaveStaffLifecycleTaskRequest request,
+        CancellationToken cancellationToken) =>
+        MutateAsync(
+            venue,
+            (baseUri, accessToken) => taskDefinitionId is null
+                ? apiClient.CreateStaffLifecycleTaskAsync(
+                    baseUri,
+                    accessToken,
+                    request,
+                    cancellationToken)
+                : apiClient.UpdateStaffLifecycleTaskAsync(
+                    baseUri,
+                    accessToken,
+                    taskDefinitionId.Value,
+                    request,
+                    cancellationToken),
+            cancellationToken);
+
+    public Task<ApiResult<StaffLifecycleProgressResponse>> SaveLifecycleProgressAsync(
+        VenueConnectionConfiguration venue,
+        long staffMemberId,
+        SaveStaffLifecycleProgressRequest request,
+        CancellationToken cancellationToken) =>
+        MutateAsync(
+            venue,
+            (baseUri, accessToken) => apiClient.SaveStaffLifecycleProgressAsync(
+                baseUri,
+                accessToken,
+                staffMemberId,
+                request,
+                cancellationToken),
+            cancellationToken);
+
     public Task<ApiResult<StaffCharacterLinkResponse>> LinkCharacterAsync(
         VenueConnectionConfiguration venue,
         LinkStaffCharacterRequest request,

@@ -23,6 +23,8 @@ public sealed class StaffTabRenderer(Plugin plugin)
     private static readonly Vector4 PositiveBalanceColor = new(1f, 0.72f, 0.25f, 1f);
     private static readonly Vector4 NegativeBalanceColor = new(0.95f, 0.25f, 0.25f, 1f);
     private static readonly Vector4 ZeroBalanceColor = new(0.35f, 0.85f, 0.45f, 1f);
+    private static readonly Vector4 PendingOnboardingColor = new(1f, 0.72f, 0.25f, 1f);
+    private static readonly Vector4 PendingOffboardingColor = new(0.78f, 0.48f, 1f, 1f);
 
     private Guid activeProfileId;
     private long selectedOpeningId;
@@ -43,6 +45,11 @@ public sealed class StaffTabRenderer(Plugin plugin)
     private int fixedAmount;
     private string staffNote = string.Empty;
     private bool staffArchived;
+
+    private long editingLifecycleTaskId;
+    private string lifecycleTaskName = string.Empty;
+    private string lifecycleTaskType = StaffLifecycleTypes.Onboarding;
+    private bool lifecycleTaskArchived;
 
     private readonly Dictionary<long, AttendanceRowState> attendanceRows = new();
     private readonly Dictionary<long, string> clockOutTextByEntry = new();
@@ -109,6 +116,8 @@ public sealed class StaffTabRenderer(Plugin plugin)
         {
             ImGui.Separator();
             DrawStaffListings(venue, view, busy);
+            ImGui.Separator();
+            DrawLifecycleTaskDefinitions(venue, view, busy);
             ImGui.Separator();
             DrawCharacterLinks(venue, view, busy);
         }
@@ -453,11 +462,30 @@ public sealed class StaffTabRenderer(Plugin plugin)
                      .ThenBy(member => member.DisplayName))
         {
             ImGui.PushID($"staff-member-{member.StaffMemberId}");
-            ImGui.TextUnformatted(
+            var lifecycleType = member.ArchivedAt is null
+                ? StaffLifecycleTypes.Onboarding
+                : StaffLifecycleTypes.Offboarding;
+            var incompleteTaskCount = view.LifecycleTaskAssignments.Count(task =>
+                task.StaffMemberId == member.StaffMemberId &&
+                task.LifecycleType == lifecycleType &&
+                task.CompletedAt is null);
+            var memberLabel =
                 $"{member.JobName} — {member.DisplayName} — " +
                 $"{member.EffectiveHourlyRateGil:N0}/h + " +
                 $"{member.CustomFixedAmountGil:N0} fixed" +
-                (member.ArchivedAt is null ? string.Empty : " (archived)"));
+                (member.ArchivedAt is null ? string.Empty : " (archived)");
+            if (incompleteTaskCount > 0)
+            {
+                ImGui.TextColored(
+                    lifecycleType == StaffLifecycleTypes.Onboarding
+                        ? PendingOnboardingColor
+                        : PendingOffboardingColor,
+                    memberLabel);
+            }
+            else
+            {
+                ImGui.TextUnformatted(memberLabel);
+            }
             ImGui.SameLine();
             ImGui.TextColored(
                 BalanceColor(member.StandingBalanceGil),
@@ -466,6 +494,17 @@ public sealed class StaffTabRenderer(Plugin plugin)
             if (ImGui.SmallButton("Edit"))
             {
                 LoadMember(member);
+            }
+            if (incompleteTaskCount > 0)
+            {
+                ImGui.SameLine();
+                var lifecycleLabel = lifecycleType == StaffLifecycleTypes.Onboarding
+                    ? "Onboarding"
+                    : "Offboarding";
+                if (ImGui.SmallButton($"{lifecycleLabel} ({incompleteTaskCount})"))
+                {
+                    plugin.OpenStaffLifecycle(venue, member);
+                }
             }
             ImGui.PopID();
         }
@@ -528,6 +567,93 @@ public sealed class StaffTabRenderer(Plugin plugin)
             ClearMember();
         }
     }
+
+    private void DrawLifecycleTaskDefinitions(
+        VenueConnectionConfiguration venue,
+        StaffManagementViewResponse view,
+        bool busy)
+    {
+        if (!ImGui.CollapsingHeader("Onboarding / offboarding task templates"))
+        {
+            return;
+        }
+
+        ImGui.TextWrapped(
+            "Active templates are copied to a Staff checklist when that lifecycle begins. " +
+            "Changing a template does not rewrite existing checklists.");
+
+        foreach (var task in view.LifecycleTaskDefinitions
+                     .OrderBy(task => task.LifecycleType)
+                     .ThenBy(task => task.ArchivedAt is not null)
+                     .ThenBy(task => task.Name))
+        {
+            ImGui.PushID($"staff-lifecycle-template-{task.TaskDefinitionId}");
+            ImGui.TextColored(
+                task.LifecycleType == StaffLifecycleTypes.Onboarding
+                    ? PendingOnboardingColor
+                    : PendingOffboardingColor,
+                $"{LifecycleDisplay(task.LifecycleType)} — {task.Name}" +
+                (task.ArchivedAt is null ? string.Empty : " (archived)"));
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Edit"))
+            {
+                editingLifecycleTaskId = task.TaskDefinitionId;
+                lifecycleTaskName = task.Name;
+                lifecycleTaskType = task.LifecycleType;
+                lifecycleTaskArchived = task.ArchivedAt is not null;
+            }
+            ImGui.PopID();
+        }
+
+        ImGui.InputText("Task name##StaffLifecycleTask", ref lifecycleTaskName, 200);
+        ImGui.BeginDisabled(editingLifecycleTaskId != 0);
+        if (ImGui.BeginCombo(
+                "Lifecycle##StaffLifecycleTask",
+                LifecycleDisplay(lifecycleTaskType)))
+        {
+            if (ImGui.Selectable(
+                    "Onboarding",
+                    lifecycleTaskType == StaffLifecycleTypes.Onboarding))
+            {
+                lifecycleTaskType = StaffLifecycleTypes.Onboarding;
+            }
+            if (ImGui.Selectable(
+                    "Offboarding",
+                    lifecycleTaskType == StaffLifecycleTypes.Offboarding))
+            {
+                lifecycleTaskType = StaffLifecycleTypes.Offboarding;
+            }
+            ImGui.EndCombo();
+        }
+        ImGui.EndDisabled();
+        ImGui.Checkbox("Archived##StaffLifecycleTask", ref lifecycleTaskArchived);
+
+        ImGui.BeginDisabled(busy || string.IsNullOrWhiteSpace(lifecycleTaskName));
+        if (ImGui.Button(editingLifecycleTaskId == 0
+                ? "Create lifecycle task"
+                : "Save lifecycle task"))
+        {
+            plugin.SaveStaffLifecycleTask(
+                venue,
+                editingLifecycleTaskId == 0 ? null : editingLifecycleTaskId,
+                new SaveStaffLifecycleTaskRequest(
+                    lifecycleTaskType,
+                    lifecycleTaskName.Trim(),
+                    lifecycleTaskArchived));
+        }
+        ImGui.EndDisabled();
+
+        ImGui.SameLine();
+        if (ImGui.Button("Clear##StaffLifecycleTask"))
+        {
+            ClearLifecycleTask();
+        }
+    }
+
+    private static string LifecycleDisplay(string lifecycleType) =>
+        lifecycleType == StaffLifecycleTypes.Offboarding
+            ? "Offboarding"
+            : "Onboarding";
 
     private void DrawJobSelector(StaffJobSummary[] jobs)
     {
@@ -1597,6 +1723,14 @@ public sealed class StaffTabRenderer(Plugin plugin)
         staffArchived = false;
     }
 
+    private void ClearLifecycleTask()
+    {
+        editingLifecycleTaskId = 0;
+        lifecycleTaskName = string.Empty;
+        lifecycleTaskType = StaffLifecycleTypes.Onboarding;
+        lifecycleTaskArchived = false;
+    }
+
     private void SelectDefaults(
         StaffManagementViewResponse view,
         VenueConnectionConfiguration venue)
@@ -1637,6 +1771,7 @@ public sealed class StaffTabRenderer(Plugin plugin)
         jobRate = 0;
         jobArchived = false;
         ClearMember();
+        ClearLifecycleTask();
         attendanceRows.Clear();
         clockOutTextByEntry.Clear();
         clockOutErrorByEntry.Clear();
