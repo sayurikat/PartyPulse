@@ -6,6 +6,7 @@
     <PackageLicenseExpression>AGPL-3.0-or-later</PackageLicenseExpression>
     <IsPackable>false</IsPackable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+      <PathMap>$(MSBuildProjectDirectory)=/_/src</PathMap>
   </PropertyGroup>
     <ItemGroup>
         <Content Include="Assets\icon.png">
