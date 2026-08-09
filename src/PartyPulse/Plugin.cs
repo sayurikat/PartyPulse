@@ -14,6 +14,7 @@ using PartyPulse.Bar;
 using PartyPulse.Court;
 using PartyPulse.Finance;
 using PartyPulse.Greeter;
+using PartyPulse.Giveaways;
 using PartyPulse.Integrations;
 using PartyPulse.Integrations.Dropbox;
 using PartyPulse.Notifications;
@@ -131,6 +132,12 @@ public sealed class Plugin : IDalamudPlugin
             IdentityProvider,
             Log);
         TimedMacros = new TimedMacroManagementManager(
+            Configuration,
+            Authentication,
+            apiClient,
+            IdentityProvider,
+            Log);
+        Giveaways = new GiveawayManagementManager(
             Configuration,
             Authentication,
             apiClient,
@@ -258,6 +265,8 @@ public sealed class Plugin : IDalamudPlugin
 
     public TimedMacroManagementManager TimedMacros { get; }
 
+    public GiveawayManagementManager Giveaways { get; }
+
     public DjManagementManager Djs { get; }
 
     public OpeningPublicationManagementManager OpeningPublications { get; }
@@ -321,6 +330,7 @@ public sealed class Plugin : IDalamudPlugin
         PartyFinderAutomation.Stop("PartyPulse is unloading.");
         OpeningPublications.Dispose();
         Djs.Dispose();
+        Giveaways.Dispose();
         TimedMacros.Dispose();
         VenueOpenings.Dispose();
         Greeter.Dispose();
@@ -495,6 +505,7 @@ public sealed class Plugin : IDalamudPlugin
         VipArrivals.ClearProfile(venue.ProfileId);
         Greeter.ClearProfile(venue.ProfileId);
         VenueOpenings.RemoveProfile(venue.ProfileId);
+        Giveaways.RemoveProfile(venue.ProfileId);
         TimedMacros.RemoveProfile(venue.ProfileId);
         Djs.RemoveProfile(venue.ProfileId);
         OpeningPublications.RemoveProfile(venue.ProfileId);
@@ -1083,6 +1094,35 @@ public sealed class Plugin : IDalamudPlugin
         Observe(
             TimedMacros.LoadAsync(venue, true, LifetimeToken),
             $"refresh timed macros for {venue.VenueCode}");
+
+    public void EnsureGiveawaysLoaded(VenueConnectionConfiguration venue)
+    {
+        if (!Giveaways.ShouldLoad(venue)) return;
+        Observe(
+            Giveaways.LoadAsync(venue, false, LifetimeToken),
+            $"load giveaways for {venue.VenueCode}");
+    }
+
+    public void RefreshGiveaways(VenueConnectionConfiguration venue) =>
+        Observe(
+            Giveaways.LoadAsync(venue, true, LifetimeToken),
+            $"refresh giveaways for {venue.VenueCode}");
+
+    public void SaveGiveaway(
+        VenueConnectionConfiguration venue,
+        long? giveawayId,
+        SaveGiveawayRequest request) =>
+        Observe(
+            SaveGiveawayAndReportAsync(venue, giveawayId, request),
+            $"save giveaway for {venue.VenueCode}");
+
+    public void SaveGiveawayScheduler(
+        VenueConnectionConfiguration venue,
+        long? schedulerId,
+        SaveGiveawaySchedulerRequest request) =>
+        Observe(
+            SaveGiveawaySchedulerAndReportAsync(venue, schedulerId, request),
+            $"save giveaway scheduler for {venue.VenueCode}");
 
     public void CreateTimedMacro(
         VenueConnectionConfiguration venue,
@@ -1680,6 +1720,7 @@ public sealed class Plugin : IDalamudPlugin
                 VipArrivals.Clear();
                 Greeter.Clear();
                 VenueOpenings.Clear("Character logged out or changed.");
+                Giveaways.Clear("Character logged out or changed.");
                 TimedMacros.Clear("Character logged out or changed.");
                 Djs.Clear("Character logged out or changed.");
                 OpeningPublications.Clear("Character logged out or changed.");
@@ -1706,6 +1747,7 @@ public sealed class Plugin : IDalamudPlugin
             VipArrivals.Clear();
             Greeter.Clear();
             VenueOpenings.Clear("Character changed; opening schedule was cleared.");
+            Giveaways.Clear("Character changed; giveaway data was cleared.");
             TimedMacros.Clear("Character changed; timed macro data was cleared.");
             Djs.Clear("Character changed; DJ data was cleared.");
             OpeningPublications.Clear("Character changed; opening-publication data was cleared.");
@@ -1866,6 +1908,7 @@ public sealed class Plugin : IDalamudPlugin
         VipArrivals.ClearProfile(venue.ProfileId);
         Greeter.ClearProfile(venue.ProfileId);
         VenueOpenings.RemoveProfile(venue.ProfileId);
+        Giveaways.RemoveProfile(venue.ProfileId);
         TimedMacros.RemoveProfile(venue.ProfileId);
         Djs.RemoveProfile(venue.ProfileId);
         OpeningPublications.RemoveProfile(venue.ProfileId);
@@ -2960,6 +3003,36 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         ReportVipFailure(result.Failure, "The timed macro could not be created.");
+    }
+
+    private async Task SaveGiveawayAndReportAsync(
+        VenueConnectionConfiguration venue,
+        long? giveawayId,
+        SaveGiveawayRequest request)
+    {
+        var result = await Giveaways.SaveGiveawayAsync(venue, giveawayId, request, LifetimeToken);
+        if (result.Success)
+        {
+            ChatGui.Print(giveawayId is null ? "Giveaway created." : "Giveaway updated.", "PartyPulse");
+            return;
+        }
+
+        ReportVipFailure(result.Failure, "The giveaway could not be saved.");
+    }
+
+    private async Task SaveGiveawaySchedulerAndReportAsync(
+        VenueConnectionConfiguration venue,
+        long? schedulerId,
+        SaveGiveawaySchedulerRequest request)
+    {
+        var result = await Giveaways.SaveSchedulerAsync(venue, schedulerId, request, LifetimeToken);
+        if (result.Success)
+        {
+            ChatGui.Print(schedulerId is null ? "Giveaway scheduler created." : "Giveaway scheduler updated.", "PartyPulse");
+            return;
+        }
+
+        ReportVipFailure(result.Failure, "The giveaway scheduler could not be saved.");
     }
 
     private async Task UpdateTimedMacroAndReportAsync(

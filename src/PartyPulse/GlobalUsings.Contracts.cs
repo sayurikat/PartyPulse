@@ -6,6 +6,7 @@ global using PartyPulse.Contracts.Djs;
 global using PartyPulse.Contracts.Discord;
 global using PartyPulse.Contracts.Finance;
 global using PartyPulse.Contracts.Greeter;
+global using PartyPulse.Contracts.Giveaways;
 global using PartyPulse.Contracts.Notifications;
 global using PartyPulse.Contracts.OpeningPublications;
 global using PartyPulse.Contracts.OtherGames;

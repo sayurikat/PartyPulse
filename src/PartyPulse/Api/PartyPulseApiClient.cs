@@ -514,6 +514,77 @@ public sealed class PartyPulseApiClient : IDisposable
             static payload => payload.GuildId > 0 && payload.UnlinkedAt != default,
             cancellationToken);
 
+    public Task<ApiResult<GiveawayManagementViewResponse>> GetGiveawaysAsync(
+        Uri baseUri,
+        string accessToken,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<GiveawayManagementViewResponse>(
+            baseUri,
+            HttpMethod.Get,
+            "api/v1/giveaways",
+            accessToken,
+            null,
+            ValidateGiveawayManagementViewResponse,
+            cancellationToken);
+
+    public Task<ApiResult<SaveGiveawayResponse>> CreateGiveawayAsync(
+        Uri baseUri,
+        string accessToken,
+        SaveGiveawayRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<SaveGiveawayResponse>(
+            baseUri,
+            HttpMethod.Post,
+            "api/v1/giveaways",
+            accessToken,
+            request,
+            static payload => payload.GiveawayId > 0 && payload.UpdatedAt != default,
+            cancellationToken);
+
+    public Task<ApiResult<SaveGiveawayResponse>> UpdateGiveawayAsync(
+        Uri baseUri,
+        string accessToken,
+        long giveawayId,
+        SaveGiveawayRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<SaveGiveawayResponse>(
+            baseUri,
+            HttpMethod.Put,
+            $"api/v1/giveaways/{giveawayId}",
+            accessToken,
+            request,
+            static payload => payload.GiveawayId > 0 && payload.UpdatedAt != default,
+            cancellationToken);
+
+    public Task<ApiResult<SaveGiveawaySchedulerResponse>> CreateGiveawaySchedulerAsync(
+        Uri baseUri,
+        string accessToken,
+        SaveGiveawaySchedulerRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<SaveGiveawaySchedulerResponse>(
+            baseUri,
+            HttpMethod.Post,
+            "api/v1/giveaways/schedulers",
+            accessToken,
+            request,
+            static payload => payload.SchedulerId > 0 && payload.UpdatedAt != default,
+            cancellationToken);
+
+    public Task<ApiResult<SaveGiveawaySchedulerResponse>> UpdateGiveawaySchedulerAsync(
+        Uri baseUri,
+        string accessToken,
+        long schedulerId,
+        SaveGiveawaySchedulerRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<SaveGiveawaySchedulerResponse>(
+            baseUri,
+            HttpMethod.Put,
+            $"api/v1/giveaways/schedulers/{schedulerId}",
+            accessToken,
+            request,
+            static payload => payload.SchedulerId > 0 && payload.UpdatedAt != default,
+            cancellationToken);
+
     public Task<ApiResult<VenueOpeningScheduleResponse>> GetVenueOpeningScheduleAsync(
         Uri baseUri,
         string accessToken,
@@ -2554,10 +2625,40 @@ public sealed class PartyPulseApiClient : IDisposable
     private static bool ValidateDiscordManagementViewResponse(DiscordManagementViewResponse payload) =>
         payload.Capabilities is not null &&
         payload.Roles is not null &&
+        payload.Channels is not null &&
         (payload.Guild is null ||
          (payload.Guild.GuildId > 0 && !string.IsNullOrWhiteSpace(payload.Guild.GuildName))) &&
         payload.Roles.All(static role =>
-            role.RoleId > 0 && !string.IsNullOrWhiteSpace(role.Name) && role.Position >= 0);
+            role.RoleId > 0 && !string.IsNullOrWhiteSpace(role.Name) && role.Position >= 0) &&
+        payload.Channels.All(static channel =>
+            channel is not null && channel.ChannelId > 0 && !string.IsNullOrWhiteSpace(channel.Name) &&
+            !string.IsNullOrWhiteSpace(channel.ChannelType) && channel.Position >= 0);
+
+    private static bool ValidateGiveawayManagementViewResponse(GiveawayManagementViewResponse payload) =>
+        payload.Capabilities is not null && payload.ServerNow != default &&
+        payload.Channels is not null && payload.ActiveAndPending is not null &&
+        payload.Ended is not null && payload.Schedulers is not null &&
+        payload.Channels.All(static channel => channel is not null && channel.ChannelId > 0 &&
+            !string.IsNullOrWhiteSpace(channel.Name) && !string.IsNullOrWhiteSpace(channel.ChannelType) &&
+            channel.Position >= 0 && channel.LastSeenAt != default) &&
+        payload.ActiveAndPending.All(ValidateGiveawaySummary) &&
+        payload.Ended.All(ValidateGiveawaySummary) &&
+        payload.Schedulers.All(static scheduler => scheduler is not null &&
+            scheduler.SchedulerId > 0 && scheduler.ChannelId > 0 &&
+            !string.IsNullOrWhiteSpace(scheduler.ChannelName) && !string.IsNullOrWhiteSpace(scheduler.Title) &&
+            !string.IsNullOrWhiteSpace(scheduler.Description) &&
+            !string.IsNullOrWhiteSpace(scheduler.CongratulationsMessage) &&
+            scheduler.CongratulationsMessage.Contains("<winner>", StringComparison.Ordinal) &&
+            scheduler.RepeatIntervalMinutes > 0 && scheduler.CreatedAt != default && scheduler.UpdatedAt != default);
+
+    private static bool ValidateGiveawaySummary(GiveawaySummary? giveaway) =>
+        giveaway is not null && giveaway.GiveawayId > 0 && giveaway.ChannelId > 0 &&
+        !string.IsNullOrWhiteSpace(giveaway.Status) && !string.IsNullOrWhiteSpace(giveaway.ChannelName) &&
+        !string.IsNullOrWhiteSpace(giveaway.Title) && !string.IsNullOrWhiteSpace(giveaway.Description) &&
+        !string.IsNullOrWhiteSpace(giveaway.CongratulationsMessage) &&
+        giveaway.CongratulationsMessage.Contains("<winner>", StringComparison.Ordinal) &&
+        giveaway.EndsAt > giveaway.StartsAt && giveaway.EntryCount >= 0 &&
+        giveaway.CreatedAt != default && giveaway.UpdatedAt != default;
 
     private static bool ValidateVenueUserOperationResponse(VenueUserOperationResponse payload) =>
         payload.UserId > 0;

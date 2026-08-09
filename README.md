@@ -19,6 +19,7 @@ The current milestone provides:
 - profile editing for display names and Discord handles;
 - dynamic granular-permission checkboxes backed by the server permission catalog;
 - target-assisted user creation;
+- Discord giveaway creation, copy/edit workflows, channel selection, and opening-based giveaway schedulers;
 - placeholder tabs for VIP, staff, payout, bar, games, and greeter modules.
 
 ## Visitor flow
