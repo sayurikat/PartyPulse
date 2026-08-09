@@ -3,6 +3,7 @@ global using PartyPulse.Contracts.Auth;
 global using PartyPulse.Contracts.Bar;
 global using PartyPulse.Contracts.Court;
 global using PartyPulse.Contracts.Djs;
+global using PartyPulse.Contracts.Discord;
 global using PartyPulse.Contracts.Finance;
 global using PartyPulse.Contracts.Greeter;
 global using PartyPulse.Contracts.Notifications;

@@ -475,6 +475,45 @@ public sealed class PartyPulseApiClient : IDisposable
                               (!payload.Settled || payload.PaidToVenueAt is not null),
             cancellationToken);
 
+    public Task<ApiResult<DiscordManagementViewResponse>> GetDiscordManagementAsync(
+        Uri baseUri,
+        string accessToken,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<DiscordManagementViewResponse>(
+            baseUri,
+            HttpMethod.Get,
+            "api/v1/discord",
+            accessToken,
+            null,
+            ValidateDiscordManagementViewResponse,
+            cancellationToken);
+
+    public Task<ApiResult<CreateDiscordGuildLinkCodeResponse>> CreateDiscordGuildLinkCodeAsync(
+        Uri baseUri,
+        string accessToken,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<CreateDiscordGuildLinkCodeResponse>(
+            baseUri,
+            HttpMethod.Post,
+            "api/v1/discord/link-codes",
+            accessToken,
+            null,
+            static payload => !string.IsNullOrWhiteSpace(payload.LinkCode) && payload.ExpiresAt > DateTimeOffset.UtcNow,
+            cancellationToken);
+
+    public Task<ApiResult<UnlinkDiscordGuildResponse>> UnlinkDiscordGuildAsync(
+        Uri baseUri,
+        string accessToken,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<UnlinkDiscordGuildResponse>(
+            baseUri,
+            HttpMethod.Delete,
+            "api/v1/discord/guild",
+            accessToken,
+            null,
+            static payload => payload.GuildId > 0 && payload.UnlinkedAt != default,
+            cancellationToken);
+
     public Task<ApiResult<VenueOpeningScheduleResponse>> GetVenueOpeningScheduleAsync(
         Uri baseUri,
         string accessToken,
@@ -1501,8 +1540,11 @@ public sealed class PartyPulseApiClient : IDisposable
             package.PriceGil >= 0) &&
         payload.Players.All(static player =>
             player.VipPlayerId > 0 &&
-            !string.IsNullOrWhiteSpace(player.DisplayCharacterName) &&
-            !string.IsNullOrWhiteSpace(player.DisplayWorldName)) &&
+            ((string.IsNullOrWhiteSpace(player.DisplayCharacterName) &&
+              string.IsNullOrWhiteSpace(player.DisplayWorldName) &&
+              (!string.IsNullOrWhiteSpace(player.DiscordUsername) || player.DiscordId is not null)) ||
+             (!string.IsNullOrWhiteSpace(player.DisplayCharacterName) &&
+              !string.IsNullOrWhiteSpace(player.DisplayWorldName)))) &&
         payload.Characters.All(static character =>
             character.CharacterId > 0 &&
             character.VipPlayerId > 0 &&
@@ -1514,7 +1556,8 @@ public sealed class PartyPulseApiClient : IDisposable
             subscription.PackageId > 0 &&
             subscription.PurchasePriceGil >= 0 &&
             !string.IsNullOrWhiteSpace(subscription.PackageName) &&
-            !string.IsNullOrWhiteSpace(subscription.SellerDisplayName));
+            !string.IsNullOrWhiteSpace(subscription.SellerDisplayName) &&
+            !string.IsNullOrWhiteSpace(subscription.SourceType));
 
     private static bool ValidateVipPerkViewResponse(VipPerkManagementViewResponse payload) =>
         payload.Capabilities is not null &&
@@ -2507,6 +2550,14 @@ public sealed class PartyPulseApiClient : IDisposable
         payload.UserId > 0 &&
         !string.IsNullOrWhiteSpace(payload.InviteCode) &&
         payload.InviteExpiresAt > DateTimeOffset.UtcNow;
+
+    private static bool ValidateDiscordManagementViewResponse(DiscordManagementViewResponse payload) =>
+        payload.Capabilities is not null &&
+        payload.Roles is not null &&
+        (payload.Guild is null ||
+         (payload.Guild.GuildId > 0 && !string.IsNullOrWhiteSpace(payload.Guild.GuildName))) &&
+        payload.Roles.All(static role =>
+            role.RoleId > 0 && !string.IsNullOrWhiteSpace(role.Name) && role.Position >= 0);
 
     private static bool ValidateVenueUserOperationResponse(VenueUserOperationResponse payload) =>
         payload.UserId > 0;

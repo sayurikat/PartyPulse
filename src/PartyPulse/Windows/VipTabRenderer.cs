@@ -43,6 +43,7 @@ public sealed class VipTabRenderer(Plugin plugin)
     private int packageYears;
     private bool packageLifetime;
     private string packageDiscordRoleId = string.Empty;
+    private bool packageGrantedByServerBoost;
     private bool packageArchived;
     private string settlementTargetName = string.Empty;
     private string settlementTargetWorld = string.Empty;
@@ -498,7 +499,9 @@ public sealed class VipTabRenderer(Plugin plugin)
             ImGui.TextColored(
                 AvailableColor,
                 $"VIP: {activeSubscription.PackageName}" +
-                (activeSubscription.EndsAt is { } endsAt
+                (activeSubscription.IsServerBoost
+                    ? " (Server Booster)"
+                    : activeSubscription.EndsAt is { } endsAt
                     ? $" until {VenueTimeZone.Format(venue, endsAt, "g")}"
                     : " (lifetime)"));
         }
@@ -568,7 +571,7 @@ public sealed class VipTabRenderer(Plugin plugin)
                 saleDiscordUsername = string.Empty;
             }
 
-            foreach (var player in view.Players.OrderBy(player => player.DisplayCharacterName))
+            foreach (var player in view.Players.OrderBy(player => player.DisplayCharacterName ?? player.DiscordUsername))
             {
                 var selected = selectedExistingVipPlayerId == player.VipPlayerId;
                 if (ImGui.Selectable(
@@ -720,8 +723,10 @@ public sealed class VipTabRenderer(Plugin plugin)
             ImGui.TableSetColumnIndex(3);
             ImGui.TextUnformatted(VenueTimeZone.Format(venue, subscription.StartsAt, "g"));
             ImGui.TableSetColumnIndex(4);
-            ImGui.TextUnformatted(subscription.Lifetime
-                ? "Lifetime"
+            ImGui.TextUnformatted(subscription.IsServerBoost
+                ? "While boosting"
+                : subscription.Lifetime
+                    ? "Lifetime"
                 : VenueTimeZone.Format(venue, subscription.EndsAt!.Value, "g"));
             ImGui.TableSetColumnIndex(5);
             ImGui.TextUnformatted(subscription.SellerDisplayName);
@@ -783,7 +788,7 @@ public sealed class VipTabRenderer(Plugin plugin)
             .Where(player =>
                 !vipPlayerNearbyOnly ||
                 plugin.NearbyVipPlayers.IsNearby(player.VipPlayerId))
-            .OrderBy(player => player.DisplayCharacterName)
+            .OrderBy(player => player.DisplayCharacterName ?? player.DiscordUsername)
             .ThenBy(player => player.DisplayWorldName)
             .ToArray();
 
@@ -836,6 +841,8 @@ public sealed class VipTabRenderer(Plugin plugin)
             ImGui.TableSetColumnIndex(2);
             ImGui.TextUnformatted(player.HasLifetime
                 ? "Lifetime"
+                : player.HasServerBoostSubscription
+                    ? "Server Booster"
                 : player.LastSubscriptionEndsAt is { } lastSubscriptionEnd ? VenueTimeZone.Format(venue, lastSubscriptionEnd, "g") : "None");
             ImGui.TableSetColumnIndex(3);
             ImGui.TextUnformatted(characterCount.ToString(CultureInfo.InvariantCulture));
@@ -897,8 +904,9 @@ public sealed class VipTabRenderer(Plugin plugin)
             return true;
         }
 
-        if (player.DisplayCharacterName.Contains(nameFilter, StringComparison.OrdinalIgnoreCase) ||
-            player.DisplayWorldName.Contains(nameFilter, StringComparison.OrdinalIgnoreCase))
+        if ((player.DisplayCharacterName?.Contains(nameFilter, StringComparison.OrdinalIgnoreCase) ?? false) ||
+            (player.DisplayWorldName?.Contains(nameFilter, StringComparison.OrdinalIgnoreCase) ?? false) ||
+            (player.DiscordUsername?.Contains(nameFilter, StringComparison.OrdinalIgnoreCase) ?? false))
         {
             return true;
         }
@@ -909,13 +917,14 @@ public sealed class VipTabRenderer(Plugin plugin)
     }
 
     private static bool IsVipPlayerActive(VipPlayerSummary player, DateTimeOffset now) =>
-        player.HasLifetime || player.LastSubscriptionEndsAt > now;
+        player.HasLifetime || player.HasServerBoostSubscription || player.LastSubscriptionEndsAt > now;
 
     private static bool IsVipPlayerExpiringSoon(
         VipPlayerSummary player,
         DateTimeOffset now,
         DateTimeOffset expiringSoonCutoff) =>
         !player.HasLifetime &&
+        !player.HasServerBoostSubscription &&
         player.LastSubscriptionEndsAt is { } expiresAt &&
         expiresAt > now &&
         expiresAt < expiringSoonCutoff;
@@ -925,7 +934,7 @@ public sealed class VipTabRenderer(Plugin plugin)
         DateTimeOffset now,
         DateTimeOffset expiringSoonCutoff)
     {
-        if (player.HasLifetime || player.LastSubscriptionEndsAt is not { } expiresAt)
+        if (player.HasLifetime || player.HasServerBoostSubscription || player.LastSubscriptionEndsAt is not { } expiresAt)
         {
             return null;
         }
@@ -1021,11 +1030,12 @@ public sealed class VipTabRenderer(Plugin plugin)
             ImGuiTableFlags.Resizable |
             ImGuiTableFlags.SizingStretchProp;
 
-        if (ImGui.BeginTable("VipPackages", 5, flags))
+        if (ImGui.BeginTable("VipPackages", 6, flags))
         {
             ImGui.TableSetupColumn("Name");
             ImGui.TableSetupColumn("Price");
             ImGui.TableSetupColumn("Duration");
+            ImGui.TableSetupColumn("Server Boost");
             ImGui.TableSetupColumn("State");
             ImGui.TableSetupColumn("##Edit", ImGuiTableColumnFlags.WidthFixed, 60 * ImGuiHelpers.GlobalScale);
             ImGui.TableHeadersRow();
@@ -1044,8 +1054,10 @@ public sealed class VipTabRenderer(Plugin plugin)
                 ImGui.TableSetColumnIndex(2);
                 ImGui.TextUnformatted(package.DurationDisplay);
                 ImGui.TableSetColumnIndex(3);
-                ImGui.TextUnformatted(package.IsArchived ? "Archived" : "Active");
+                ImGui.TextUnformatted(package.GrantedByServerBoost ? "Granted" : "No");
                 ImGui.TableSetColumnIndex(4);
+                ImGui.TextUnformatted(package.IsArchived ? "Archived" : "Active");
+                ImGui.TableSetColumnIndex(5);
                 if (ImGui.SmallButton("Edit"))
                 {
                     LoadPackageEditor(package);
@@ -1071,6 +1083,11 @@ public sealed class VipTabRenderer(Plugin plugin)
 
         ImGui.SetNextItemWidth(300 * ImGuiHelpers.GlobalScale);
         ImGui.InputText("Discord role ID (optional)", ref packageDiscordRoleId, 20);
+        ImGui.Checkbox("Grant while Discord Server Boosting", ref packageGrantedByServerBoost);
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip("Only one active package per venue can be granted by Server Boosting.");
+        }
         if (editingPackageId > 0)
         {
             ImGui.Checkbox("Archived", ref packageArchived);
@@ -1109,7 +1126,8 @@ public sealed class VipTabRenderer(Plugin plugin)
                         packageLifetime ? 0 : packageMonths,
                         packageLifetime ? 0 : packageYears,
                         packageLifetime,
-                        discordRoleId));
+                        discordRoleId,
+                        packageGrantedByServerBoost));
             }
             else
             {
@@ -1124,7 +1142,8 @@ public sealed class VipTabRenderer(Plugin plugin)
                         packageLifetime ? 0 : packageYears,
                         packageLifetime,
                         discordRoleId,
-                        packageArchived));
+                        packageArchived,
+                        packageGrantedByServerBoost));
             }
         }
         ImGui.EndDisabled();
@@ -1603,6 +1622,7 @@ public sealed class VipTabRenderer(Plugin plugin)
         packageYears = 0;
         packageLifetime = false;
         packageDiscordRoleId = string.Empty;
+        packageGrantedByServerBoost = false;
         packageArchived = false;
     }
 
@@ -1616,6 +1636,7 @@ public sealed class VipTabRenderer(Plugin plugin)
         packageYears = package.YearsGranted;
         packageLifetime = package.Lifetime;
         packageDiscordRoleId = package.DiscordRoleId?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
+        packageGrantedByServerBoost = package.GrantedByServerBoost;
         packageArchived = package.IsArchived;
     }
 }
