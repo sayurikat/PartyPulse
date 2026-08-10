@@ -33,6 +33,7 @@ public sealed class MainWindow : Window, IDisposable
         Staff,
         TimedMacros,
         Giveaways,
+        DiscordStatus,
         Shoutrunner,
         PartyFinder,
         Finance,
@@ -62,6 +63,7 @@ public sealed class MainWindow : Window, IDisposable
         new(MainPage.Staff, "OPERATIONS", "Staff", "STF"),
         new(MainPage.TimedMacros, "OPERATIONS", "Timed Macros", "TMR"),
         new(MainPage.Giveaways, "OPERATIONS", "Giveaways", "GIV"),
+        new(MainPage.DiscordStatus, "OPERATIONS", "Discord Status", "DS"),
         new(MainPage.Shoutrunner, "OPERATIONS", "Shoutrunner", "SHR"),
         new(MainPage.PartyFinder, "OPERATIONS", "Party Finder", "PF"),
         new(MainPage.Finance, "ADMINISTRATION", "Finance", "FIN"),
@@ -82,6 +84,7 @@ public sealed class MainWindow : Window, IDisposable
     private readonly DjsTabRenderer djsTab;
     private readonly TimedMacrosTabRenderer timedMacrosTab;
     private readonly GiveawaysTabRenderer giveawaysTab;
+    private readonly DiscordStatusTabRenderer discordStatusTab;
     private readonly FinanceTabRenderer financeTab;
     private readonly GreeterTabRenderer greeterTab;
     private readonly ShoutrunnerTabRenderer shoutrunnerTab;
@@ -118,6 +121,7 @@ public sealed class MainWindow : Window, IDisposable
         djsTab = new DjsTabRenderer(plugin);
         timedMacrosTab = new TimedMacrosTabRenderer(plugin);
         giveawaysTab = new GiveawaysTabRenderer(plugin);
+        discordStatusTab = new DiscordStatusTabRenderer(plugin);
         financeTab = new FinanceTabRenderer(plugin);
         greeterTab = new GreeterTabRenderer(plugin);
         shoutrunnerTab = new ShoutrunnerTabRenderer(plugin);
@@ -448,6 +452,9 @@ public sealed class MainWindow : Window, IDisposable
             case MainPage.Giveaways:
                 giveawaysTab.Draw(selectedVenue);
                 break;
+            case MainPage.DiscordStatus:
+                discordStatusTab.Draw(selectedVenue);
+                break;
             case MainPage.Shoutrunner:
                 shoutrunnerTab.Draw(selectedVenue);
                 break;
@@ -485,6 +492,7 @@ public sealed class MainWindow : Window, IDisposable
         {
             MainPage.TimedMacros => TimeSpan.FromSeconds(10),
             MainPage.Giveaways => TimeSpan.FromSeconds(15),
+            MainPage.DiscordStatus => TimeSpan.FromSeconds(30),
             MainPage.Shoutrunner or MainPage.PartyFinder or MainPage.Greeter or MainPage.Staff => TimeSpan.FromSeconds(15),
             MainPage.Djs => TimeSpan.FromMinutes(1),
             MainPage.Users or MainPage.MyAccount => TimeSpan.FromMinutes(2),
@@ -552,6 +560,9 @@ public sealed class MainWindow : Window, IDisposable
             case MainPage.Giveaways:
                 plugin.RefreshGiveaways(venue);
                 break;
+            case MainPage.DiscordStatus:
+                plugin.RefreshDiscordStatus(venue);
+                break;
             case MainPage.Shoutrunner:
             case MainPage.PartyFinder:
                 plugin.RefreshOpeningPublications(venue);
@@ -590,6 +601,7 @@ public sealed class MainWindow : Window, IDisposable
             MainPage.TimedMacros => plugin.TimedMacros.GetSnapshot(venue).View?.Capabilities is not { } capabilities ||
                                     capabilities.CanExecuteAny || capabilities.CanManageAny,
             MainPage.Giveaways => plugin.Giveaways.GetSnapshot(venue).View?.Capabilities.CanManage ?? true,
+            MainPage.DiscordStatus => plugin.DiscordStatus.GetSnapshot(venue).View?.Capabilities.CanManage ?? true,
             MainPage.Shoutrunner => plugin.OpeningPublications.GetSnapshot(venue).View?.Capabilities.CanUseShoutrunner ?? true,
             MainPage.PartyFinder => plugin.OpeningPublications.GetSnapshot(venue).View?.Capabilities.CanUsePartyFinder ?? true,
             MainPage.Greeter => plugin.Greeter.GetSnapshot(venue).Context?.Capabilities.CanUse ?? true,

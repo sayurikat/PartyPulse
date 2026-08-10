@@ -12,6 +12,7 @@ using PartyPulse.Api;
 using PartyPulse.Authentication;
 using PartyPulse.Bar;
 using PartyPulse.Court;
+using PartyPulse.DiscordStatus;
 using PartyPulse.Finance;
 using PartyPulse.Greeter;
 using PartyPulse.Giveaways;
@@ -143,6 +144,12 @@ public sealed class Plugin : IDalamudPlugin
             apiClient,
             IdentityProvider,
             Log);
+        DiscordStatus = new DiscordStatusManagementManager(
+            Configuration,
+            Authentication,
+            apiClient,
+            IdentityProvider,
+            Log);
         Djs = new DjManagementManager(
             Configuration,
             Authentication,
@@ -267,6 +274,8 @@ public sealed class Plugin : IDalamudPlugin
 
     public GiveawayManagementManager Giveaways { get; }
 
+    public DiscordStatusManagementManager DiscordStatus { get; }
+
     public DjManagementManager Djs { get; }
 
     public OpeningPublicationManagementManager OpeningPublications { get; }
@@ -330,6 +339,7 @@ public sealed class Plugin : IDalamudPlugin
         PartyFinderAutomation.Stop("PartyPulse is unloading.");
         OpeningPublications.Dispose();
         Djs.Dispose();
+        DiscordStatus.Dispose();
         Giveaways.Dispose();
         TimedMacros.Dispose();
         VenueOpenings.Dispose();
@@ -505,6 +515,7 @@ public sealed class Plugin : IDalamudPlugin
         VipArrivals.ClearProfile(venue.ProfileId);
         Greeter.ClearProfile(venue.ProfileId);
         VenueOpenings.RemoveProfile(venue.ProfileId);
+        DiscordStatus.RemoveProfile(venue.ProfileId);
         Giveaways.RemoveProfile(venue.ProfileId);
         TimedMacros.RemoveProfile(venue.ProfileId);
         Djs.RemoveProfile(venue.ProfileId);
@@ -1107,6 +1118,26 @@ public sealed class Plugin : IDalamudPlugin
         Observe(
             Giveaways.LoadAsync(venue, true, LifetimeToken),
             $"refresh giveaways for {venue.VenueCode}");
+
+    public void EnsureDiscordStatusLoaded(VenueConnectionConfiguration venue)
+    {
+        if (!DiscordStatus.ShouldLoad(venue)) return;
+        Observe(
+            DiscordStatus.LoadAsync(venue, false, LifetimeToken),
+            $"load Discord venue status for {venue.VenueCode}");
+    }
+
+    public void RefreshDiscordStatus(VenueConnectionConfiguration venue) =>
+        Observe(
+            DiscordStatus.LoadAsync(venue, true, LifetimeToken),
+            $"refresh Discord venue status for {venue.VenueCode}");
+
+    public void SaveDiscordStatus(
+        VenueConnectionConfiguration venue,
+        SaveDiscordVenueStatusRequest request) =>
+        Observe(
+            SaveDiscordStatusAndReportAsync(venue, request),
+            $"save Discord venue status for {venue.VenueCode}");
 
     public void SaveGiveaway(
         VenueConnectionConfiguration venue,
@@ -1720,6 +1751,7 @@ public sealed class Plugin : IDalamudPlugin
                 VipArrivals.Clear();
                 Greeter.Clear();
                 VenueOpenings.Clear("Character logged out or changed.");
+                DiscordStatus.Clear("Character logged out or changed.");
                 Giveaways.Clear("Character logged out or changed.");
                 TimedMacros.Clear("Character logged out or changed.");
                 Djs.Clear("Character logged out or changed.");
@@ -1747,6 +1779,7 @@ public sealed class Plugin : IDalamudPlugin
             VipArrivals.Clear();
             Greeter.Clear();
             VenueOpenings.Clear("Character changed; opening schedule was cleared.");
+            DiscordStatus.Clear("Character changed; Discord venue-status data was cleared.");
             Giveaways.Clear("Character changed; giveaway data was cleared.");
             TimedMacros.Clear("Character changed; timed macro data was cleared.");
             Djs.Clear("Character changed; DJ data was cleared.");
@@ -1908,6 +1941,7 @@ public sealed class Plugin : IDalamudPlugin
         VipArrivals.ClearProfile(venue.ProfileId);
         Greeter.ClearProfile(venue.ProfileId);
         VenueOpenings.RemoveProfile(venue.ProfileId);
+        DiscordStatus.RemoveProfile(venue.ProfileId);
         Giveaways.RemoveProfile(venue.ProfileId);
         TimedMacros.RemoveProfile(venue.ProfileId);
         Djs.RemoveProfile(venue.ProfileId);
@@ -3018,6 +3052,20 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         ReportVipFailure(result.Failure, "The giveaway could not be saved.");
+    }
+
+    private async Task SaveDiscordStatusAndReportAsync(
+        VenueConnectionConfiguration venue,
+        SaveDiscordVenueStatusRequest request)
+    {
+        var result = await DiscordStatus.SaveAsync(venue, request, LifetimeToken);
+        if (result.Success)
+        {
+            ChatGui.Print("Discord venue-status settings saved.", "PartyPulse");
+            return;
+        }
+
+        ReportVipFailure(result.Failure, "The Discord venue-status settings could not be saved.");
     }
 
     private async Task SaveGiveawaySchedulerAndReportAsync(

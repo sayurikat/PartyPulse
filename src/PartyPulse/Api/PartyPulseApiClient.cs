@@ -488,6 +488,24 @@ public sealed class PartyPulseApiClient : IDisposable
             ValidateDiscordManagementViewResponse,
             cancellationToken);
 
+    public Task<ApiResult<SaveDiscordVenueStatusResponse>> SaveDiscordVenueStatusAsync(
+        Uri baseUri,
+        string accessToken,
+        SaveDiscordVenueStatusRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<SaveDiscordVenueStatusResponse>(
+            baseUri,
+            HttpMethod.Put,
+            "api/v1/discord/venue-status",
+            accessToken,
+            request,
+            static payload =>
+                payload.UpdatedAt != default &&
+                !string.IsNullOrWhiteSpace(payload.OpenMessage) &&
+                !string.IsNullOrWhiteSpace(payload.ClosedMessage) &&
+                (!payload.Enabled || payload.ChannelId is > 0),
+            cancellationToken);
+
     public Task<ApiResult<CreateDiscordGuildLinkCodeResponse>> CreateDiscordGuildLinkCodeAsync(
         Uri baseUri,
         string accessToken,
@@ -2626,6 +2644,17 @@ public sealed class PartyPulseApiClient : IDisposable
         payload.Capabilities is not null &&
         payload.Roles is not null &&
         payload.Channels is not null &&
+        payload.VenueStatus is { } venueStatus &&
+        !string.IsNullOrWhiteSpace(venueStatus.OpenMessage) &&
+        !string.IsNullOrWhiteSpace(venueStatus.ClosedMessage) &&
+        (!venueStatus.Enabled || venueStatus.ChannelId is > 0) &&
+        (venueStatus.CurrentPublication is null ||
+         (venueStatus.CurrentPublication.OpeningId > 0 &&
+          venueStatus.CurrentPublication.ChannelId > 0 &&
+          !string.IsNullOrWhiteSpace(venueStatus.CurrentPublication.ChannelName) &&
+          (venueStatus.CurrentPublication.PublicationState == DiscordVenueStatusPublicationStates.Pending ||
+           venueStatus.CurrentPublication.PublicationState == DiscordVenueStatusPublicationStates.Open ||
+           venueStatus.CurrentPublication.PublicationState == DiscordVenueStatusPublicationStates.Closed))) &&
         (payload.Guild is null ||
          (payload.Guild.GuildId > 0 && !string.IsNullOrWhiteSpace(payload.Guild.GuildName))) &&
         payload.Roles.All(static role =>
