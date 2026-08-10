@@ -1622,6 +1622,7 @@ public sealed class PartyPulseApiClient : IDisposable
         payload.Players is not null &&
         payload.Characters is not null &&
         payload.Subscriptions is not null &&
+        payload.DiscordRoles is not null &&
         payload.Packages.All(static package =>
             package.PackageId > 0 &&
             !string.IsNullOrWhiteSpace(package.Name) &&
@@ -1646,7 +1647,11 @@ public sealed class PartyPulseApiClient : IDisposable
             subscription.PurchasePriceGil >= 0 &&
             !string.IsNullOrWhiteSpace(subscription.PackageName) &&
             !string.IsNullOrWhiteSpace(subscription.SellerDisplayName) &&
-            !string.IsNullOrWhiteSpace(subscription.SourceType));
+            !string.IsNullOrWhiteSpace(subscription.SourceType)) &&
+        payload.DiscordRoles.All(static role =>
+            role.RoleId > 0 &&
+            !string.IsNullOrWhiteSpace(role.Name) &&
+            role.Position >= 0);
 
     private static bool ValidateVipPerkViewResponse(VipPerkManagementViewResponse payload) =>
         payload.Capabilities is not null &&

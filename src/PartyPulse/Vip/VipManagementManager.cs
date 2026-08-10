@@ -95,6 +95,42 @@ public sealed class VipManagementManager : IDisposable
             },
             cancellationToken);
 
+    public Task<ApiResult<VipManagementViewResponse>> RefreshQuietlyAsync(
+        VenueConnectionConfiguration venue,
+        CancellationToken cancellationToken) =>
+        WithGateAsync(
+            venue,
+            async () =>
+            {
+                var attemptAt = DateTimeOffset.UtcNow;
+                var context = await GetAuthorizedContextAsync(venue, cancellationToken);
+                if (!context.Success)
+                {
+                    TouchSnapshotAttempt(venue.ProfileId, attemptAt);
+                    return ApiResult<VipManagementViewResponse>.Failed(context.Failure!);
+                }
+
+                var result = await apiClient.GetVipAsync(
+                    context.BaseUri!,
+                    context.AccessToken!,
+                    cancellationToken);
+                if (result.Success && result.Value is not null)
+                {
+                    snapshots[venue.ProfileId] = new VipManagementSnapshot(
+                        VipManagementStatus.Ready,
+                        "VIP data loaded.",
+                        result.Value,
+                        attemptAt);
+                }
+                else
+                {
+                    TouchSnapshotAttempt(venue.ProfileId, attemptAt);
+                }
+
+                return result;
+            },
+            cancellationToken);
+
     public Task<ApiResult<VipPackageOperationResponse>> CreatePackageAsync(
         VenueConnectionConfiguration venue,
         CreateVipPackageRequest request,
@@ -515,6 +551,14 @@ public sealed class VipManagementManager : IDisposable
             failure.Message,
             null,
             attemptAt);
+    }
+
+    private void TouchSnapshotAttempt(Guid profileId, DateTimeOffset attemptAt)
+    {
+        if (snapshots.TryGetValue(profileId, out var existing))
+        {
+            snapshots[profileId] = existing with { LastAttemptAt = attemptAt };
+        }
     }
 
     private async Task<T> WithGateAsync<T>(

@@ -160,9 +160,9 @@ public sealed class DiscordStatusTabRenderer(Plugin plugin)
     {
         var selected = postableChannels.FirstOrDefault(channel => channel.ChannelId == channelId);
         var preview = selected is not null
-            ? $"#{selected.Name}"
+            ? DiscordChannelDisplayName.ToAsciiLetters(selected.Name)
             : channelId > 0
-                ? $"Unavailable channel ({channelId})"
+                ? "Unavailable channel"
                 : "Select a channel";
 
         ImGui.SetNextItemWidth(360 * ImGuiHelpers.GlobalScale);
@@ -174,7 +174,8 @@ public sealed class DiscordStatusTabRenderer(Plugin plugin)
         foreach (var channel in postableChannels)
         {
             var isSelected = channel.ChannelId == channelId;
-            if (ImGui.Selectable($"#{channel.Name}", isSelected))
+            var displayName = DiscordChannelDisplayName.ToAsciiLetters(channel.Name);
+            if (ImGui.Selectable($"{displayName}##DiscordStatusChannel{channel.ChannelId}", isSelected))
             {
                 channelId = channel.ChannelId;
                 dirty = true;

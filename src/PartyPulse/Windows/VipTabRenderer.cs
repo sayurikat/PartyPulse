@@ -31,6 +31,8 @@ public sealed class VipTabRenderer(Plugin plugin)
     private bool vipPlayerActiveOnly;
     private bool vipPlayerExpiringSoonOnly;
     private bool vipPlayerNearbyOnly;
+    private bool vipPlayerNoCharacterOnly;
+    private bool vipPlayerServerBoosterOnly;
     private readonly Dictionary<string, string> arrivalMacroDrafts = new(StringComparer.OrdinalIgnoreCase);
     private int temporaryOpeningDurationMinutes = 480;
     private string temporaryOpeningTitle = string.Empty;
@@ -42,7 +44,7 @@ public sealed class VipTabRenderer(Plugin plugin)
     private int packageMonths;
     private int packageYears;
     private bool packageLifetime;
-    private string packageDiscordRoleId = string.Empty;
+    private long packageDiscordRoleId;
     private bool packageGrantedByServerBoost;
     private bool packageArchived;
     private string settlementTargetName = string.Empty;
@@ -90,7 +92,7 @@ public sealed class VipTabRenderer(Plugin plugin)
         ImGui.SameLine();
         ImGui.TextDisabled("Data is cached for this venue until refreshed or changed.");
 
-        var vipDataReady = snapshot.Status == VipManagementStatus.Ready && snapshot.View is not null;
+        var vipDataReady = snapshot.View is not null;
         DrawArrivalToolbar(venue, vipDataReady);
         DrawNewVipOffer(venue);
         DrawVipTimedMacro(venue);
@@ -772,6 +774,19 @@ public sealed class VipTabRenderer(Plugin plugin)
             ImGui.SetTooltip("Shows VIP players with at least one linked character currently detected nearby.");
         }
 
+        ImGui.Checkbox("No character linked", ref vipPlayerNoCharacterOnly);
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip("Shows VIP players that do not have any FFXIV character linked.");
+        }
+
+        ImGui.SameLine();
+        ImGui.Checkbox("Server Booster", ref vipPlayerServerBoosterOnly);
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip("Shows VIP players with an active Discord Server Booster subscription.");
+        }
+
         var now = DateTimeOffset.UtcNow;
         var expiringSoonCutoff = now.AddDays(8);
         var trimmedNameFilter = vipPlayerNameFilter.Trim();
@@ -788,6 +803,12 @@ public sealed class VipTabRenderer(Plugin plugin)
             .Where(player =>
                 !vipPlayerNearbyOnly ||
                 plugin.NearbyVipPlayers.IsNearby(player.VipPlayerId))
+            .Where(player =>
+                !vipPlayerNoCharacterOnly ||
+                !charactersByPlayer[player.VipPlayerId].Any())
+            .Where(player =>
+                !vipPlayerServerBoosterOnly ||
+                player.HasServerBoostSubscription)
             .OrderBy(player => player.DisplayCharacterName ?? player.DiscordUsername)
             .ThenBy(player => player.DisplayWorldName)
             .ToArray();
@@ -1081,8 +1102,7 @@ public sealed class VipTabRenderer(Plugin plugin)
         ImGui.InputInt("Years", ref packageYears);
         ImGui.EndDisabled();
 
-        ImGui.SetNextItemWidth(300 * ImGuiHelpers.GlobalScale);
-        ImGui.InputText("Discord role ID (optional)", ref packageDiscordRoleId, 20);
+        DrawDiscordRoleCombo(view, venue, isBusy);
         ImGui.Checkbox("Grant while Discord Server Boosting", ref packageGrantedByServerBoost);
         if (ImGui.IsItemHovered())
         {
@@ -1094,9 +1114,10 @@ public sealed class VipTabRenderer(Plugin plugin)
         }
 
         var validDuration = packageLifetime || packageDays > 0 || packageMonths > 0 || packageYears > 0;
-        var validRole = string.IsNullOrWhiteSpace(packageDiscordRoleId) ||
-                        long.TryParse(packageDiscordRoleId, NumberStyles.None, CultureInfo.InvariantCulture, out var parsedRoleId) &&
-                        parsedRoleId > 0;
+        var validRole = packageDiscordRoleId == 0 ||
+                        view.DiscordRoles.Any(role =>
+                            role.RoleId == packageDiscordRoleId &&
+                            role.CanAssign);
         var valid = !string.IsNullOrWhiteSpace(packageName) &&
                     packagePriceGil >= 0 &&
                     packageDays >= 0 &&
@@ -1108,12 +1129,9 @@ public sealed class VipTabRenderer(Plugin plugin)
         ImGui.BeginDisabled(isBusy || !valid);
         if (ImGui.Button(editingPackageId == 0 ? "Create package" : "Save package"))
         {
-            long? discordRoleId = string.IsNullOrWhiteSpace(packageDiscordRoleId)
-                ? null
-                : long.Parse(
-                    packageDiscordRoleId,
-                    NumberStyles.None,
-                    CultureInfo.InvariantCulture);
+            long? discordRoleId = packageDiscordRoleId > 0
+                ? packageDiscordRoleId
+                : null;
 
             if (editingPackageId == 0)
             {
@@ -1147,6 +1165,57 @@ public sealed class VipTabRenderer(Plugin plugin)
             }
         }
         ImGui.EndDisabled();
+    }
+    private void DrawDiscordRoleCombo(VipManagementViewResponse view, VenueConnectionConfiguration venue, bool isBusy)
+    {
+        var assignableRoles = view.DiscordRoles
+            .Where(role => role.CanAssign)
+            .OrderByDescending(role => role.Position)
+            .ThenBy(role => role.Name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var selectedRole = view.DiscordRoles.FirstOrDefault(role => role.RoleId == packageDiscordRoleId);
+        var preview = packageDiscordRoleId == 0
+            ? "No Discord role"
+            : selectedRole is not null
+                ? DiscordChannelDisplayName.ToAsciiLetters(selectedRole.Name)
+                : "Stored role no longer available";
+
+        ImGui.SetNextItemWidth(300 * ImGuiHelpers.GlobalScale);
+        if (ImGui.BeginCombo("Discord role (optional)", preview))
+        {
+            if (ImGui.Selectable("No Discord role", packageDiscordRoleId == 0))
+            {
+                packageDiscordRoleId = 0;
+            }
+
+            foreach (var role in assignableRoles)
+            {
+                if (ImGui.Selectable(
+                        $"{DiscordChannelDisplayName.ToAsciiLetters(role.Name)}##VipDiscordRole{role.RoleId}",
+                        packageDiscordRoleId == role.RoleId))
+                {
+                    packageDiscordRoleId = role.RoleId;
+                }
+            }
+
+            ImGui.EndCombo();
+        }
+
+        if (view.DiscordRoles.Count == 0)
+        {
+            ImGui.TextDisabled("No active Discord roles are stored for this venue.");
+        }
+        else if (assignableRoles.Length == 0)
+        {
+            ImGui.TextDisabled("No stored Discord role can currently be assigned by the bot.");
+        }
+        else if (packageDiscordRoleId > 0 && selectedRole?.CanAssign != true)
+        {
+            ImGui.TextColored(
+                PartyPulseUi.Warning,
+                "The saved role is no longer assignable. Select another role or clear it.");
+        }
+    
 
         var perkSnapshot = plugin.VipPerks.GetSnapshot(venue);
         if (perkSnapshot.Status == VipPerkManagementStatus.Ready &&
@@ -1582,6 +1651,8 @@ public sealed class VipTabRenderer(Plugin plugin)
         vipPlayerActiveOnly = false;
         vipPlayerExpiringSoonOnly = false;
         vipPlayerNearbyOnly = false;
+        vipPlayerNoCharacterOnly = false;
+        vipPlayerServerBoosterOnly = false;
         arrivalMacroDrafts.Clear();
         temporaryOpeningDurationMinutes = 480;
         temporaryOpeningTitle = string.Empty;
@@ -1621,7 +1692,7 @@ public sealed class VipTabRenderer(Plugin plugin)
         packageMonths = 0;
         packageYears = 0;
         packageLifetime = false;
-        packageDiscordRoleId = string.Empty;
+        packageDiscordRoleId = 0;
         packageGrantedByServerBoost = false;
         packageArchived = false;
     }
@@ -1635,7 +1706,7 @@ public sealed class VipTabRenderer(Plugin plugin)
         packageMonths = package.MonthsGranted;
         packageYears = package.YearsGranted;
         packageLifetime = package.Lifetime;
-        packageDiscordRoleId = package.DiscordRoleId?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
+        packageDiscordRoleId = package.DiscordRoleId ?? 0;
         packageGrantedByServerBoost = package.GrantedByServerBoost;
         packageArchived = package.IsArchived;
     }

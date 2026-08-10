@@ -397,13 +397,20 @@ public sealed class GiveawaysTabRenderer(Plugin plugin)
         ImGui.BeginDisabled(disabled);
         ImGui.SetNextItemWidth(320 * ImGuiHelpers.GlobalScale);
 
-        if (ImGui.BeginCombo(label, selected is null ? "Select a channel" : $"#{selected.Name}"))
+        if (ImGui.BeginCombo(
+                label,
+                selected is null
+                    ? "Select a channel"
+                    : DiscordChannelDisplayName.ToAsciiLetters(selected.Name)))
         {
             foreach (var channel in view.Channels.Where(channel => channel.CanPost)
                          .OrderByDescending(channel => channel.Position)
                          .ThenBy(channel => channel.Name, StringComparer.OrdinalIgnoreCase))
             {
-                if (ImGui.Selectable($"#{channel.Name}##{channel.ChannelId}", channel.ChannelId == currentChannelId))
+                var displayName = DiscordChannelDisplayName.ToAsciiLetters(channel.Name);
+                if (ImGui.Selectable(
+                        $"{displayName}##GiveawayChannel{channel.ChannelId}",
+                        channel.ChannelId == currentChannelId))
                 {
                     selectedChannelId = channel.ChannelId;
                     currentChannelId = channel.ChannelId; // keeps local in sync if needed

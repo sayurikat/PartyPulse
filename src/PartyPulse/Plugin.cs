@@ -607,7 +607,7 @@ public sealed class Plugin : IDalamudPlugin
         NearbyVipPlayers.ClearProfile(venue.ProfileId);
         VipArrivalNearby.Clear();
         Observe(
-            Vip.LoadAsync(venue, true, LifetimeToken),
+            Vip.RefreshQuietlyAsync(venue, LifetimeToken),
             $"refresh VIP data for {venue.VenueCode}");
     }
 
