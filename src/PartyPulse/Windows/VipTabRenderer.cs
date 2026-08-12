@@ -15,6 +15,8 @@ namespace PartyPulse.Windows;
 
 public sealed class VipTabRenderer(Plugin plugin)
 {
+    private const string DiscordRoleManagementPopupName =
+        "Confirm VIP Discord role management###PartyPulseVipDiscordRoleManagement";
     private const string RedeemPerkPopupName = "Confirm VIP perk redemption###PartyPulseVipPerkRedeem";
     private const string UndoPerkPopupName = "Undo VIP perk redemption###PartyPulseUndoVipPerk";
 
@@ -45,8 +47,10 @@ public sealed class VipTabRenderer(Plugin plugin)
     private int packageYears;
     private bool packageLifetime;
     private long packageDiscordRoleId;
+    private long loadedPackageDiscordRoleId;
     private bool packageGrantedByServerBoost;
     private bool packageArchived;
+    private bool openDiscordRoleManagementPopup;
     private string settlementTargetName = string.Empty;
     private string settlementTargetWorld = string.Empty;
     private int editingPerkId;
@@ -1129,42 +1133,124 @@ public sealed class VipTabRenderer(Plugin plugin)
         ImGui.BeginDisabled(isBusy || !valid);
         if (ImGui.Button(editingPackageId == 0 ? "Create package" : "Save package"))
         {
-            long? discordRoleId = packageDiscordRoleId > 0
-                ? packageDiscordRoleId
-                : null;
-
-            if (editingPackageId == 0)
+            if (packageDiscordRoleId != loadedPackageDiscordRoleId)
             {
-                plugin.CreateVipPackage(
-                    venue,
-                    new CreateVipPackageRequest(
-                        packageName.Trim(),
-                        packagePriceGil,
-                        packageLifetime ? 0 : packageDays,
-                        packageLifetime ? 0 : packageMonths,
-                        packageLifetime ? 0 : packageYears,
-                        packageLifetime,
-                        discordRoleId,
-                        packageGrantedByServerBoost));
+                openDiscordRoleManagementPopup = true;
             }
             else
             {
-                plugin.UpdateVipPackage(
-                    venue,
-                    editingPackageId,
-                    new UpdateVipPackageRequest(
-                        packageName.Trim(),
-                        packagePriceGil,
-                        packageLifetime ? 0 : packageDays,
-                        packageLifetime ? 0 : packageMonths,
-                        packageLifetime ? 0 : packageYears,
-                        packageLifetime,
-                        discordRoleId,
-                        packageArchived,
-                        packageGrantedByServerBoost));
+                SavePackage(venue, confirmDiscordRoleManagement: false);
             }
         }
         ImGui.EndDisabled();
+
+        if (openDiscordRoleManagementPopup)
+        {
+            openDiscordRoleManagementPopup = false;
+            ImGui.OpenPopup(DiscordRoleManagementPopupName);
+        }
+
+        DrawDiscordRoleManagementConfirmation(venue, view, isBusy);
+    }
+
+    private void DrawDiscordRoleManagementConfirmation(
+        VenueConnectionConfiguration venue,
+        VipManagementViewResponse view,
+        bool isBusy)
+    {
+        if (!ImGui.BeginPopupModal(
+                DiscordRoleManagementPopupName,
+                ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            return;
+        }
+
+        var previousRole = view.DiscordRoles.FirstOrDefault(role =>
+            role.RoleId == loadedPackageDiscordRoleId);
+        var selectedRole = view.DiscordRoles.FirstOrDefault(role =>
+            role.RoleId == packageDiscordRoleId);
+        var previousName = loadedPackageDiscordRoleId == 0
+            ? "No Discord role"
+            : previousRole is null
+                ? "Unavailable role"
+                : DiscordChannelDisplayName.ToAsciiLetters(previousRole.Name);
+        var selectedName = packageDiscordRoleId == 0
+            ? "No Discord role"
+            : selectedRole is null
+                ? "Unavailable role"
+                : DiscordChannelDisplayName.ToAsciiLetters(selectedRole.Name);
+
+        ImGui.TextWrapped($"Discord role: {previousName} -> {selectedName}");
+        if (packageDiscordRoleId > 0)
+        {
+            ImGui.TextColored(
+                PartyPulseUi.Warning,
+                "PartyPulse will fully manage the selected role. On the next reconciliation, the bot removes it from every member without a matching active VIP subscription, including roles assigned manually in Discord.");
+        }
+        else
+        {
+            ImGui.TextColored(
+                PartyPulseUi.Warning,
+                "PartyPulse will remove assignments it previously managed for the old role, then stop treating that role as authoritative.");
+        }
+        ImGui.TextWrapped("Confirm only if this is the intended VIP role.");
+
+        ImGui.BeginDisabled(isBusy);
+        if (ImGui.Button("Confirm role change and save"))
+        {
+            SavePackage(venue, confirmDiscordRoleManagement: true);
+            ImGui.CloseCurrentPopup();
+        }
+        ImGui.EndDisabled();
+
+        ImGui.SameLine();
+        if (ImGui.Button("Cancel"))
+        {
+            ImGui.CloseCurrentPopup();
+        }
+
+        ImGui.EndPopup();
+    }
+
+    private void SavePackage(
+        VenueConnectionConfiguration venue,
+        bool confirmDiscordRoleManagement)
+    {
+        long? discordRoleId = packageDiscordRoleId > 0
+            ? packageDiscordRoleId
+            : null;
+
+        if (editingPackageId == 0)
+        {
+            plugin.CreateVipPackage(
+                venue,
+                new CreateVipPackageRequest(
+                    packageName.Trim(),
+                    packagePriceGil,
+                    packageLifetime ? 0 : packageDays,
+                    packageLifetime ? 0 : packageMonths,
+                    packageLifetime ? 0 : packageYears,
+                    packageLifetime,
+                    discordRoleId,
+                    packageGrantedByServerBoost,
+                    confirmDiscordRoleManagement));
+            return;
+        }
+
+        plugin.UpdateVipPackage(
+            venue,
+            editingPackageId,
+            new UpdateVipPackageRequest(
+                packageName.Trim(),
+                packagePriceGil,
+                packageLifetime ? 0 : packageDays,
+                packageLifetime ? 0 : packageMonths,
+                packageLifetime ? 0 : packageYears,
+                packageLifetime,
+                discordRoleId,
+                packageArchived,
+                packageGrantedByServerBoost,
+                confirmDiscordRoleManagement));
     }
     private void DrawDiscordRoleCombo(VipManagementViewResponse view, VenueConnectionConfiguration venue, bool isBusy)
     {
@@ -1215,6 +1301,9 @@ public sealed class VipTabRenderer(Plugin plugin)
                 PartyPulseUi.Warning,
                 "The saved role is no longer assignable. Select another role or clear it.");
         }
+
+        ImGui.TextDisabled(
+            "Configured VIP roles are fully managed by PartyPulse; manual assignments are removed during reconciliation.");
     
 
         var perkSnapshot = plugin.VipPerks.GetSnapshot(venue);
@@ -1693,6 +1782,7 @@ public sealed class VipTabRenderer(Plugin plugin)
         packageYears = 0;
         packageLifetime = false;
         packageDiscordRoleId = 0;
+        loadedPackageDiscordRoleId = 0;
         packageGrantedByServerBoost = false;
         packageArchived = false;
     }
@@ -1707,6 +1797,7 @@ public sealed class VipTabRenderer(Plugin plugin)
         packageYears = package.YearsGranted;
         packageLifetime = package.Lifetime;
         packageDiscordRoleId = package.DiscordRoleId ?? 0;
+        loadedPackageDiscordRoleId = package.DiscordRoleId ?? 0;
         packageGrantedByServerBoost = package.GrantedByServerBoost;
         packageArchived = package.IsArchived;
     }

@@ -17,8 +17,11 @@ public sealed class DiscordStatusTabRenderer(Plugin plugin)
     private bool dirty;
     private bool enabled;
     private long channelId;
+    private int preOpenMinutes = DiscordVenueStatusDefaults.PreOpenMinutes;
+    private string preOpenMessage = DiscordVenueStatusDefaults.PreOpenMessage;
     private string openMessage = DiscordVenueStatusDefaults.OpenMessage;
     private string closedMessage = DiscordVenueStatusDefaults.ClosedMessage;
+    private bool autoPublishAnnouncement;
 
     public void Draw(VenueConnectionConfiguration venue)
     {
@@ -29,7 +32,7 @@ public sealed class DiscordStatusTabRenderer(Plugin plugin)
 
         PartyPulseUi.PageHeader(
             "Discord Venue Status",
-            "Post the current opening to one Discord channel and keep that same message updated until the venue closes.");
+            "Post an upcoming or current opening to one Discord channel and keep that same message updated until the venue closes.");
 
         ImGui.BeginDisabled(isBusy);
         if (ImGui.Button("Refresh status"))
@@ -94,6 +97,23 @@ public sealed class DiscordStatusTabRenderer(Plugin plugin)
 
         DrawChannelCombo(postableChannels);
 
+        ImGui.SetNextItemWidth(160 * ImGuiHelpers.GlobalScale);
+        if (ImGui.InputInt("Post before opening (minutes)", ref preOpenMinutes))
+        {
+            dirty = true;
+        }
+        ImGui.TextDisabled("Use 0 to post when the opening starts; the maximum is 1440 minutes.");
+
+        ImGui.TextUnformatted("Pre-opening message");
+        if (ImGui.InputTextMultiline(
+                "##DiscordVenueStatusPreOpenMessage",
+                ref preOpenMessage,
+                2000,
+                new Vector2(0, 90 * ImGuiHelpers.GlobalScale)))
+        {
+            dirty = true;
+        }
+
         ImGui.TextUnformatted("Open message");
         if (ImGui.InputTextMultiline(
                 "##DiscordVenueStatusOpenMessage",
@@ -114,6 +134,14 @@ public sealed class DiscordStatusTabRenderer(Plugin plugin)
             dirty = true;
         }
 
+        if (ImGui.Checkbox(
+                "Automatically publish posts in announcement channels",
+                ref autoPublishAnnouncement))
+        {
+            dirty = true;
+        }
+        ImGui.TextDisabled("This has no effect for ordinary text channels.");
+
         ImGui.TextDisabled("Placeholders: <theme>, <title>, and <address>. Matching is case-insensitive.");
 
         var validationError = Validate(view, postableChannels);
@@ -130,8 +158,11 @@ public sealed class DiscordStatusTabRenderer(Plugin plugin)
             {
                 Enabled = enabled,
                 ChannelId = channelId > 0 ? channelId : null,
+                PreOpenMinutes = preOpenMinutes,
+                PreOpenMessage = preOpenMessage,
                 OpenMessage = openMessage,
                 ClosedMessage = closedMessage,
+                AutoPublishAnnouncement = autoPublishAnnouncement
             });
             dirty = false;
         }
@@ -148,6 +179,7 @@ public sealed class DiscordStatusTabRenderer(Plugin plugin)
         ImGui.SameLine();
         if (ImGui.Button("Use default messages"))
         {
+            preOpenMessage = DiscordVenueStatusDefaults.PreOpenMessage;
             openMessage = DiscordVenueStatusDefaults.OpenMessage;
             closedMessage = DiscordVenueStatusDefaults.ClosedMessage;
             dirty = true;
@@ -194,6 +226,16 @@ public sealed class DiscordStatusTabRenderer(Plugin plugin)
         DiscordManagementViewResponse view,
         System.Collections.Generic.IReadOnlyCollection<DiscordChannelSummary> postableChannels)
     {
+        if (preOpenMinutes is < 0 or > 1440)
+        {
+            return "Pre-opening minutes must be between 0 and 1440.";
+        }
+
+        if (string.IsNullOrWhiteSpace(preOpenMessage))
+        {
+            return "Enter a pre-opening message.";
+        }
+
         if (string.IsNullOrWhiteSpace(openMessage))
         {
             return "Enter an open message.";
@@ -222,12 +264,12 @@ public sealed class DiscordStatusTabRenderer(Plugin plugin)
         DiscordVenueStatusPublicationSummary? publication)
     {
         PartyPulseUi.SectionHeader(
-            "Current opening",
-            "The bot refreshes PartyPulse details about once per minute while the opening is active.");
+            "Current publication",
+            "The bot refreshes PartyPulse details about once per minute before and during the opening.");
 
         if (publication is null)
         {
-            ImGui.TextDisabled("No venue-status publication exists for an active opening.");
+            ImGui.TextDisabled("No venue-status publication exists for an upcoming or active opening.");
             return;
         }
 
@@ -290,8 +332,11 @@ public sealed class DiscordStatusTabRenderer(Plugin plugin)
         draftReceivedAt = receivedAt;
         enabled = settings.Enabled;
         channelId = settings.ChannelId ?? 0;
+        preOpenMinutes = settings.PreOpenMinutes;
+        preOpenMessage = settings.PreOpenMessage;
         openMessage = settings.OpenMessage;
         closedMessage = settings.ClosedMessage;
+        autoPublishAnnouncement = settings.AutoPublishAnnouncement;
         dirty = false;
     }
 }

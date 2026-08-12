@@ -501,6 +501,8 @@ public sealed class PartyPulseApiClient : IDisposable
             request,
             static payload =>
                 payload.UpdatedAt != default &&
+                payload.PreOpenMinutes is >= 0 and <= 1440 &&
+                !string.IsNullOrWhiteSpace(payload.PreOpenMessage) &&
                 !string.IsNullOrWhiteSpace(payload.OpenMessage) &&
                 !string.IsNullOrWhiteSpace(payload.ClosedMessage) &&
                 (!payload.Enabled || payload.ChannelId is > 0),
@@ -2650,6 +2652,8 @@ public sealed class PartyPulseApiClient : IDisposable
         payload.Roles is not null &&
         payload.Channels is not null &&
         payload.VenueStatus is { } venueStatus &&
+        venueStatus.PreOpenMinutes is >= 0 and <= 1440 &&
+        !string.IsNullOrWhiteSpace(venueStatus.PreOpenMessage) &&
         !string.IsNullOrWhiteSpace(venueStatus.OpenMessage) &&
         !string.IsNullOrWhiteSpace(venueStatus.ClosedMessage) &&
         (!venueStatus.Enabled || venueStatus.ChannelId is > 0) &&
@@ -2658,6 +2662,7 @@ public sealed class PartyPulseApiClient : IDisposable
           venueStatus.CurrentPublication.ChannelId > 0 &&
           !string.IsNullOrWhiteSpace(venueStatus.CurrentPublication.ChannelName) &&
           (venueStatus.CurrentPublication.PublicationState == DiscordVenueStatusPublicationStates.Pending ||
+           venueStatus.CurrentPublication.PublicationState == DiscordVenueStatusPublicationStates.PreOpen ||
            venueStatus.CurrentPublication.PublicationState == DiscordVenueStatusPublicationStates.Open ||
            venueStatus.CurrentPublication.PublicationState == DiscordVenueStatusPublicationStates.Closed))) &&
         (payload.Guild is null ||
