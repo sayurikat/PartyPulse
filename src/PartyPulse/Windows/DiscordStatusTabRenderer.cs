@@ -137,6 +137,8 @@ public sealed class DiscordStatusTabRenderer(Plugin plugin)
             dirty = true;
         }
 
+
+
         if (ImGui.Checkbox(
                 "Automatically publish posts in announcement channels",
                 ref autoPublishAnnouncement))
@@ -156,7 +158,7 @@ public sealed class DiscordStatusTabRenderer(Plugin plugin)
 
         DrawMentionRoles(view.Roles, view.Guild?.GuildId);
 
-        ImGui.TextDisabled("Placeholders: <theme>, <title>, and <address>. Matching is case-insensitive.");
+        ImGui.Spacing();
 
         var validationError = Validate(view, postableChannels);
         if (validationError is not null)
@@ -206,6 +208,9 @@ public sealed class DiscordStatusTabRenderer(Plugin plugin)
 
     private void DrawMentionRoles(IReadOnlyList<DiscordRoleSummary> roles, long? guildId)
     {
+        if (!ImGui.CollapsingHeader("Mention Roles"))
+            return;
+
         var availableRoles = roles
             .Where(role => !role.Managed && role.RoleId != guildId)
             .OrderByDescending(static role => role.Position)
