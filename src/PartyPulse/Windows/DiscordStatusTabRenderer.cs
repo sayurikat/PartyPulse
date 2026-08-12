@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
@@ -22,6 +23,8 @@ public sealed class DiscordStatusTabRenderer(Plugin plugin)
     private string openMessage = DiscordVenueStatusDefaults.OpenMessage;
     private string closedMessage = DiscordVenueStatusDefaults.ClosedMessage;
     private bool autoPublishAnnouncement;
+    private bool mentionEveryone;
+    private readonly HashSet<long> mentionRoleIds = [];
 
     public void Draw(VenueConnectionConfiguration venue)
     {
@@ -142,6 +145,17 @@ public sealed class DiscordStatusTabRenderer(Plugin plugin)
         }
         ImGui.TextDisabled("This has no effect for ordinary text channels.");
 
+        PartyPulseUi.SectionHeader(
+            "Notifications",
+            "Optionally notify @everyone and one or more Discord roles when the status post is first created.");
+
+        if (ImGui.Checkbox("Notify @everyone", ref mentionEveryone))
+        {
+            dirty = true;
+        }
+
+        DrawMentionRoles(view.Roles, view.Guild?.GuildId);
+
         ImGui.TextDisabled("Placeholders: <theme>, <title>, and <address>. Matching is case-insensitive.");
 
         var validationError = Validate(view, postableChannels);
@@ -162,7 +176,9 @@ public sealed class DiscordStatusTabRenderer(Plugin plugin)
                 PreOpenMessage = preOpenMessage,
                 OpenMessage = openMessage,
                 ClosedMessage = closedMessage,
-                AutoPublishAnnouncement = autoPublishAnnouncement
+                AutoPublishAnnouncement = autoPublishAnnouncement,
+                MentionEveryone = mentionEveryone,
+                MentionRoleIds = mentionRoleIds.OrderBy(static roleId => roleId).ToArray()
             });
             dirty = false;
         }
@@ -186,6 +202,59 @@ public sealed class DiscordStatusTabRenderer(Plugin plugin)
         }
 
         DrawCurrentPublication(venue, view.VenueStatus.CurrentPublication);
+    }
+
+    private void DrawMentionRoles(IReadOnlyList<DiscordRoleSummary> roles, long? guildId)
+    {
+        var availableRoles = roles
+            .Where(role => !role.Managed && role.RoleId != guildId)
+            .OrderByDescending(static role => role.Position)
+            .ThenBy(static role => role.Name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        ImGui.TextUnformatted("Roles to notify");
+        var availableRoleIds = availableRoles.Select(static role => role.RoleId).ToHashSet();
+        var unavailableSelectionCount = mentionRoleIds.Count(roleId => !availableRoleIds.Contains(roleId));
+        if (unavailableSelectionCount > 0)
+        {
+            ImGui.TextColored(
+                PartyPulseUi.Warning,
+                $"{unavailableSelectionCount} saved role selection(s) are no longer available.");
+        }
+
+        ImGui.BeginDisabled(mentionRoleIds.Count == 0);
+        if (ImGui.Button("Remove all role notifications"))
+        {
+            mentionRoleIds.Clear();
+            dirty = true;
+        }
+        ImGui.EndDisabled();
+
+        if (availableRoles.Length == 0)
+        {
+            ImGui.TextDisabled("No selectable Discord roles are available.");
+            return;
+        }
+
+        foreach (var role in availableRoles)
+        {
+            var selected = mentionRoleIds.Contains(role.RoleId);
+            var displayName = DiscordChannelDisplayName.ToAsciiLetters(role.Name);
+            if (ImGui.Checkbox($"{displayName}##DiscordStatusMentionRole{role.RoleId}", ref selected))
+            {
+                if (selected)
+                {
+                    mentionRoleIds.Add(role.RoleId);
+                }
+                else
+                {
+                    mentionRoleIds.Remove(role.RoleId);
+                }
+
+                dirty = true;
+            }
+        }
+
     }
 
     private void DrawChannelCombo(DiscordChannelSummary[] postableChannels)
@@ -337,6 +406,9 @@ public sealed class DiscordStatusTabRenderer(Plugin plugin)
         openMessage = settings.OpenMessage;
         closedMessage = settings.ClosedMessage;
         autoPublishAnnouncement = settings.AutoPublishAnnouncement;
+        mentionEveryone = settings.MentionEveryone;
+        mentionRoleIds.Clear();
+        mentionRoleIds.UnionWith(settings.MentionRoleIds);
         dirty = false;
     }
 }
