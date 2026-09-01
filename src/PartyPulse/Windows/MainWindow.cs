@@ -448,6 +448,12 @@ public sealed class MainWindow : Window, IDisposable
         var selectedVenue = DrawVenueSelector();
 
         ImGui.SameLine();
+        if (ImGui.Button("Mini"))
+        {
+            plugin.SwitchToMiniUi();
+        }
+
+        ImGui.SameLine();
         if (ImGui.Button("Settings"))
         {
             plugin.ToggleConfigUi();
@@ -587,85 +593,47 @@ public sealed class MainWindow : Window, IDisposable
 
         PartyPulseUi.PageHeader($"{item.Label} · {subtab.Label}", item.Description);
 
-        switch (activePage)
+        if (TryDrawManagedSubtab(
+                selectedVenue,
+                activePage,
+                subtab.Id,
+                requestedFinanceSettlementId))
         {
-            case MainPage.Overview:
-                DrawOverviewPage(selectedVenue);
-                break;
-            case MainPage.Openings:
+            if (activePage == MainPage.Openings &&
+                venueOpeningsTab.RequestedSubtab is { } requestedSubtab)
             {
-                venueOpeningsTab.Draw(selectedVenue!, subtab.Id);
-                if (venueOpeningsTab.RequestedSubtab is { } requestedSubtab)
-                {
-                    navigationState.Select(profileId, MainPage.Openings, requestedSubtab);
-                }
-                break;
+                navigationState.Select(profileId, MainPage.Openings, requestedSubtab);
             }
-            case MainPage.Djs:
-                djsTab.Draw(selectedVenue!, subtab.Id);
-                break;
-            case MainPage.Greeter:
-                greeterTab.Draw(selectedVenue!, subtab.Id);
-                break;
-            case MainPage.Vip:
-                vipTab.Draw(selectedVenue!, subtab.Id);
-                break;
-            case MainPage.Photoshoots:
-                photoshootsTab.Draw(selectedVenue!, subtab.Id);
-                break;
-            case MainPage.Bar:
-                barTab.Draw(selectedVenue!, subtab.Id);
-                break;
-            case MainPage.Court:
-                courtTab.Draw(selectedVenue!, subtab.Id);
-                break;
-            case MainPage.OtherSales:
-                otherSalesTab.Draw(selectedVenue!, subtab.Id);
-                break;
-            case MainPage.OtherGames:
-                otherGamesTab.Draw(selectedVenue!, subtab.Id);
-                break;
-            case MainPage.Purchases:
-                purchasesTab.Draw(selectedVenue!, subtab.Id);
-                break;
-            case MainPage.Staff:
-                staffTab.Draw(selectedVenue!, subtab.Id);
-                break;
-            case MainPage.TimedMacros:
-                timedMacrosTab.Draw(selectedVenue!, subtab.Id);
-                break;
-            case MainPage.Giveaways:
-                giveawaysTab.Draw(selectedVenue!, subtab.Id);
-                break;
-            case MainPage.DiscordStatus:
-                discordStatusTab.Draw(selectedVenue!, subtab.Id);
-                break;
-            case MainPage.Shoutrunner:
-                shoutrunnerTab.Draw(selectedVenue!, subtab.Id);
-                break;
-            case MainPage.PartyFinder:
-                partyFinderTab.Draw(selectedVenue!, subtab.Id);
-                break;
-            case MainPage.Finance:
-                financeTab.Draw(selectedVenue!, subtab.Id, requestedFinanceSettlementId);
+
+            if (activePage == MainPage.Finance)
+            {
                 requestedFinanceSettlementId = null;
-                break;
-            case MainPage.Users:
-            {
-                var snapshot = plugin.UserManagement.GetSnapshot(selectedVenue!);
-                if (snapshot.View?.Capabilities.CanView == true)
-                {
-                    DrawUsersPage(selectedVenue!, snapshot, subtab.Id);
-                }
-                else
-                {
-                    ImGui.TextWrapped(snapshot.Message);
-                }
-                break;
             }
-            case MainPage.MyAccount:
-                DrawMyAccountPage(selectedVenue!, subtab.Id);
-                break;
+        }
+        else
+        {
+            switch (activePage)
+            {
+                case MainPage.Overview:
+                    DrawOverviewPage(selectedVenue);
+                    break;
+                case MainPage.Users:
+                {
+                    var snapshot = plugin.UserManagement.GetSnapshot(selectedVenue!);
+                    if (snapshot.View?.Capabilities.CanView == true)
+                    {
+                        DrawUsersPage(selectedVenue!, snapshot, subtab.Id);
+                    }
+                    else
+                    {
+                        ImGui.TextWrapped(snapshot.Message);
+                    }
+                    break;
+                }
+                case MainPage.MyAccount:
+                    DrawMyAccountPage(selectedVenue!, subtab.Id);
+                    break;
+            }
         }
 
         ImGui.EndChild();
@@ -676,6 +644,90 @@ public sealed class MainWindow : Window, IDisposable
             refreshDeferral.Observe(ImGui.GetIO().WantTextInput, now);
             RunActivePageAutoRefresh(selectedVenue!, activePage);
         }
+    }
+
+    private bool TryDrawManagedSubtab(
+        VenueConnectionConfiguration? venue,
+        MainPage page,
+        MainSubtab subtab,
+        long? financeSettlementId)
+    {
+        if (venue is null)
+        {
+            return false;
+        }
+
+        switch (page)
+        {
+            case MainPage.Openings:
+                venueOpeningsTab.Draw(venue, subtab);
+                break;
+            case MainPage.Djs:
+                djsTab.Draw(venue, subtab);
+                break;
+            case MainPage.Greeter:
+                greeterTab.Draw(venue, subtab);
+                break;
+            case MainPage.Vip:
+                vipTab.Draw(venue, subtab);
+                break;
+            case MainPage.Photoshoots:
+                photoshootsTab.Draw(venue, subtab);
+                break;
+            case MainPage.Bar:
+                barTab.Draw(venue, subtab);
+                break;
+            case MainPage.Court:
+                courtTab.Draw(venue, subtab);
+                break;
+            case MainPage.OtherSales:
+                otherSalesTab.Draw(venue, subtab);
+                break;
+            case MainPage.OtherGames:
+                otherGamesTab.Draw(venue, subtab);
+                break;
+            case MainPage.Purchases:
+                purchasesTab.Draw(venue, subtab);
+                break;
+            case MainPage.Staff:
+                staffTab.Draw(venue, subtab);
+                break;
+            case MainPage.TimedMacros:
+                timedMacrosTab.Draw(venue, subtab);
+                break;
+            case MainPage.Giveaways:
+                giveawaysTab.Draw(venue, subtab);
+                break;
+            case MainPage.DiscordStatus:
+                discordStatusTab.Draw(venue, subtab);
+                break;
+            case MainPage.Shoutrunner:
+                shoutrunnerTab.Draw(venue, subtab);
+                break;
+            case MainPage.PartyFinder:
+                partyFinderTab.Draw(venue, subtab);
+                break;
+            case MainPage.Finance:
+                financeTab.Draw(venue, subtab, financeSettlementId);
+                break;
+            default:
+                return false;
+        }
+
+        return true;
+    }
+
+    internal void DrawMiniSubtab(
+        VenueConnectionConfiguration venue,
+        MiniTabDefinition definition)
+    {
+        refreshDeferral.Observe(ImGui.GetIO().WantTextInput, DateTimeOffset.UtcNow);
+        if (!TryDrawManagedSubtab(venue, definition.Page, definition.Subtab, null))
+        {
+            throw new InvalidOperationException($"Mini tab {definition.Id} does not map to a shared renderer.");
+        }
+
+        RunActivePageAutoRefresh(venue, definition.Page);
     }
 
     private void RunActivePageAutoRefresh(
@@ -829,6 +881,21 @@ public sealed class MainWindow : Window, IDisposable
             navigationAccess.MarkResolved(venue.ProfileId);
         }
     }
+
+    internal bool PrepareMiniAccess(VenueConnectionConfiguration venue)
+    {
+        var authentication = venue.IsRegistered
+            ? plugin.Authentication.GetSnapshot(venue)
+            : null;
+        var authenticated = authentication is not null && CanDrawAuthenticatedFeatures(authentication);
+        PrepareNavigationAccess(venue, authentication, authenticated);
+        return authenticated && navigationAccess.IsResolved(venue.ProfileId);
+    }
+
+    internal bool IsMiniSubtabAvailable(
+        VenueConnectionConfiguration venue,
+        MainSubtab subtab) =>
+        navigationAccess.IsResolved(venue.ProfileId) && IsSubtabVisible(subtab, venue);
 
     private void RefreshRemainingNavigationAccess(VenueConnectionConfiguration venue)
     {

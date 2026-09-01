@@ -113,4 +113,40 @@ internal static class PartyPulseUi
 
         return clicked;
     }
+
+    public static bool MiniTabButton(string label, string id, bool selected)
+    {
+        var start = ImGui.GetCursorScreenPos();
+        var size = new Vector2(
+            ImGui.CalcTextSize(label).X + (18f * ImGuiHelpers.GlobalScale),
+            27f * ImGuiHelpers.GlobalScale);
+
+        ImGui.PushStyleVar(ImGuiStyleVar.FrameRounding, 3f * ImGuiHelpers.GlobalScale);
+        ImGui.PushStyleColor(
+            ImGuiCol.Text,
+            selected ? new Vector4(0.97f, 0.94f, 1f, 1f) : Muted);
+        ImGui.PushStyleColor(
+            ImGuiCol.Button,
+            selected
+                ? new Vector4(0.34f, 0.23f, 0.43f, 0.95f)
+                : new Vector4(0.12f, 0.12f, 0.14f, 0.72f));
+        ImGui.PushStyleColor(ImGuiCol.ButtonHovered, new Vector4(0.39f, 0.30f, 0.47f, 0.95f));
+        ImGui.PushStyleColor(ImGuiCol.ButtonActive, new Vector4(0.46f, 0.34f, 0.56f, 1f));
+
+        var clicked = ImGui.Button($"{label}##PartyPulseMiniTab{id}", size);
+
+        ImGui.PopStyleColor(4);
+        ImGui.PopStyleVar();
+
+        if (selected)
+        {
+            var accentHeight = 2f * ImGuiHelpers.GlobalScale;
+            ImGui.GetWindowDrawList().AddRectFilled(
+                new Vector2(start.X + (3f * ImGuiHelpers.GlobalScale), start.Y + size.Y - accentHeight),
+                new Vector2(start.X + size.X - (3f * ImGuiHelpers.GlobalScale), start.Y + size.Y),
+                ImGui.GetColorU32(Accent));
+        }
+
+        return clicked;
+    }
 }

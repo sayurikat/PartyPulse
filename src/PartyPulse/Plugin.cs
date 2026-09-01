@@ -62,6 +62,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly PartyPulseApiClient apiClient;
     private readonly ConfigWindow configWindow;
     private readonly MainWindow mainWindow;
+    private readonly MiniWindow miniWindow;
     private readonly VenueUserEditWindow venueUserEditWindow;
     private readonly VipPlayerEditWindow vipPlayerEditWindow;
     private readonly StaffLifecycleWindow staffLifecycleWindow;
@@ -205,6 +206,7 @@ public sealed class Plugin : IDalamudPlugin
 
         configWindow = new ConfigWindow(this);
         mainWindow = new MainWindow(this);
+        miniWindow = new MiniWindow(this, mainWindow);
         venueUserEditWindow = new VenueUserEditWindow(this);
         vipPlayerEditWindow = new VipPlayerEditWindow(this);
         staffLifecycleWindow = new StaffLifecycleWindow(this);
@@ -212,6 +214,7 @@ public sealed class Plugin : IDalamudPlugin
         notificationToastWindow = new NotificationToastWindow(this);
         WindowSystem.AddWindow(configWindow);
         WindowSystem.AddWindow(mainWindow);
+        WindowSystem.AddWindow(miniWindow);
         WindowSystem.AddWindow(venueUserEditWindow);
         WindowSystem.AddWindow(vipPlayerEditWindow);
         WindowSystem.AddWindow(staffLifecycleWindow);
@@ -321,6 +324,7 @@ public sealed class Plugin : IDalamudPlugin
         WindowSystem.RemoveAllWindows();
         configWindow.Dispose();
         mainWindow.Dispose();
+        miniWindow.Dispose();
         venueUserEditWindow.Dispose();
         vipPlayerEditWindow.Dispose();
         staffLifecycleWindow.Dispose();
@@ -357,7 +361,28 @@ public sealed class Plugin : IDalamudPlugin
 
     public void ToggleConfigUi() => configWindow.Toggle();
 
-    public void ToggleMainUi() => mainWindow.Toggle();
+    public void ToggleMainUi()
+    {
+        mainWindow.Toggle();
+        if (mainWindow.IsOpen)
+        {
+            miniWindow.IsOpen = false;
+        }
+    }
+
+    public void OpenConfigUi() => configWindow.IsOpen = true;
+
+    public void SwitchToMiniUi()
+    {
+        miniWindow.IsOpen = true;
+        mainWindow.IsOpen = false;
+    }
+
+    public void SwitchToMainUi()
+    {
+        mainWindow.IsOpen = true;
+        miniWindow.IsOpen = false;
+    }
 
     public void AddVenueByCode(string venueCode) =>
         Observe(

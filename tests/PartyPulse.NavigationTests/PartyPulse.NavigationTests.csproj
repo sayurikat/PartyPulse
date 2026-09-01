@@ -9,5 +9,7 @@
   <ItemGroup>
     <Compile Include="..\..\src\PartyPulse\Windows\MainWindowNavigation.cs"
              Link="MainWindowNavigation.cs" />
+    <Compile Include="..\..\src\PartyPulse\Windows\MiniWindowNavigation.cs"
+             Link="MiniWindowNavigation.cs" />
   </ItemGroup>
 </Project>

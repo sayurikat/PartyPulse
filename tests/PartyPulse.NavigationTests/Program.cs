@@ -23,6 +23,13 @@ internal static class Program
             VisibilityCacheCanBeClearedForReauthentication,
             AccessLoadRunsOncePerAuthenticationSession,
             RefreshDeferralIsCappedAndResets,
+            MiniTabCatalogMatchesRequestedOperations,
+            MiniTabOrderAppendsMissingDefinitions,
+            MiniTabMoveUsesPermittedNeighbors,
+            TargetBlockedMiniTabRestoresAutomatically,
+            SelectingAnotherMiniTabCancelsTargetRestore,
+            PermissionLossFallsBackWithoutTargetPlaceholder,
+            DefaultMiniTabsUseTwoRows,
         };
 
         foreach (var test in tests)
@@ -155,6 +162,133 @@ internal static class Program
         state.Observe(false, startedAt.AddMinutes(2));
         state.Observe(true, startedAt.AddMinutes(3));
         True(state.ShouldDefer(startedAt.AddMinutes(3).AddSeconds(1)), nameof(RefreshDeferralIsCappedAndResets));
+    }
+
+    private static void MiniTabOrderAppendsMissingDefinitions()
+    {
+        var ordered = MiniTabCatalog.ResolveOrder(
+            [MiniTabId.Vip.ToString(), "Unknown", MiniTabId.Dj.ToString(), MiniTabId.Vip.ToString()]);
+
+        Equal(MiniTabId.Vip, ordered[0].Id, nameof(MiniTabOrderAppendsMissingDefinitions));
+        Equal(MiniTabId.Dj, ordered[1].Id, nameof(MiniTabOrderAppendsMissingDefinitions));
+        Equal(MiniTabCatalog.Features.Length, ordered.Count, nameof(MiniTabOrderAppendsMissingDefinitions));
+        Equal(
+            MiniTabCatalog.Features.Length,
+            ordered.Select(static definition => definition.Id).Distinct().Count(),
+            nameof(MiniTabOrderAppendsMissingDefinitions));
+    }
+
+    private static void MiniTabCatalogMatchesRequestedOperations()
+    {
+        AssertMini(MiniTabId.Dj, "DJ", MainPage.Djs, MainSubtab.DjsPayments, MiniTabCondition.LinkedDjTarget);
+        AssertMini(MiniTabId.Greet, "Greet", MainPage.Greeter, MainSubtab.GreeterArrivals, MiniTabCondition.None);
+        AssertMini(MiniTabId.Vip, "VIP", MainPage.Vip, MainSubtab.VipSales, MiniTabCondition.AnyTarget);
+        AssertMini(MiniTabId.Photo, "Photo", MainPage.Photoshoots, MainSubtab.PhotoshootsSales, MiniTabCondition.AnyTarget);
+        AssertMini(MiniTabId.BarBuyout, "Bar Buyout", MainPage.Bar, MainSubtab.BarBuyouts, MiniTabCondition.AnyTarget);
+        AssertMini(MiniTabId.GambaShot, "Gamba Shot", MainPage.Bar, MainSubtab.BarGamba, MiniTabCondition.AnyTarget);
+        AssertMini(MiniTabId.Court, "Court", MainPage.Court, MainSubtab.CourtSales, MiniTabCondition.AnyTarget);
+        AssertMini(MiniTabId.PayCourt, "Pay Court", MainPage.Court, MainSubtab.CourtSettlements, MiniTabCondition.LinkedStaffTarget);
+        AssertMini(MiniTabId.Accountant, "Accountant", MainPage.Court, MainSubtab.CourtAccountants, MiniTabCondition.CourtAccountantTarget);
+        AssertMini(MiniTabId.OtherSales, "Other Sales", MainPage.OtherSales, MainSubtab.OtherSalesSell, MiniTabCondition.AnyTarget);
+        AssertMini(MiniTabId.OtherGames, "Other Games", MainPage.OtherGames, MainSubtab.OtherGamesSell, MiniTabCondition.AnyTarget);
+        AssertMini(MiniTabId.NewPurchase, "New Purchase", MainPage.Purchases, MainSubtab.PurchasesCreate, MiniTabCondition.None);
+        AssertMini(MiniTabId.PayStaff, "Pay Staff", MainPage.Staff, MainSubtab.StaffPayouts, MiniTabCondition.LinkedStaffTarget);
+        AssertMini(MiniTabId.Settlements, "Settlements", MainPage.Finance, MainSubtab.FinanceSettlements, MiniTabCondition.PendingSettlement);
+        Equal(14, MiniTabCatalog.Features.Length, nameof(MiniTabCatalogMatchesRequestedOperations));
+    }
+
+    private static void MiniTabMoveUsesPermittedNeighbors()
+    {
+        var permitted = new HashSet<MiniTabId>
+        {
+            MiniTabId.Greet,
+            MiniTabId.Photo,
+        };
+
+        var moved = MiniTabCatalog.Move([], MiniTabId.Photo, -1, permitted);
+        var ordered = MiniTabCatalog.ResolveOrder(moved);
+        var permittedOrder = ordered
+            .Where(definition => permitted.Contains(definition.Id))
+            .Select(static definition => definition.Id)
+            .ToArray();
+
+        Equal(MiniTabId.Photo, permittedOrder[0], nameof(MiniTabMoveUsesPermittedNeighbors));
+        Equal(MiniTabId.Greet, permittedOrder[1], nameof(MiniTabMoveUsesPermittedNeighbors));
+    }
+
+    private static void TargetBlockedMiniTabRestoresAutomatically()
+    {
+        var state = new MiniWindowSelectionState();
+        var configured = new HashSet<MiniTabId> { MiniTabId.Vip, MiniTabId.Greet };
+        state.Select(MiniTabId.Vip);
+
+        var blocked = state.Resolve(
+            [MiniTabCatalog.Get(MiniTabId.Greet)],
+            configured,
+            new HashSet<MiniTabId> { MiniTabId.Vip });
+        var restored = state.Resolve(
+            [MiniTabCatalog.Get(MiniTabId.Vip), MiniTabCatalog.Get(MiniTabId.Greet)],
+            configured,
+            new HashSet<MiniTabId>());
+
+        Equal(MiniTabId.Vip, blocked.SelectedTab, nameof(TargetBlockedMiniTabRestoresAutomatically));
+        True(blocked.MissingTargetTab is not null, nameof(TargetBlockedMiniTabRestoresAutomatically));
+        Equal(MiniTabId.Vip, blocked.MissingTargetTab!.Id, nameof(TargetBlockedMiniTabRestoresAutomatically));
+        Equal(MiniTabId.Vip, restored.SelectedTab, nameof(TargetBlockedMiniTabRestoresAutomatically));
+        True(restored.MissingTargetTab is null, nameof(TargetBlockedMiniTabRestoresAutomatically));
+    }
+
+    private static void SelectingAnotherMiniTabCancelsTargetRestore()
+    {
+        var state = new MiniWindowSelectionState();
+        var configured = new HashSet<MiniTabId> { MiniTabId.Vip, MiniTabId.Greet };
+        state.Select(MiniTabId.Vip);
+        state.Resolve(
+            [MiniTabCatalog.Get(MiniTabId.Greet)],
+            configured,
+            new HashSet<MiniTabId> { MiniTabId.Vip });
+
+        state.Select(MiniTabId.Greet);
+        var selected = state.Resolve(
+            [MiniTabCatalog.Get(MiniTabId.Vip), MiniTabCatalog.Get(MiniTabId.Greet)],
+            configured,
+            new HashSet<MiniTabId>());
+
+        Equal(MiniTabId.Greet, selected.SelectedTab, nameof(SelectingAnotherMiniTabCancelsTargetRestore));
+    }
+
+    private static void PermissionLossFallsBackWithoutTargetPlaceholder()
+    {
+        var state = new MiniWindowSelectionState();
+        state.Select(MiniTabId.Vip);
+
+        var selected = state.Resolve(
+            [MiniTabCatalog.Get(MiniTabId.Greet)],
+            new HashSet<MiniTabId> { MiniTabId.Greet },
+            new HashSet<MiniTabId>());
+
+        Equal(MiniTabId.Greet, selected.SelectedTab, nameof(PermissionLossFallsBackWithoutTargetPlaceholder));
+        True(selected.MissingTargetTab is null, nameof(PermissionLossFallsBackWithoutTargetPlaceholder));
+    }
+
+    private static void DefaultMiniTabsUseTwoRows()
+    {
+        var tabCount = MiniTabCatalog.Features.Length + 1;
+        Equal(2, MiniTabCatalog.GetRowCount(tabCount), nameof(DefaultMiniTabsUseTwoRows));
+    }
+
+    private static void AssertMini(
+        MiniTabId id,
+        string label,
+        MainPage page,
+        MainSubtab subtab,
+        MiniTabCondition condition)
+    {
+        var definition = MiniTabCatalog.Get(id);
+        Equal(label, definition.Label, nameof(MiniTabCatalogMatchesRequestedOperations));
+        Equal(page, definition.Page, nameof(MiniTabCatalogMatchesRequestedOperations));
+        Equal(subtab, definition.Subtab, nameof(MiniTabCatalogMatchesRequestedOperations));
+        Equal(condition, definition.Condition, nameof(MiniTabCatalogMatchesRequestedOperations));
     }
 
     private static void Equal<T>(T expected, T actual, string testName)

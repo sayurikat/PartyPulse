@@ -14,13 +14,17 @@ public sealed class Configuration : IPluginConfiguration
 
     private const string LegacyAzureApiBaseUrl = "https://partypulse.azurewebsites.net";
 
-    public int Version { get; set; } = 7;
+    public int Version { get; set; } = 8;
 
     public bool IsConfigWindowMovable { get; set; } = true;
 
     public bool AutoConnect { get; set; } = true;
 
     public bool NavigationCollapsed { get; set; }
+
+    public List<string> MiniTabOrder { get; set; } = [];
+
+    public List<string> HiddenMiniTabs { get; set; } = [];
 
     public int PartyFinderRefreshMinutes { get; set; } = 60;
 
@@ -91,6 +95,20 @@ public sealed class Configuration : IPluginConfiguration
         if (ShoutrunnerProfiles is null)
         {
             ShoutrunnerProfiles = [];
+            changed = true;
+        }
+
+        var normalizedMiniTabOrder = NormalizeLocalStringList(MiniTabOrder);
+        if (MiniTabOrder is null || !MiniTabOrder.SequenceEqual(normalizedMiniTabOrder, StringComparer.Ordinal))
+        {
+            MiniTabOrder = normalizedMiniTabOrder;
+            changed = true;
+        }
+
+        var normalizedHiddenMiniTabs = NormalizeLocalStringList(HiddenMiniTabs);
+        if (HiddenMiniTabs is null || !HiddenMiniTabs.SequenceEqual(normalizedHiddenMiniTabs, StringComparer.Ordinal))
+        {
+            HiddenMiniTabs = normalizedHiddenMiniTabs;
             changed = true;
         }
 
@@ -190,9 +208,9 @@ public sealed class Configuration : IPluginConfiguration
             }
         }
 
-        if (Version < 7)
+        if (Version < 8)
         {
-            Version = 7;
+            Version = 8;
             changed = true;
         }
 
@@ -216,6 +234,14 @@ public sealed class Configuration : IPluginConfiguration
 
     private static string? NormalizeOptional(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static List<string> NormalizeLocalStringList(IEnumerable<string>? values) =>
+        values?
+            .Select(static value => value?.Trim())
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .Select(static value => value!)
+            .Distinct(StringComparer.Ordinal)
+            .ToList() ?? [];
 
     public void Save() => Plugin.PluginInterface.SavePluginConfig(this);
 }
