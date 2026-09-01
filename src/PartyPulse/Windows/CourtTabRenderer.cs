@@ -49,7 +49,7 @@ public sealed class CourtTabRenderer(Plugin plugin)
     private bool openCancelTransactionPopup;
     private string cancelReason = string.Empty;
 
-    public void Draw(VenueConnectionConfiguration venue)
+    public void Draw(VenueConnectionConfiguration venue, MainSubtab subtab)
     {
         ResetForVenue(venue);
         plugin.EnsureCourtLoaded(venue);
@@ -58,8 +58,6 @@ public sealed class CourtTabRenderer(Plugin plugin)
 
         var snapshot = plugin.Court.GetSnapshot(venue);
         var busy = plugin.Court.IsBusy(venue.ProfileId);
-
-        PartyPulseUi.PageHeader("Court Services", "Sell court services, manage offers and commission, and settle worker balances.");
 
         ImGui.BeginDisabled(busy);
         if (ImGui.Button("Refresh Court Services"))
@@ -76,52 +74,45 @@ public sealed class CourtTabRenderer(Plugin plugin)
 
         var view = snapshot.View;
         SyncCommissionEditor(view);
-        DrawCourtTimedMacro(venue);
-
-        var personalNetGil =
-            (decimal)view.PersonalUnsettledCourtGil +
-            view.PersonalAdjustmentGil -
-            view.PersonalUnpaidSalaryGil;
-        ImGui.SameLine();
-        ImGui.TextDisabled(
-            $"Unsettled Court sales: {view.PersonalUnsettledCourtGil:N0} | " +
-            $"corrections: {view.PersonalAdjustmentGil:+#,0;-#,0;0} | " +
-            $"unpaid salary: {view.PersonalUnpaidSalaryGil:N0} | " +
-            $"net: {personalNetGil:+#,0;-#,0;0} gil");
-
-        if (view.Capabilities.CanSell)
+        switch (subtab)
         {
-            DrawSale(venue, view, busy);
+            case MainSubtab.CourtSales when view.Capabilities.CanSell:
+            {
+                DrawCourtTimedMacro(venue);
+                var personalNetGil =
+                    (decimal)view.PersonalUnsettledCourtGil +
+                    view.PersonalAdjustmentGil -
+                    view.PersonalUnpaidSalaryGil;
+                ImGui.TextDisabled(
+                    $"Unsettled Court sales: {view.PersonalUnsettledCourtGil:N0} | " +
+                    $"corrections: {view.PersonalAdjustmentGil:+#,0;-#,0;0} | " +
+                    $"unpaid salary: {view.PersonalUnpaidSalaryGil:N0} | " +
+                    $"net: {personalNetGil:+#,0;-#,0;0} gil");
+                DrawSale(venue, view, busy);
+                break;
+            }
+            case MainSubtab.CourtSettlements
+                when view.Capabilities.CanFinance || view.Capabilities.CanAccount:
+                DrawUnsettledCourtStaff(venue, view);
+                DrawSettlement(venue, view, busy);
+                break;
+            case MainSubtab.CourtCommission when view.Capabilities.CanManageCommission:
+                DrawCommissionSettings(venue, busy);
+                break;
+            case MainSubtab.CourtOffers when view.Capabilities.CanManage:
+                DrawOfferManagement(venue, view, busy);
+                break;
+            case MainSubtab.CourtAccountants
+                when view.Capabilities.CanFinance || view.Capabilities.CanAccount:
+                DrawAccountants(venue, view, busy);
+                break;
+            case MainSubtab.CourtTransactions:
+                DrawTransactions(venue, view, busy);
+                break;
+            case MainSubtab.CourtSalesHistory:
+                DrawSales(venue, view, busy);
+                break;
         }
-
-        if (view.Capabilities.CanFinance || view.Capabilities.CanAccount)
-        {
-            DrawUnsettledCourtStaff(venue, view);
-            DrawSettlement(venue, view, busy);
-        }
-
-        if (view.Capabilities.CanManageCommission)
-        {
-            ImGui.Separator();
-            DrawCommissionSettings(venue, busy);
-        }
-
-        if (view.Capabilities.CanManage)
-        {
-            ImGui.Separator();
-            DrawOfferManagement(venue, view, busy);
-        }
-
-        if (view.Capabilities.CanFinance || view.Capabilities.CanAccount)
-        {
-            ImGui.Separator();
-            DrawAccountants(venue, view, busy);
-        }
-
-        ImGui.Separator();
-        DrawTransactions(venue, view, busy);
-        ImGui.Separator();
-        DrawSales(venue, view, busy);
 
         OpenQueuedPopups();
         DrawSaleCancellationPopup(venue, busy);
@@ -207,13 +198,6 @@ public sealed class CourtTabRenderer(Plugin plugin)
         VenueConnectionConfiguration venue,
         CourtManagementViewResponse view)
     {
-        if (!ImGui.CollapsingHeader(
-                "Unsettled Courts",
-                ImGuiTreeNodeFlags.DefaultOpen))
-        {
-            return;
-        }
-
         var rows = view.UnsettledStaff
             .OrderByDescending(static row => row.RequiresSettlement)
             .ThenByDescending(static row => row.OpenTimeEntryCount)
@@ -331,9 +315,6 @@ public sealed class CourtTabRenderer(Plugin plugin)
         VenueConnectionConfiguration venue,
         bool busy)
     {
-        if (!ImGui.CollapsingHeader("Court worker retained percentage"))
-            return;
-
         ImGui.TextWrapped(
             "This percentage is retained by the Court worker from gil sales. " +
             "Each sale snapshots the percentage, so changing it does not rewrite existing sales.");
@@ -365,11 +346,6 @@ public sealed class CourtTabRenderer(Plugin plugin)
         CourtManagementViewResponse view,
         bool busy)
     {
-        if (!ImGui.CollapsingHeader("Sell Court Service", ImGuiTreeNodeFlags.DefaultOpen))
-        {
-            return;
-        }
-
         var offers = view.Offers
             .Where(offer => offer.ArchivedAt is null)
             .OrderBy(offer => offer.Name)
@@ -568,13 +544,6 @@ public sealed class CourtTabRenderer(Plugin plugin)
         CourtManagementViewResponse view,
         bool busy)
     {
-        if (!ImGui.CollapsingHeader(
-                "Create Court settlement for target",
-                ImGuiTreeNodeFlags.DefaultOpen))
-        {
-            return;
-        }
-
         var canFinance = view.Capabilities.CanFinance;
         var canAccount = view.Capabilities.CanAccount;
         if (canFinance && canAccount)
@@ -687,11 +656,6 @@ public sealed class CourtTabRenderer(Plugin plugin)
         CourtManagementViewResponse view,
         bool busy)
     {
-        if (!ImGui.CollapsingHeader("Court Service offers"))
-        {
-            return;
-        }
-
         var perks = plugin.VipPerks.GetSnapshot(venue).View?.Perks
             .Where(perk => perk.ArchivedAt is null)
             .OrderBy(perk => perk.Name)
@@ -800,11 +764,6 @@ public sealed class CourtTabRenderer(Plugin plugin)
         CourtManagementViewResponse view,
         bool busy)
     {
-        if (!ImGui.CollapsingHeader("Court Accountant balances"))
-        {
-            return;
-        }
-
         foreach (var account in view.AccountantAccounts)
         {
             ImGui.TextUnformatted(
@@ -895,13 +854,6 @@ public sealed class CourtTabRenderer(Plugin plugin)
         CourtManagementViewResponse view,
         bool busy)
     {
-        if (!ImGui.CollapsingHeader(
-                "Court financial transactions",
-                ImGuiTreeNodeFlags.DefaultOpen))
-        {
-            return;
-        }
-
         foreach (var transaction in view.Transactions.Take(100))
         {
             ImGui.PushID($"court-tx-{transaction.TransactionId}");
@@ -981,11 +933,6 @@ public sealed class CourtTabRenderer(Plugin plugin)
         CourtManagementViewResponse view,
         bool busy)
     {
-        if (!ImGui.CollapsingHeader("Recent Court Service sales"))
-        {
-            return;
-        }
-
         foreach (var sale in view.Sales.Take(100))
         {
             ImGui.PushID($"court-sale-{sale.SaleId}");

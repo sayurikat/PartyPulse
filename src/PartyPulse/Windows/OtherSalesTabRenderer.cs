@@ -51,15 +51,13 @@ public sealed class OtherSalesTabRenderer(Plugin plugin)
     private string cancelReason = string.Empty;
     private bool openCancelPopup;
 
-    public void Draw(VenueConnectionConfiguration venue)
+    public void Draw(VenueConnectionConfiguration venue, MainSubtab subtab)
     {
 
         ResetForVenue(venue);
         plugin.EnsureOtherSalesLoaded(venue);
         var snapshot = plugin.OtherSales.GetSnapshot(venue);
         var busy = plugin.OtherSales.IsBusy(venue.ProfileId) || plugin.Finance.IsBusy(venue.ProfileId);
-
-        PartyPulseUi.PageHeader("Other Sales", "Sell configurable venue items, track seller shares, and settle collected venue revenue.");
 
         ImGui.BeginDisabled(busy);
         if (ImGui.Button("Refresh Other Sales")) plugin.RefreshOtherSales(venue);
@@ -72,9 +70,8 @@ public sealed class OtherSalesTabRenderer(Plugin plugin)
         }
 
         var view = snapshot.View;
-        if (view.Capabilities.CanSell)
+        if (subtab == MainSubtab.OtherSalesSell && view.Capabilities.CanSell)
         {
-            ImGui.SameLine();
             ImGui.TextDisabled(
                 $"Unsettled collected: {view.PersonalGrossGil:N0} gil | Keep: {view.PersonalSellerShareGil:N0} gil | " +
                 $"Available for venue: {view.PersonalAvailableGil:N0} gil" +
@@ -82,15 +79,14 @@ public sealed class OtherSalesTabRenderer(Plugin plugin)
             DrawSeller(venue, view, busy);
             DrawSettlement(venue, view, busy);
         }
-
-        if (view.Capabilities.CanManageItems)
+        else if (subtab == MainSubtab.OtherSalesCatalog && view.Capabilities.CanManageItems)
         {
-            ImGui.Separator();
             DrawItemManagement(venue, view, busy);
         }
-
-        ImGui.Separator();
-        DrawHistory(venue, view, busy);
+        else if (subtab == MainSubtab.OtherSalesHistory)
+        {
+            DrawHistory(venue, view, busy);
+        }
         QueuePopups();
         DrawSaleConfirmation(venue, view);
         DrawPaymentConfirmation(venue);

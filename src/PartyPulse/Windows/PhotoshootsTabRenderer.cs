@@ -54,7 +54,7 @@ public sealed class PhotoshootsTabRenderer(Plugin plugin)
     private string cancelSaleReason = string.Empty;
     private bool openCancelSalePopup;
 
-    public void Draw(VenueConnectionConfiguration venue)
+    public void Draw(VenueConnectionConfiguration venue, MainSubtab subtab)
     {
         ResetForVenue(venue);
         plugin.EnsurePhotoshootsLoaded(venue);
@@ -64,7 +64,6 @@ public sealed class PhotoshootsTabRenderer(Plugin plugin)
         var snapshot = plugin.Photoshoots.GetSnapshot(venue);
         var busy = plugin.Photoshoots.IsBusy(venue.ProfileId) || plugin.Finance.IsBusy(venue.ProfileId);
 
-        PartyPulseUi.PageHeader("Photoshoots", "Sell photoshoot packages, apply VIP perks, and manage seller commission and sales history.");
         ImGui.BeginDisabled(busy);
         if (ImGui.Button("Refresh photoshoots"))
         {
@@ -80,11 +79,9 @@ public sealed class PhotoshootsTabRenderer(Plugin plugin)
 
         var view = snapshot.View;
         SyncCommissionEditor(view);
-        DrawPhotoshootTimedMacro(venue);
-
-        if (view.Capabilities.CanSell)
+        if (subtab == MainSubtab.PhotoshootsSales && view.Capabilities.CanSell)
         {
-            ImGui.SameLine();
+            DrawPhotoshootTimedMacro(venue);
             ImGui.TextUnformatted($"Seller keeps {view.SellerPercentage:0.##}%");
             ImGui.TextDisabled(
                 $"Unsettled collected: {view.PersonalGrossGil:N0} gil | " +
@@ -94,21 +91,18 @@ public sealed class PhotoshootsTabRenderer(Plugin plugin)
             DrawSeller(venue, view, busy);
             DrawSettlement(venue, view, busy);
         }
-
-        if (view.Capabilities.CanManageCommission)
+        else if (subtab == MainSubtab.PhotoshootsCommission && view.Capabilities.CanManageCommission)
         {
-            ImGui.Separator();
             DrawCommissionSettings(venue, busy);
         }
-
-        if (view.Capabilities.CanManagePackages)
+        else if (subtab == MainSubtab.PhotoshootsPackages && view.Capabilities.CanManagePackages)
         {
-            ImGui.Separator();
             DrawPackageManagement(venue, view, busy);
         }
-
-        ImGui.Separator();
-        DrawRecentSales(venue, view, busy);
+        else if (subtab == MainSubtab.PhotoshootsHistory)
+        {
+            DrawRecentSales(venue, view, busy);
+        }
         OpenQueuedSalePopups();
         DrawPaymentStatusConfirmation(venue);
         DrawCancelSaleConfirmation(venue);
@@ -397,11 +391,6 @@ public sealed class PhotoshootsTabRenderer(Plugin plugin)
 
     private void DrawCommissionSettings(VenueConnectionConfiguration venue, bool busy)
     {
-        if (!ImGui.CollapsingHeader("Photoshoot seller percentage"))
-        {
-            return;
-        }
-
         ImGui.TextDisabled(
             "Venue owner setting. The percentage is snapshotted when each sale is recorded and only applies to gil collected.");
         ImGui.SetNextItemWidth(180 * ImGuiHelpers.GlobalScale);
@@ -422,11 +411,6 @@ public sealed class PhotoshootsTabRenderer(Plugin plugin)
         PhotoshootManagementViewResponse view,
         bool busy)
     {
-        if (!ImGui.CollapsingHeader("Photoshoot package definitions", ImGuiTreeNodeFlags.DefaultOpen))
-        {
-            return;
-        }
-
         if (ImGui.Button("New package"))
         {
             ResetEditor();
@@ -528,11 +512,6 @@ public sealed class PhotoshootsTabRenderer(Plugin plugin)
         PhotoshootManagementViewResponse view,
         bool busy)
     {
-        if (!ImGui.CollapsingHeader("Recent photoshoot sales"))
-        {
-            return;
-        }
-
         var filterWidth = Math.Min(
             420 * ImGuiHelpers.GlobalScale,
             Math.Max(180 * ImGuiHelpers.GlobalScale, ImGui.GetContentRegionAvail().X * 0.6f));

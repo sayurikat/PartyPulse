@@ -18,15 +18,15 @@ public sealed class PartyFinderTabRenderer(Plugin plugin)
     private Guid activeProfileId;
     private DateTimeOffset? lastReceivedAt;
 
-    public void Draw(VenueConnectionConfiguration venue)
+    public void Draw(VenueConnectionConfiguration venue, MainSubtab subtab)
     {
         plugin.EnsureOpeningPublicationsLoaded(venue);
         var snapshot = plugin.OpeningPublications.GetSnapshot(venue);
         var view = snapshot.View;
-        if (view is not null && !view.Capabilities.CanUsePartyFinder)
+        if (view is not null &&
+            !view.Capabilities.CanUsePartyFinder &&
+            !view.Capabilities.CanManagePartyFinderTemplates)
             return;
-
-        PartyPulseUi.PageHeader("Party Finder", "Publish the active opening text and keep the in-game listing refreshed automatically.");
 
         SyncDrafts(venue, snapshot.ReceivedAt, view);
         var busy = plugin.OpeningPublications.IsBusy(venue.ProfileId);
@@ -41,10 +41,12 @@ public sealed class PartyFinderTabRenderer(Plugin plugin)
             return;
         }
 
-        DrawActivePublication(venue, view, snapshot.EstimatedServerNow, busy);
-
-        if (view.Capabilities.CanManagePartyFinderTemplates &&
-            ImGui.CollapsingHeader("Party Finder template editor"))
+        if (subtab == MainSubtab.PartyFinderRun && view.Capabilities.CanUsePartyFinder)
+        {
+            DrawActivePublication(venue, view, snapshot.EstimatedServerNow, busy);
+        }
+        else if (subtab == MainSubtab.PartyFinderTemplates &&
+                 view.Capabilities.CanManagePartyFinderTemplates)
         {
             ImGui.TextDisabled("Templates support <theme>, <djs>, <date>, and <time>. Generated opening text can be shortened separately in Openings.");
             foreach (var template in view.Templates.Where(value => value.ChannelCode == "partyfinder"))

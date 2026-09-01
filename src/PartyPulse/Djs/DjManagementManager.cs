@@ -448,7 +448,9 @@ public sealed class DjManagementManager : IDisposable
     {
         var existing = GetSnapshot(venue);
         snapshots[venue.ProfileId] = new DjManagementSnapshot(
-            DjManagementStatus.Failed,
+            failure.Kind == ApiFailureKind.Permission
+                ? DjManagementStatus.Denied
+                : DjManagementStatus.Failed,
             failure.Message,
             existing.View,
             attemptAt);

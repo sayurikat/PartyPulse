@@ -16,7 +16,7 @@ public sealed class GreeterTabRenderer(Plugin plugin)
     private readonly Dictionary<string, string> macroDrafts = new(StringComparer.OrdinalIgnoreCase);
     private Guid activeProfileId;
 
-    public void Draw(VenueConnectionConfiguration venue)
+    public void Draw(VenueConnectionConfiguration venue, MainSubtab subtab)
     {
         ResetForVenueChange(venue);
         var snapshot = plugin.Greeter.GetSnapshot(venue);
@@ -28,7 +28,6 @@ public sealed class GreeterTabRenderer(Plugin plugin)
         snapshot = plugin.Greeter.GetSnapshot(venue);
         var busy = plugin.Greeter.IsBusy(venue.ProfileId) || plugin.IsGameMacroBusy;
 
-        PartyPulseUi.PageHeader("Greeter", "Track arriving players, identify VIPs and residents, and execute greeting macros.");
         ImGui.BeginDisabled(plugin.Greeter.IsBusy(venue.ProfileId));
         if (ImGui.SmallButton("Refresh greeter"))
             plugin.RefreshGreeter(venue);
@@ -43,58 +42,57 @@ public sealed class GreeterTabRenderer(Plugin plugin)
         }
 
         SynchronizeMacroDrafts(context);
-        DrawOpeningAndDj(venue, context);
-
-        var opening = context.CurrentOpening;
-        var locationMessage = string.Empty;
-        var atAddress = opening is not null &&
-                        plugin.LocationProvider.IsAtOpeningLocation(
-                            opening.AddressWorldName,
-                            opening.AddressCityName,
-                            opening.AddressWard,
-                            opening.AddressPlot,
-                            opening.LocationType,
-                            opening.OutdoorLocationName,
-                            out locationMessage);
-
-        if (context.Capabilities.CanUse)
+        if (subtab == MainSubtab.GreeterArrivals)
         {
-            if (opening is null)
+            DrawOpeningAndDj(venue, context);
+
+            var opening = context.CurrentOpening;
+            var locationMessage = string.Empty;
+            var atAddress = opening is not null &&
+                            plugin.LocationProvider.IsAtOpeningLocation(
+                                opening.AddressWorldName,
+                                opening.AddressCityName,
+                                opening.AddressWard,
+                                opening.AddressPlot,
+                                opening.LocationType,
+                                opening.OutdoorLocationName,
+                                out locationMessage);
+
+            if (context.Capabilities.CanUse)
             {
-                plugin.GreeterNearby.Clear();
-                ImGui.Spacing();
-                ImGui.TextWrapped("There is no active venue opening. Greeter arrival tracking starts automatically during an opening.");
-            }
-            else if (!atAddress)
-            {
-                plugin.GreeterNearby.Clear();
-                ImGui.Spacing();
-                ImGui.TextColored(
-                    new Vector4(1f, 0.72f, 0.25f, 1f),
-                    "Greeter tracking is paused because you are not at this opening's location.");
-                ImGui.TextWrapped(locationMessage);
+                if (opening is null)
+                {
+                    plugin.GreeterNearby.Clear();
+                    ImGui.Spacing();
+                    ImGui.TextWrapped("There is no active venue opening. Greeter arrival tracking starts automatically during an opening.");
+                }
+                else if (!atAddress)
+                {
+                    plugin.GreeterNearby.Clear();
+                    ImGui.Spacing();
+                    ImGui.TextColored(
+                        new Vector4(1f, 0.72f, 0.25f, 1f),
+                        "Greeter tracking is paused because you are not at this opening's location.");
+                    ImGui.TextWrapped(locationMessage);
+                }
+                else
+                {
+                    TrackNearbyPlayers(venue, opening);
+                    DrawTargetStatus(context, venue);
+                    DrawArrivalTracker(venue, context, busy);
+                }
             }
             else
             {
-                TrackNearbyPlayers(venue, opening);
-                DrawTargetStatus(context, venue);
-                DrawArrivalTracker(venue, context, busy);
+                plugin.GreeterNearby.Clear();
+                ImGui.TextDisabled("You can manage greeter macros, but you do not have permission to use the arrival tracker.");
             }
         }
-        else
-        {
-            plugin.GreeterNearby.Clear();
-            ImGui.TextDisabled("You can manage greeter macros, but you do not have permission to use the arrival tracker.");
-        }
 
-        if (context.Capabilities.CanManageMacros)
+        if (subtab == MainSubtab.GreeterMacros && context.Capabilities.CanManageMacros)
         {
-            ImGui.Spacing();
-            ImGui.Separator();
-            ImGui.Spacing();
             DrawMacroSetup(venue, context, busy);
         }
-
     }
 
     private static void DrawOpeningAndDj(VenueConnectionConfiguration venue, GreeterContextResponse context)
@@ -277,9 +275,6 @@ public sealed class GreeterTabRenderer(Plugin plugin)
         GreeterContextResponse context,
         bool busy)
     {
-        if (!ImGui.CollapsingHeader("Greeter macro setup"))
-            return;
-
         ImGui.TextWrapped(
             "The two with-DJ macros support <name> and <twitch>, replaced with the currently playing confirmed DJ. " +
             "The no-DJ macros are selected automatically when no DJ is playing.");

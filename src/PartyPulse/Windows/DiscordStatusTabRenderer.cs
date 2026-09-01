@@ -26,16 +26,12 @@ public sealed class DiscordStatusTabRenderer(Plugin plugin)
     private bool mentionEveryone;
     private readonly HashSet<long> mentionRoleIds = [];
 
-    public void Draw(VenueConnectionConfiguration venue)
+    public void Draw(VenueConnectionConfiguration venue, MainSubtab subtab)
     {
         plugin.EnsureDiscordStatusLoaded(venue);
         var snapshot = plugin.DiscordStatus.GetSnapshot(venue);
         var view = snapshot.View;
         var isBusy = plugin.DiscordStatus.IsBusy(venue.ProfileId);
-
-        PartyPulseUi.PageHeader(
-            "Discord Venue Status",
-            "Post an upcoming or current opening to one Discord channel and keep that same message updated until the venue closes.");
 
         ImGui.BeginDisabled(isBusy);
         if (ImGui.Button("Refresh status"))
@@ -77,18 +73,87 @@ public sealed class DiscordStatusTabRenderer(Plugin plugin)
             ImGui.TextDisabled($"Linked to {view.Guild.GuildName}");
         }
 
+        if (subtab == MainSubtab.DiscordStatusPublication)
+        {
+            DrawCurrentPublication(venue, view.VenueStatus.CurrentPublication);
+            return;
+        }
+
         var postableChannels = view.Channels
             .Where(static channel => channel.CanPost)
             .OrderBy(static channel => channel.Position)
             .ThenBy(static channel => channel.Name, StringComparer.OrdinalIgnoreCase)
             .ToArray();
-        if (view.Guild is not null && postableChannels.Length == 0)
+        if (subtab == MainSubtab.DiscordStatusSettings &&
+            view.Guild is not null &&
+            postableChannels.Length == 0)
         {
             ImGui.TextColored(
                 PartyPulseUi.Warning,
                 "No postable channel is available. Check the bot's channel permissions and wait for metadata synchronization.");
         }
 
+        if (subtab == MainSubtab.DiscordStatusSettings)
+        {
+            DrawPublicationSettings(postableChannels);
+        }
+
+        if (subtab == MainSubtab.DiscordStatusNotifications)
+        {
+            DrawNotificationSettings(view.Roles, view.Guild?.GuildId);
+        }
+
+        ImGui.Spacing();
+
+        var validationError = Validate(view, postableChannels);
+        if (validationError is not null)
+        {
+            ImGui.TextColored(PartyPulseUi.Warning, validationError);
+        }
+
+        ImGui.BeginDisabled(isBusy || !dirty || validationError is not null);
+        if (ImGui.Button("Save settings"))
+        {
+            saveRequestedAt = DateTimeOffset.UtcNow;
+            plugin.SaveDiscordStatus(venue, new SaveDiscordVenueStatusRequest
+            {
+                Enabled = enabled,
+                ChannelId = channelId > 0 ? channelId : null,
+                PreOpenMinutes = preOpenMinutes,
+                PreOpenMessage = preOpenMessage,
+                OpenMessage = openMessage,
+                ClosedMessage = closedMessage,
+                AutoPublishAnnouncement = autoPublishAnnouncement,
+                MentionEveryone = mentionEveryone,
+                MentionRoleIds = mentionRoleIds.OrderBy(static roleId => roleId).ToArray()
+            });
+            dirty = false;
+        }
+        ImGui.EndDisabled();
+
+        ImGui.SameLine();
+        ImGui.BeginDisabled(isBusy || !dirty);
+        if (ImGui.Button("Reset saved values"))
+        {
+            ResetDraft(venue, snapshot.ReceivedAt, view.VenueStatus);
+        }
+        ImGui.EndDisabled();
+
+        if (subtab == MainSubtab.DiscordStatusSettings)
+        {
+            ImGui.SameLine();
+            if (ImGui.Button("Use default messages"))
+            {
+                preOpenMessage = DiscordVenueStatusDefaults.PreOpenMessage;
+                openMessage = DiscordVenueStatusDefaults.OpenMessage;
+                closedMessage = DiscordVenueStatusDefaults.ClosedMessage;
+                dirty = true;
+            }
+        }
+    }
+
+    private void DrawPublicationSettings(DiscordChannelSummary[] postableChannels)
+    {
         PartyPulseUi.SectionHeader(
             "Publication settings",
             "Channel changes apply to the next opening. A message already published for the current opening remains in its original channel.");
@@ -137,8 +202,6 @@ public sealed class DiscordStatusTabRenderer(Plugin plugin)
             dirty = true;
         }
 
-
-
         if (ImGui.Checkbox(
                 "Automatically publish posts in announcement channels",
                 ref autoPublishAnnouncement))
@@ -146,7 +209,10 @@ public sealed class DiscordStatusTabRenderer(Plugin plugin)
             dirty = true;
         }
         ImGui.TextDisabled("This has no effect for ordinary text channels.");
+    }
 
+    private void DrawNotificationSettings(IReadOnlyList<DiscordRoleSummary> roles, long? guildId)
+    {
         PartyPulseUi.SectionHeader(
             "Notifications",
             "Optionally notify @everyone and one or more Discord roles when the status post is first created.");
@@ -156,61 +222,11 @@ public sealed class DiscordStatusTabRenderer(Plugin plugin)
             dirty = true;
         }
 
-        DrawMentionRoles(view.Roles, view.Guild?.GuildId);
-
-        ImGui.Spacing();
-
-        var validationError = Validate(view, postableChannels);
-        if (validationError is not null)
-        {
-            ImGui.TextColored(PartyPulseUi.Warning, validationError);
-        }
-
-        ImGui.BeginDisabled(isBusy || !dirty || validationError is not null);
-        if (ImGui.Button("Save settings"))
-        {
-            saveRequestedAt = DateTimeOffset.UtcNow;
-            plugin.SaveDiscordStatus(venue, new SaveDiscordVenueStatusRequest
-            {
-                Enabled = enabled,
-                ChannelId = channelId > 0 ? channelId : null,
-                PreOpenMinutes = preOpenMinutes,
-                PreOpenMessage = preOpenMessage,
-                OpenMessage = openMessage,
-                ClosedMessage = closedMessage,
-                AutoPublishAnnouncement = autoPublishAnnouncement,
-                MentionEveryone = mentionEveryone,
-                MentionRoleIds = mentionRoleIds.OrderBy(static roleId => roleId).ToArray()
-            });
-            dirty = false;
-        }
-        ImGui.EndDisabled();
-
-        ImGui.SameLine();
-        ImGui.BeginDisabled(isBusy || !dirty);
-        if (ImGui.Button("Reset saved values"))
-        {
-            ResetDraft(venue, snapshot.ReceivedAt, view.VenueStatus);
-        }
-        ImGui.EndDisabled();
-
-        ImGui.SameLine();
-        if (ImGui.Button("Use default messages"))
-        {
-            preOpenMessage = DiscordVenueStatusDefaults.PreOpenMessage;
-            openMessage = DiscordVenueStatusDefaults.OpenMessage;
-            closedMessage = DiscordVenueStatusDefaults.ClosedMessage;
-            dirty = true;
-        }
-
-        DrawCurrentPublication(venue, view.VenueStatus.CurrentPublication);
+        DrawMentionRoles(roles, guildId);
     }
 
     private void DrawMentionRoles(IReadOnlyList<DiscordRoleSummary> roles, long? guildId)
     {
-        if (!ImGui.CollapsingHeader("Mention Roles"))
-            return;
-
         var availableRoles = roles
             .Where(role => !role.Managed && role.RoleId != guildId)
             .OrderByDescending(static role => role.Position)

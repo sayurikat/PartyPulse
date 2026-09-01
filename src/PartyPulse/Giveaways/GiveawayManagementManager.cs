@@ -225,7 +225,13 @@ public sealed class GiveawayManagementManager : IDisposable
     {
         var existing = GetSnapshot(venue);
         snapshots[venue.ProfileId] = new GiveawayManagementSnapshot(
-            GiveawayManagementStatus.Failed, failure.Message, existing.View, attemptAt, existing.ReceivedAt);
+            failure.Kind == ApiFailureKind.Permission
+                ? GiveawayManagementStatus.Denied
+                : GiveawayManagementStatus.Failed,
+            failure.Message,
+            existing.View,
+            attemptAt,
+            existing.ReceivedAt);
     }
 
     private sealed record AuthorizedContext(bool Success, Uri? BaseUri, string? AccessToken, ApiFailure? Failure)

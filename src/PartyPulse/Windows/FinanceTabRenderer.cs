@@ -23,6 +23,7 @@ public sealed class FinanceTabRenderer(Plugin plugin)
 
     public void Draw(
         VenueConnectionConfiguration venue,
+        MainSubtab subtab,
         long? requestedSettlementId)
     {
         if (activeProfileId != venue.ProfileId)
@@ -35,8 +36,6 @@ public sealed class FinanceTabRenderer(Plugin plugin)
         {
             selectedSettlementId = requestedId;
         }
-
-        PartyPulseUi.PageHeader("Finance", "Review personal balances and resolve venue settlement transactions across all revenue streams.");
 
         plugin.EnsureFinanceLoaded(venue);
         var snapshot = plugin.Finance.GetSnapshot(venue);
@@ -57,42 +56,45 @@ public sealed class FinanceTabRenderer(Plugin plugin)
         }
 
         var view = snapshot.View;
-        ImGui.SameLine();
         ImGui.TextDisabled("Transactions are server-audited and remain visible after resolution.");
 
-        ImGui.Spacing();
-        ImGui.TextUnformatted($"My unsettled VIP sales: {view.PersonalUnpaidVipGil:N0} gil");
-        ImGui.SameLine();
-        ImGui.TextDisabled($"Pending: {view.PersonalPendingVipGil:N0} gil");
-        ImGui.SameLine();
-        ImGui.TextUnformatted($"Available: {view.PersonalAvailableVipGil:N0} gil");
-        ImGui.TextUnformatted($"My unsettled photoshoot sales: {view.PersonalUnpaidPhotoshootGil:N0} gil");
-        ImGui.SameLine();
-        ImGui.TextDisabled($"Pending: {view.PersonalPendingPhotoshootGil:N0} gil");
-        ImGui.SameLine();
-        ImGui.TextUnformatted($"Available: {view.PersonalAvailablePhotoshootGil:N0} gil");
-        ImGui.TextUnformatted($"My unsettled Other Sales: {view.PersonalUnpaidOtherSalesGil:N0} gil");
-        ImGui.SameLine();
-        ImGui.TextDisabled($"Pending: {view.PersonalPendingOtherSalesGil:N0} gil");
-        ImGui.SameLine();
-        ImGui.TextUnformatted($"Available: {view.PersonalAvailableOtherSalesGil:N0} gil");
-        ImGui.TextUnformatted("My unsettled Other Games net: ");
-        ImGui.SameLine(); DrawSigned(view.PersonalUnsettledOtherGamesGil);
-        ImGui.SameLine(); ImGui.TextDisabled($"Pending: {view.PersonalPendingOtherGamesGil:N0} gil");
-        ImGui.SameLine(); ImGui.TextUnformatted("Available: ");
-        ImGui.SameLine(); DrawSigned(view.PersonalAvailableOtherGamesGil);
-
-        if (view.Capabilities.CanManageSettlements)
+        if (subtab == MainSubtab.FinanceBalances)
         {
-            ImGui.TextUnformatted($"Venue pending transactions: {view.VenuePendingCount}");
+            ImGui.Spacing();
+            ImGui.TextUnformatted($"My unsettled VIP sales: {view.PersonalUnpaidVipGil:N0} gil");
+            ImGui.SameLine();
+            ImGui.TextDisabled($"Pending: {view.PersonalPendingVipGil:N0} gil");
+            ImGui.SameLine();
+            ImGui.TextUnformatted($"Available: {view.PersonalAvailableVipGil:N0} gil");
+            ImGui.TextUnformatted($"My unsettled photoshoot sales: {view.PersonalUnpaidPhotoshootGil:N0} gil");
+            ImGui.SameLine();
+            ImGui.TextDisabled($"Pending: {view.PersonalPendingPhotoshootGil:N0} gil");
+            ImGui.SameLine();
+            ImGui.TextUnformatted($"Available: {view.PersonalAvailablePhotoshootGil:N0} gil");
+            ImGui.TextUnformatted($"My unsettled Other Sales: {view.PersonalUnpaidOtherSalesGil:N0} gil");
+            ImGui.SameLine();
+            ImGui.TextDisabled($"Pending: {view.PersonalPendingOtherSalesGil:N0} gil");
+            ImGui.SameLine();
+            ImGui.TextUnformatted($"Available: {view.PersonalAvailableOtherSalesGil:N0} gil");
+            ImGui.TextUnformatted("My unsettled Other Games net: ");
+            ImGui.SameLine(); DrawSigned(view.PersonalUnsettledOtherGamesGil);
+            ImGui.SameLine(); ImGui.TextDisabled($"Pending: {view.PersonalPendingOtherGamesGil:N0} gil");
+            ImGui.SameLine(); ImGui.TextUnformatted("Available: ");
+            ImGui.SameLine(); DrawSigned(view.PersonalAvailableOtherGamesGil);
+
+            if (view.Capabilities.CanManageSettlements)
+            {
+                ImGui.TextUnformatted($"Venue pending transactions: {view.VenuePendingCount}");
+            }
         }
-
-        ImGui.Spacing();
-        DrawSettlementList(venue, view);
-        ImGui.Spacing();
-        DrawSelectedSettlement(venue, view, busy);
+        else if (subtab == MainSubtab.FinanceSettlements)
+        {
+            ImGui.Spacing();
+            DrawSettlementList(venue, view);
+            ImGui.Spacing();
+            DrawSelectedSettlement(venue, view, busy);
+        }
         DrawResponseConfirmation(venue);
-
     }
 
     private void DrawSettlementList(VenueConnectionConfiguration venue, FinanceViewResponse view)

@@ -5,6 +5,8 @@ VisualStudioVersion = 18.5.11723.231 stable
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PartyPulse", "src\PartyPulse\PartyPulse.csproj", "{13C812E9-0D42-4B95-8646-40EEBF30636F}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PartyPulse.NavigationTests", "tests\PartyPulse.NavigationTests\PartyPulse.NavigationTests.csproj", "{B25C5E47-1197-46FA-9673-97B45F176A3A}"
+EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "repo", "repo", "{E05A4696-B520-481B-B309-507D8899187D}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{254B057B-BC61-4805-B795-4FB5698CDCCE}"
@@ -19,6 +21,10 @@ Global
 		{13C812E9-0D42-4B95-8646-40EEBF30636F}.Debug|x64.Build.0 = Debug|x64
 		{13C812E9-0D42-4B95-8646-40EEBF30636F}.Release|x64.ActiveCfg = Release|x64
 		{13C812E9-0D42-4B95-8646-40EEBF30636F}.Release|x64.Build.0 = Release|x64
+		{B25C5E47-1197-46FA-9673-97B45F176A3A}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{B25C5E47-1197-46FA-9673-97B45F176A3A}.Debug|x64.Build.0 = Debug|Any CPU
+		{B25C5E47-1197-46FA-9673-97B45F176A3A}.Release|x64.ActiveCfg = Release|Any CPU
+		{B25C5E47-1197-46FA-9673-97B45F176A3A}.Release|x64.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

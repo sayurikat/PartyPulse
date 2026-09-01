@@ -384,7 +384,9 @@ public sealed class VenueOpeningScheduleManager : IDisposable
     {
         var existing = GetSnapshot(venue);
         snapshots[venue.ProfileId] = new VenueOpeningScheduleSnapshot(
-            VenueOpeningScheduleStatus.Failed,
+            failure.Kind == ApiFailureKind.Permission
+                ? VenueOpeningScheduleStatus.Denied
+                : VenueOpeningScheduleStatus.Failed,
             failure.Message,
             existing.View,
             attemptAt);

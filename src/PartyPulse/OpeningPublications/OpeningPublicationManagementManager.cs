@@ -269,7 +269,9 @@ public sealed class OpeningPublicationManagementManager : IDisposable
         var existing = GetSnapshot(venue);
         snapshots[venue.ProfileId] = existing with
         {
-            Status = OpeningPublicationManagementStatus.Failed,
+            Status = failure.Kind == ApiFailureKind.Permission
+                ? OpeningPublicationManagementStatus.Denied
+                : OpeningPublicationManagementStatus.Failed,
             Message = failure.Message,
             LastAttemptAt = attemptAt
         };

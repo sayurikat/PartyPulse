@@ -78,4 +78,39 @@ internal static class PartyPulseUi
         ImGui.PopStyleColor(3);
         return clicked;
     }
+
+    public static bool SubNavigationButton(string label, string id, bool selected, Vector2 size)
+    {
+        var start = ImGui.GetCursorScreenPos();
+        var markerColor = selected
+            ? Accent
+            : new Vector4(0.40f, 0.41f, 0.46f, 0.75f);
+
+        ImGui.PushStyleVar(ImGuiStyleVar.ButtonTextAlign, new Vector2(0f, 0.5f));
+        ImGui.PushStyleColor(
+            ImGuiCol.Text,
+            selected ? new Vector4(0.95f, 0.91f, 0.98f, 1f) : Muted);
+        ImGui.PushStyleColor(
+            ImGuiCol.Button,
+            selected
+                ? new Vector4(0.30f, 0.20f, 0.38f, 0.82f)
+                : new Vector4(0.10f, 0.10f, 0.12f, 0.28f));
+        ImGui.PushStyleColor(ImGuiCol.ButtonHovered, new Vector4(0.34f, 0.27f, 0.41f, 0.82f));
+        ImGui.PushStyleColor(ImGuiCol.ButtonActive, new Vector4(0.40f, 0.30f, 0.49f, 0.90f));
+
+        var clicked = ImGui.Button($"   {label}##{id}", size);
+
+        ImGui.PopStyleColor(4);
+        ImGui.PopStyleVar();
+
+        var markerWidth = 2f * ImGuiHelpers.GlobalScale;
+        var markerInset = 4f * ImGuiHelpers.GlobalScale;
+        ImGui.GetWindowDrawList().AddRectFilled(
+            new Vector2(start.X, start.Y + markerInset),
+            new Vector2(start.X + markerWidth, start.Y + size.Y - markerInset),
+            ImGui.GetColorU32(markerColor),
+            markerWidth / 2f);
+
+        return clicked;
+    }
 }

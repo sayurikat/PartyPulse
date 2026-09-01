@@ -66,8 +66,11 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
     private readonly HashSet<string> dirtyPublicationDrafts = new(StringComparer.OrdinalIgnoreCase);
     private DateTimeOffset? publicationDraftReceivedAt;
 
-    public void Draw(VenueConnectionConfiguration venue)
+    public MainSubtab? RequestedSubtab { get; private set; }
+
+    public void Draw(VenueConnectionConfiguration venue, MainSubtab subtab)
     {
+        RequestedSubtab = null;
         ResetForVenueChange(venue);
         plugin.EnsureVenueOpeningsLoaded(venue);
         plugin.EnsureDjsLoaded(venue);
@@ -78,8 +81,6 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
         var view = snapshot.View;
         if (view is not null && !view.Capabilities.CanManage)
             return;
-
-        PartyPulseUi.PageHeader("Venue Openings", "Schedule openings, assign DJs, manage publication text, and review previous events.");
 
         var isBusy = plugin.VenueOpenings.IsBusy(venue.ProfileId);
         var djsBusy = plugin.Djs.IsBusy(venue.ProfileId);
@@ -108,76 +109,103 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
 
         ProcessPendingSuggestions(venue, view, djSnapshot, isBusy, djsBusy);
         EnsureDraft(venue, view);
-        DrawEditor(venue, view, isBusy);
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Spacing();
-        DrawSchedule(venue, view, djView, isBusy || djsBusy);
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Spacing();
-        DrawPreviousOpenings(venue, historySnapshot, djView, isBusy || djsBusy);
-
-        if (selectedDjOpeningId is { } openingId)
+        switch (subtab)
         {
-            var opening = view.Openings.FirstOrDefault(value => value.OpeningId == openingId);
-            IReadOnlyList<DjBookingSummary>? historicalBookings = null;
-            if (opening is null)
-            {
-                opening = historySnapshot.Openings.FirstOrDefault(value => value.OpeningId == openingId);
-                if (opening is not null)
-                {
-                    historicalBookings = historySnapshot.DjBookings
-                        .Where(value => value.OpeningId == openingId)
-                        .Select(value => djView?.Bookings.FirstOrDefault(current => current.BookingId == value.BookingId) ?? value)
-                        .OrderBy(value => value.StartsAt)
-                        .ThenBy(value => value.BookingId)
-                        .ToArray();
-                }
-            }
-
-            if (opening is not null)
-            {
+            case MainSubtab.OpeningsSchedule:
+                DrawEditor(venue, view, isBusy);
                 ImGui.Spacing();
                 ImGui.Separator();
                 ImGui.Spacing();
-                DrawDjScheduleEditor(
+                DrawSchedule(venue, view, djView, isBusy || djsBusy);
+                break;
+            case MainSubtab.OpeningsHistory:
+                DrawPreviousOpenings(venue, historySnapshot, djView, isBusy || djsBusy);
+                break;
+            case MainSubtab.OpeningsDjs:
+                DrawSelectedDjSchedule(
                     venue,
-                    opening,
+                    view,
+                    historySnapshot,
                     djSnapshot,
-                    isBusy || djsBusy,
-                    historicalBookings);
-            }
-            else
-            {
-                selectedDjOpeningId = null;
-                ClearBookingDraft();
-            }
-        }
-
-        if (selectedPublicationOpeningId is { } publicationOpeningId)
-        {
-            var opening = view.Openings.FirstOrDefault(value => value.OpeningId == publicationOpeningId);
-            if (opening is not null)
-            {
-                ImGui.Spacing();
-                ImGui.Separator();
-                ImGui.Spacing();
-                DrawPublicationEditor(
+                    djView,
+                    isBusy || djsBusy);
+                break;
+            case MainSubtab.OpeningsPublications:
+                DrawSelectedPublication(
                     venue,
-                    opening,
+                    view,
                     publicationSnapshot,
                     isBusy || djsBusy || plugin.OpeningPublications.IsBusy(venue.ProfileId));
-            }
-            else
-            {
-                selectedPublicationOpeningId = null;
-                publicationDrafts.Clear();
-                dirtyPublicationDrafts.Clear();
-            }
+                break;
         }
 
         DrawConfirmationPopups(venue, isBusy || djsBusy);
+    }
+
+    private void DrawSelectedDjSchedule(
+        VenueConnectionConfiguration venue,
+        VenueOpeningScheduleResponse view,
+        VenueOpeningHistorySnapshot historySnapshot,
+        PartyPulse.Djs.DjManagementSnapshot djSnapshot,
+        DjViewResponse? djView,
+        bool isBusy)
+    {
+        if (selectedDjOpeningId is not { } openingId)
+        {
+            ImGui.TextDisabled("Choose DJs from an opening in Schedule or Previous openings.");
+            return;
+        }
+
+        var opening = view.Openings.FirstOrDefault(value => value.OpeningId == openingId);
+        IReadOnlyList<DjBookingSummary>? historicalBookings = null;
+        if (opening is null)
+        {
+            opening = historySnapshot.Openings.FirstOrDefault(value => value.OpeningId == openingId);
+            if (opening is not null)
+            {
+                historicalBookings = historySnapshot.DjBookings
+                    .Where(value => value.OpeningId == openingId)
+                    .Select(value => djView?.Bookings.FirstOrDefault(current => current.BookingId == value.BookingId) ?? value)
+                    .OrderBy(value => value.StartsAt)
+                    .ThenBy(value => value.BookingId)
+                    .ToArray();
+            }
+        }
+
+        if (opening is not null)
+        {
+            DrawDjScheduleEditor(venue, opening, djSnapshot, isBusy, historicalBookings);
+            return;
+        }
+
+        selectedDjOpeningId = null;
+        ClearBookingDraft();
+        ImGui.TextDisabled("The selected opening is no longer available.");
+    }
+
+    private void DrawSelectedPublication(
+        VenueConnectionConfiguration venue,
+        VenueOpeningScheduleResponse view,
+        OpeningPublicationManagementSnapshot publicationSnapshot,
+        bool isBusy)
+    {
+        if (selectedPublicationOpeningId is not { } openingId)
+        {
+            ImGui.TextDisabled("Choose Publicity from an opening in Schedule.");
+            return;
+        }
+
+        var opening = view.Openings.FirstOrDefault(value => value.OpeningId == openingId);
+        if (opening is not null)
+        {
+            DrawPublicationEditor(venue, opening, publicationSnapshot, isBusy);
+            return;
+        }
+
+        selectedPublicationOpeningId = null;
+        publicationDrafts.Clear();
+        dirtyPublicationDrafts.Clear();
+        ImGui.TextDisabled("The selected opening is no longer available.");
     }
 
     private void DrawEditor(
@@ -423,6 +451,7 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
                 {
                     selectedDjOpeningId = opening.OpeningId;
                     InitializeBookingDraft(venue, opening, bookings, djView);
+                    RequestedSubtab = MainSubtab.OpeningsDjs;
                 }
                 ImGui.SameLine();
             }
@@ -431,6 +460,7 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
                 selectedPublicationOpeningId = opening.OpeningId;
                 publicationDraftReceivedAt = null;
                 dirtyPublicationDrafts.Clear();
+                RequestedSubtab = MainSubtab.OpeningsPublications;
             }
             ImGui.SameLine();
             if (isFuture)
@@ -507,7 +537,7 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
                 "VenueOpeningHistory",
                 6,
                 flags,
-                new Vector2(0, 240 * ImGuiHelpers.GlobalScale)))
+                new Vector2(0, 630 * ImGuiHelpers.GlobalScale)))
         {
             ImGui.TableSetupColumn("When");
             ImGui.TableSetupColumn("Theme");
@@ -540,6 +570,7 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
                 {
                     selectedDjOpeningId = opening.OpeningId;
                     ClearBookingDraft();
+                    RequestedSubtab = MainSubtab.OpeningsDjs;
                 }
                 ImGui.EndDisabled();
                 if (bookingCount == 0 && ImGui.IsItemHovered())

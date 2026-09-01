@@ -262,7 +262,9 @@ public sealed class DiscordStatusManagementManager : IDisposable
     {
         var existing = GetSnapshot(venue);
         snapshots[venue.ProfileId] = new DiscordStatusManagementSnapshot(
-            DiscordStatusManagementStatus.Failed,
+            failure.Kind == ApiFailureKind.Permission
+                ? DiscordStatusManagementStatus.Denied
+                : DiscordStatusManagementStatus.Failed,
             failure.Message,
             existing.View,
             attemptAt,

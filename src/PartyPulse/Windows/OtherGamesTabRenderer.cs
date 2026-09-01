@@ -62,15 +62,13 @@ public sealed class OtherGamesTabRenderer(Plugin plugin)
     private long pendingPayoutAmountGil;
     private bool openPayoutPopup;
 
-    public void Draw(VenueConnectionConfiguration venue)
+    public void Draw(VenueConnectionConfiguration venue, MainSubtab subtab)
     {
 
         ResetForVenue(venue);
         plugin.EnsureOtherGamesLoaded(venue);
         var snapshot = plugin.OtherGames.GetSnapshot(venue);
         var busy = plugin.OtherGames.IsBusy(venue.ProfileId) || plugin.Finance.IsBusy(venue.ProfileId);
-
-        PartyPulseUi.PageHeader("Other Games", "Sell game entries, record outcomes and winnings, and settle each seller's net balance.");
 
         ImGui.BeginDisabled(busy);
         if (ImGui.Button("Refresh Other Games")) plugin.RefreshOtherGames(venue);
@@ -83,9 +81,8 @@ public sealed class OtherGamesTabRenderer(Plugin plugin)
         }
 
         var view = snapshot.View;
-        if (view.Capabilities.CanSell)
+        if (subtab == MainSubtab.OtherGamesSell && view.Capabilities.CanSell)
         {
-            ImGui.SameLine();
             ImGui.TextDisabled(
                 $"Sales: {view.PersonalGrossGil:N0} gil | Seller share: {view.PersonalSellerShareGil:N0} gil | " +
                 $"Wins: {view.PersonalWinGil:N0} gil | Awaiting outcome: {view.PersonalAwaitingOutcomeCount:N0}");
@@ -100,15 +97,14 @@ public sealed class OtherGamesTabRenderer(Plugin plugin)
             DrawSeller(venue, view, busy);
             DrawSettlement(venue, view, busy);
         }
-
-        if (view.Capabilities.CanManageItems)
+        else if (subtab == MainSubtab.OtherGamesCatalog && view.Capabilities.CanManageItems)
         {
-            ImGui.Separator();
             DrawItemManagement(venue, view, busy);
         }
-
-        ImGui.Separator();
-        DrawHistory(venue, view, busy);
+        else if (subtab == MainSubtab.OtherGamesHistory)
+        {
+            DrawHistory(venue, view, busy);
+        }
         QueuePopups();
         DrawSaleConfirmation(venue, view);
         DrawSettlementStatusConfirmation(venue);

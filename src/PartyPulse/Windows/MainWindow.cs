@@ -17,58 +17,164 @@ namespace PartyPulse.Windows;
 
 public sealed class MainWindow : Window, IDisposable
 {
-    private enum MainPage
-    {
-        Overview,
-        Openings,
-        Djs,
-        Greeter,
-        Vip,
-        Photoshoots,
-        Bar,
-        Court,
-        OtherSales,
-        OtherGames,
-        Purchases,
-        Staff,
-        TimedMacros,
-        Giveaways,
-        DiscordStatus,
-        Shoutrunner,
-        PartyFinder,
-        Finance,
-        Users,
-        MyAccount,
-    }
-
     private sealed record NavigationItem(
         MainPage Page,
         string Group,
         string Label,
-        string Abbreviation);
+        string Abbreviation,
+        string Description,
+        MainSubtabDefinition[] Subtabs);
 
     private static readonly NavigationItem[] NavigationItems =
     [
-        new(MainPage.Overview, "GENERAL", "Overview", "OV"),
-        new(MainPage.Openings, "VENUE", "Openings", "OP"),
-        new(MainPage.Djs, "VENUE", "DJs", "DJ"),
-        new(MainPage.Greeter, "GUESTS & SALES", "Greeter", "GR"),
-        new(MainPage.Vip, "GUESTS & SALES", "VIP", "VIP"),
-        new(MainPage.Photoshoots, "GUESTS & SALES", "Photoshoots", "PH"),
-        new(MainPage.Bar, "GUESTS & SALES", "Bar", "BAR"),
-        new(MainPage.Court, "GUESTS & SALES", "Court Services", "CRT"),
-        new(MainPage.OtherSales, "GUESTS & SALES", "Other Sales", "SAL"),
-        new(MainPage.OtherGames, "GUESTS & SALES", "Other Games", "GM"),
-        new(MainPage.Purchases, "GUESTS & SALES", "Purchases", "PUR"),
-        new(MainPage.Staff, "OPERATIONS", "Staff", "STF"),
-        new(MainPage.TimedMacros, "OPERATIONS", "Timed Macros", "TMR"),
-        new(MainPage.Giveaways, "OPERATIONS", "Giveaways", "GIV"),
-        new(MainPage.DiscordStatus, "OPERATIONS", "Discord Status", "DS"),
-        new(MainPage.Shoutrunner, "OPERATIONS", "Shoutrunner", "SHR"),
-        new(MainPage.PartyFinder, "OPERATIONS", "Party Finder", "PF"),
-        new(MainPage.Finance, "ADMINISTRATION", "Finance", "FIN"),
-        new(MainPage.Users, "ADMINISTRATION", "Users", "USR"),
-        new(MainPage.MyAccount, "ADMINISTRATION", "My Account", "ME"),
+        new(MainPage.Overview, "GENERAL", "Overview", "OV",
+            "Current character and venue status.",
+            [new(MainSubtab.OverviewStatus, "Status")]),
+        new(MainPage.Openings, "VENUE", "Openings", "OP",
+            "Schedule openings, assign DJs, manage publication text, and review previous events.",
+            [
+                new(MainSubtab.OpeningsSchedule, "Schedule"),
+                new(MainSubtab.OpeningsHistory, "Previous openings"),
+                new(MainSubtab.OpeningsDjs, "DJ schedule"),
+                new(MainSubtab.OpeningsPublications, "Publicity"),
+            ]),
+        new(MainPage.Djs, "VENUE", "DJs", "DJ",
+            "Manage the venue DJ directory, characters, pricing, and payments.",
+            [
+                new(MainSubtab.DjsDirectory, "Directory"),
+                new(MainSubtab.DjsCharacters, "Characters"),
+                new(MainSubtab.DjsPayments, "Payments"),
+                new(MainSubtab.DjsSettings, "Pricing"),
+            ]),
+        new(MainPage.Greeter, "GUESTS & SALES", "Greeter", "GR",
+            "Track arriving players and manage greeting macros.",
+            [
+                new(MainSubtab.GreeterArrivals, "Arrivals"),
+                new(MainSubtab.GreeterMacros, "Macros"),
+            ]),
+        new(MainPage.Vip, "GUESTS & SALES", "VIP", "VIP",
+            "Manage VIP arrivals, sales, players, packages, and perks.",
+            [
+                new(MainSubtab.VipArrivals, "Arrivals"),
+                new(MainSubtab.VipSales, "Sales"),
+                new(MainSubtab.VipPlayers, "Players"),
+                new(MainSubtab.VipPackages, "Packages"),
+                new(MainSubtab.VipPerks, "Perks"),
+            ]),
+        new(MainPage.Photoshoots, "GUESTS & SALES", "Photoshoots", "PH",
+            "Sell packages and manage commission, package setup, and sales history.",
+            [
+                new(MainSubtab.PhotoshootsSales, "Sales & settlement"),
+                new(MainSubtab.PhotoshootsPackages, "Packages"),
+                new(MainSubtab.PhotoshootsCommission, "Commission"),
+                new(MainSubtab.PhotoshootsHistory, "History"),
+            ]),
+        new(MainPage.Bar, "GUESTS & SALES", "Bar", "BAR",
+            "Run buyouts and Gamba Shot, settle revenue, and manage bar setup.",
+            [
+                new(MainSubtab.BarBuyouts, "Buyouts"),
+                new(MainSubtab.BarGamba, "Gamba Shot"),
+                new(MainSubtab.BarSettlements, "Settlement"),
+                new(MainSubtab.BarSettings, "Settings"),
+                new(MainSubtab.BarPackages, "Buyout packages"),
+                new(MainSubtab.BarBuyoutHistory, "Buyout history"),
+                new(MainSubtab.BarGambaSalesHistory, "Gamba sales"),
+                new(MainSubtab.BarGambaGamesHistory, "Gamba history"),
+            ]),
+        new(MainPage.Court, "GUESTS & SALES", "Court Services", "CRT",
+            "Sell court services and manage staff balances, offers, and history.",
+            [
+                new(MainSubtab.CourtSales, "Sales"),
+                new(MainSubtab.CourtSettlements, "Staff settlement"),
+                new(MainSubtab.CourtCommission, "Commission"),
+                new(MainSubtab.CourtOffers, "Offers"),
+                new(MainSubtab.CourtAccountants, "Accountants"),
+                new(MainSubtab.CourtTransactions, "Transactions"),
+                new(MainSubtab.CourtSalesHistory, "Sales history"),
+            ]),
+        new(MainPage.OtherSales, "GUESTS & SALES", "Other Sales", "SAL",
+            "Sell configured items and manage catalog and history.",
+            [
+                new(MainSubtab.OtherSalesSell, "Sell & settle"),
+                new(MainSubtab.OtherSalesCatalog, "Catalog"),
+                new(MainSubtab.OtherSalesHistory, "History"),
+            ]),
+        new(MainPage.OtherGames, "GUESTS & SALES", "Other Games", "GM",
+            "Sell game entries, settle outcomes, and manage games and history.",
+            [
+                new(MainSubtab.OtherGamesSell, "Sell & settle"),
+                new(MainSubtab.OtherGamesCatalog, "Catalog"),
+                new(MainSubtab.OtherGamesHistory, "History"),
+            ]),
+        new(MainPage.Purchases, "GUESTS & SALES", "Purchases", "PUR",
+            "Record venue expenses and review purchase requests and history.",
+            [
+                new(MainSubtab.PurchasesCreate, "New purchase"),
+                new(MainSubtab.PurchasesHistory, "History"),
+            ]),
+        new(MainPage.Staff, "OPERATIONS", "Staff", "STF",
+            "Manage attendance, staff records, jobs, time entries, and payouts.",
+            [
+                new(MainSubtab.StaffAttendance, "Attendance"),
+                new(MainSubtab.StaffDirectory, "Staff directory"),
+                new(MainSubtab.StaffCharacters, "Character links"),
+                new(MainSubtab.StaffLifecycle, "Lifecycle tasks"),
+                new(MainSubtab.StaffJobs, "Jobs"),
+                new(MainSubtab.StaffTimeEntries, "Time entries"),
+                new(MainSubtab.StaffPayouts, "Payouts"),
+            ]),
+        new(MainPage.TimedMacros, "OPERATIONS", "Timed Macros", "TMR",
+            "Run shared venue timers or manage their definitions.",
+            [
+                new(MainSubtab.TimedMacrosRun, "Run macros"),
+                new(MainSubtab.TimedMacrosSetup, "Setup"),
+            ]),
+        new(MainPage.Giveaways, "OPERATIONS", "Giveaways", "GIV",
+            "Manage Discord giveaways and opening-based schedules.",
+            [
+                new(MainSubtab.GiveawaysManage, "Giveaways"),
+                new(MainSubtab.GiveawaysScheduler, "Scheduler"),
+            ]),
+        new(MainPage.DiscordStatus, "OPERATIONS", "Discord Status", "DS",
+            "Configure and monitor the venue status post.",
+            [
+                new(MainSubtab.DiscordStatusPublication, "Current publication"),
+                new(MainSubtab.DiscordStatusSettings, "Settings"),
+                new(MainSubtab.DiscordStatusNotifications, "Notifications"),
+            ]),
+        new(MainPage.Shoutrunner, "OPERATIONS", "Shoutrunner", "SHR",
+            "Run advertisement routes and manage route and template setup.",
+            [
+                new(MainSubtab.ShoutrunnerRun, "Run route"),
+                new(MainSubtab.ShoutrunnerRoute, "Route setup"),
+                new(MainSubtab.ShoutrunnerTemplates, "Templates"),
+            ]),
+        new(MainPage.PartyFinder, "OPERATIONS", "Party Finder", "PF",
+            "Publish the active opening text and manage its template.",
+            [
+                new(MainSubtab.PartyFinderRun, "Publication"),
+                new(MainSubtab.PartyFinderTemplates, "Templates"),
+            ]),
+        new(MainPage.Finance, "ADMINISTRATION", "Finance", "FIN",
+            "Review balances and resolve settlement transactions.",
+            [
+                new(MainSubtab.FinanceBalances, "Balances"),
+                new(MainSubtab.FinanceSettlements, "Settlements"),
+            ]),
+        new(MainPage.Users, "ADMINISTRATION", "Users", "USR",
+            "Create venue users and review access.",
+            [
+                new(MainSubtab.UsersCreate, "Add user"),
+                new(MainSubtab.UsersDirectory, "Directory"),
+            ]),
+        new(MainPage.MyAccount, "ADMINISTRATION", "My Account", "ME",
+            "Manage characters, devices, and venue authorization.",
+            [
+                new(MainSubtab.MyAccountCharacters, "Characters"),
+                new(MainSubtab.MyAccountDevices, "Devices"),
+                new(MainSubtab.MyAccountAuthorization, "Authorization"),
+                new(MainSubtab.MyAccountLocalData, "Local data"),
+            ]),
     ];
 
     private readonly Plugin plugin;
@@ -90,6 +196,10 @@ public sealed class MainWindow : Window, IDisposable
     private readonly ShoutrunnerTabRenderer shoutrunnerTab;
     private readonly PartyFinderTabRenderer partyFinderTab;
     private readonly Dictionary<(Guid ProfileId, MainPage Page), DateTimeOffset> activePageRefreshes = new();
+    private readonly MainWindowNavigationState navigationState = new();
+    private readonly SubtabVisibilityState subtabVisibility = new();
+    private readonly NavigationAccessLoadState navigationAccess = new();
+    private readonly RefreshDeferralState refreshDeferral = new();
 
     private MainPage selectedPage = MainPage.Overview;
     private long? requestedFinanceSettlementId;
@@ -147,6 +257,10 @@ public sealed class MainWindow : Window, IDisposable
         plugin.Configuration.Save();
         requestedFinanceSettlementId = settlementId;
         selectedPage = MainPage.Finance;
+        navigationState.ExpandAndSelect(
+            venue.ProfileId,
+            MainPage.Finance,
+            MainSubtab.FinanceSettlements);
         IsOpen = true;
     }
 
@@ -156,16 +270,22 @@ public sealed class MainWindow : Window, IDisposable
 
     public override void Draw()
     {
-        var selectedVenue = plugin.Configuration.GetSelectedVenue();
-        var authenticated = selectedVenue?.IsRegistered == true &&
-                            CanDrawAuthenticatedFeatures(plugin.Authentication.GetSnapshot(selectedVenue));
+        // ImGui reports text-entry focus globally, so current and future text boxes
+        // participate without renderer-specific refresh code.
+        refreshDeferral.Observe(ImGui.GetIO().WantTextInput, DateTimeOffset.UtcNow);
 
-        EnsureSelectedPageVisible(selectedVenue, authenticated);
+        var selectedVenue = plugin.Configuration.GetSelectedVenue();
+        var authentication = selectedVenue?.IsRegistered == true
+            ? plugin.Authentication.GetSnapshot(selectedVenue)
+            : null;
+        var authenticated = authentication is not null && CanDrawAuthenticatedFeatures(authentication);
+        PrepareNavigationAccess(selectedVenue, authentication, authenticated);
+        var activePage = ResolveVisiblePage(selectedVenue, authenticated);
 
         var sidebarWidth = (plugin.Configuration.NavigationCollapsed ? 62f : 196f) * ImGuiHelpers.GlobalScale;
         if (ImGui.BeginChild("PartyPulseSidebar", new Vector2(sidebarWidth, 0), true))
         {
-            DrawSidebar(selectedVenue, authenticated, sidebarWidth);
+            DrawSidebar(selectedVenue, authenticated, activePage, sidebarWidth);
         }
         ImGui.EndChild();
 
@@ -173,10 +293,12 @@ public sealed class MainWindow : Window, IDisposable
         if (ImGui.BeginChild("PartyPulseContent", Vector2.Zero, false))
         {
             selectedVenue = DrawCompactHeader();
-            authenticated = selectedVenue?.IsRegistered == true &&
-                            CanDrawAuthenticatedFeatures(plugin.Authentication.GetSnapshot(selectedVenue));
-            EnsureSelectedPageVisible(selectedVenue, authenticated);
-            DrawSelectedPage(selectedVenue, authenticated);
+            authentication = selectedVenue?.IsRegistered == true
+                ? plugin.Authentication.GetSnapshot(selectedVenue)
+                : null;
+            authenticated = authentication is not null && CanDrawAuthenticatedFeatures(authentication);
+            activePage = ResolveVisiblePage(selectedVenue, authenticated);
+            DrawSelectedPage(selectedVenue, authenticated, activePage);
         }
         ImGui.EndChild();
 
@@ -186,6 +308,7 @@ public sealed class MainWindow : Window, IDisposable
     private void DrawSidebar(
         VenueConnectionConfiguration? selectedVenue,
         bool authenticated,
+        MainPage activePage,
         float sidebarWidth)
     {
         DrawLogo(sidebarWidth, plugin.Configuration.NavigationCollapsed);
@@ -199,10 +322,33 @@ public sealed class MainWindow : Window, IDisposable
             ImGui.Spacing();
         }
 
+        var toggleHeight = 34f * ImGuiHelpers.GlobalScale;
+        var navigationHeight = Math.Max(0, ImGui.GetContentRegionAvail().Y - toggleHeight);
+        if (ImGui.BeginChild("PartyPulseNavigationItems", new Vector2(0, navigationHeight), false))
+        {
+            DrawNavigationItems(selectedVenue, authenticated, activePage);
+        }
+        ImGui.EndChild();
+
+        var collapseLabel = plugin.Configuration.NavigationCollapsed ? ">>" : "<<  Collapse";
+        if (ImGui.Button($"{collapseLabel}##PartyPulseToggleNavigation", new Vector2(-1, 0)))
+        {
+            plugin.Configuration.NavigationCollapsed = !plugin.Configuration.NavigationCollapsed;
+            plugin.Configuration.Save();
+        }
+    }
+
+    private void DrawNavigationItems(
+        VenueConnectionConfiguration? selectedVenue,
+        bool authenticated,
+        MainPage activePage)
+    {
+        var profileId = selectedVenue?.ProfileId ?? Guid.Empty;
         string? currentGroup = null;
         foreach (var item in NavigationItems)
         {
-            if (!IsPageVisible(item.Page, selectedVenue, authenticated))
+            var visibleSubtabs = GetVisibleSubtabs(item, selectedVenue, authenticated);
+            if (visibleSubtabs.Count == 0)
             {
                 continue;
             }
@@ -235,29 +381,50 @@ public sealed class MainWindow : Window, IDisposable
             }
 
             var size = new Vector2(-1, 30f * ImGuiHelpers.GlobalScale);
-            if (PartyPulseUi.NavigationButton(label, $"Nav{item.Page}", selectedPage == item.Page, size))
+            if (PartyPulseUi.NavigationButton(label, $"Nav{item.Page}", activePage == item.Page, size))
             {
                 selectedPage = item.Page;
+                navigationState.TogglePage(profileId, item.Page, visibleSubtabs);
             }
 
             if (plugin.Configuration.NavigationCollapsed && ImGui.IsItemHovered())
             {
                 ImGui.SetTooltip(item.Label);
             }
+
+            if (plugin.Configuration.NavigationCollapsed ||
+                !navigationState.IsExpanded(profileId, item.Page))
+            {
+                continue;
+            }
+
+            var selectedSubtab = navigationState.Resolve(profileId, item.Page, visibleSubtabs);
+            ImGui.Indent(18f * ImGuiHelpers.GlobalScale);
+            foreach (var subtab in visibleSubtabs)
+            {
+                var selected = activePage == item.Page && selectedSubtab.Id == subtab.Id;
+                var subtabSize = new Vector2(-1, 25f * ImGuiHelpers.GlobalScale);
+                if (PartyPulseUi.SubNavigationButton(
+                        subtab.Label,
+                        $"SubNav{subtab.Id}",
+                        selected,
+                        subtabSize))
+                {
+                    selectedPage = item.Page;
+                    navigationState.Select(profileId, item.Page, subtab.Id);
+                }
+            }
+            ImGui.Unindent(18f * ImGuiHelpers.GlobalScale);
         }
 
-        var toggleHeight = 34f * ImGuiHelpers.GlobalScale;
-        var available = ImGui.GetContentRegionAvail();
-        if (available.Y > toggleHeight)
+        if (!plugin.Configuration.NavigationCollapsed &&
+            selectedVenue is not null &&
+            authenticated &&
+            navigationAccess.HasStarted(profileId) &&
+            !navigationAccess.IsResolved(profileId))
         {
-            ImGui.SetCursorPosY(ImGui.GetCursorPosY() + available.Y - toggleHeight);
-        }
-
-        var collapseLabel = plugin.Configuration.NavigationCollapsed ? ">>" : "<<  Collapse";
-        if (ImGui.Button($"{collapseLabel}##PartyPulseToggleNavigation", new Vector2(-1, 0)))
-        {
-            plugin.Configuration.NavigationCollapsed = !plugin.Configuration.NavigationCollapsed;
-            plugin.Configuration.Save();
+            ImGui.Spacing();
+            ImGui.TextDisabled("Loading available tools...");
         }
     }
 
@@ -309,13 +476,8 @@ public sealed class MainWindow : Window, IDisposable
                 plugin.ConnectVenue(selectedVenue);
             }
 
-            if (auth.Status == AuthenticationStatus.Connected)
-            {
-                plugin.EnsureVenueUsersLoaded(selectedVenue);
-                plugin.EnsureSelfServiceLoaded(selectedVenue);
-            }
-            else if (auth.Status == AuthenticationStatus.CharacterNotLinked &&
-                     plugin.IdentityProvider.TryGetCurrent(out var identity, out _))
+            if (auth.Status == AuthenticationStatus.CharacterNotLinked &&
+                plugin.IdentityProvider.TryGetCurrent(out var identity, out _))
             {
                 ImGui.Spacing();
                 ImGui.TextColored(
@@ -395,92 +557,124 @@ public sealed class MainWindow : Window, IDisposable
 
     private void DrawSelectedPage(
         VenueConnectionConfiguration? selectedVenue,
-        bool authenticated)
+        bool authenticated,
+        MainPage activePage)
     {
-        if (selectedPage == MainPage.Overview)
+        var item = NavigationItems.First(value => value.Page == activePage);
+        var visibleSubtabs = GetVisibleSubtabs(item, selectedVenue, authenticated);
+        if (visibleSubtabs.Count == 0)
         {
-            DrawOverviewPage(selectedVenue);
             return;
         }
 
-        if (selectedVenue is null || !authenticated)
+        var profileId = selectedVenue?.ProfileId ?? Guid.Empty;
+        var subtab = navigationState.Resolve(profileId, activePage, visibleSubtabs);
+
+        if (activePage != MainPage.Overview &&
+            (selectedVenue is null || !authenticated))
         {
-            PartyPulseUi.PageHeader("Venue access required", "Authenticate a registered venue account to use this page.");
             return;
         }
 
-        RunActivePageAutoRefresh(selectedVenue, selectedPage);
-
-        switch (selectedPage)
+        if (!ImGui.BeginChild(
+                $"PartyPulseSubtabContent##{profileId:N}-{subtab.Id}",
+                Vector2.Zero,
+                false))
         {
-            case MainPage.Openings:
-                venueOpeningsTab.Draw(selectedVenue);
+            ImGui.EndChild();
+            return;
+        }
+
+        PartyPulseUi.PageHeader($"{item.Label} · {subtab.Label}", item.Description);
+
+        switch (activePage)
+        {
+            case MainPage.Overview:
+                DrawOverviewPage(selectedVenue);
                 break;
+            case MainPage.Openings:
+            {
+                venueOpeningsTab.Draw(selectedVenue!, subtab.Id);
+                if (venueOpeningsTab.RequestedSubtab is { } requestedSubtab)
+                {
+                    navigationState.Select(profileId, MainPage.Openings, requestedSubtab);
+                }
+                break;
+            }
             case MainPage.Djs:
-                djsTab.Draw(selectedVenue);
+                djsTab.Draw(selectedVenue!, subtab.Id);
                 break;
             case MainPage.Greeter:
-                greeterTab.Draw(selectedVenue);
+                greeterTab.Draw(selectedVenue!, subtab.Id);
                 break;
             case MainPage.Vip:
-                vipTab.Draw(selectedVenue);
+                vipTab.Draw(selectedVenue!, subtab.Id);
                 break;
             case MainPage.Photoshoots:
-                photoshootsTab.Draw(selectedVenue);
+                photoshootsTab.Draw(selectedVenue!, subtab.Id);
                 break;
             case MainPage.Bar:
-                barTab.Draw(selectedVenue);
+                barTab.Draw(selectedVenue!, subtab.Id);
                 break;
             case MainPage.Court:
-                courtTab.Draw(selectedVenue);
+                courtTab.Draw(selectedVenue!, subtab.Id);
                 break;
             case MainPage.OtherSales:
-                otherSalesTab.Draw(selectedVenue);
+                otherSalesTab.Draw(selectedVenue!, subtab.Id);
                 break;
             case MainPage.OtherGames:
-                otherGamesTab.Draw(selectedVenue);
+                otherGamesTab.Draw(selectedVenue!, subtab.Id);
                 break;
             case MainPage.Purchases:
-                purchasesTab.Draw(selectedVenue);
+                purchasesTab.Draw(selectedVenue!, subtab.Id);
                 break;
             case MainPage.Staff:
-                staffTab.Draw(selectedVenue);
+                staffTab.Draw(selectedVenue!, subtab.Id);
                 break;
             case MainPage.TimedMacros:
-                timedMacrosTab.Draw(selectedVenue);
+                timedMacrosTab.Draw(selectedVenue!, subtab.Id);
                 break;
             case MainPage.Giveaways:
-                giveawaysTab.Draw(selectedVenue);
+                giveawaysTab.Draw(selectedVenue!, subtab.Id);
                 break;
             case MainPage.DiscordStatus:
-                discordStatusTab.Draw(selectedVenue);
+                discordStatusTab.Draw(selectedVenue!, subtab.Id);
                 break;
             case MainPage.Shoutrunner:
-                shoutrunnerTab.Draw(selectedVenue);
+                shoutrunnerTab.Draw(selectedVenue!, subtab.Id);
                 break;
             case MainPage.PartyFinder:
-                partyFinderTab.Draw(selectedVenue);
+                partyFinderTab.Draw(selectedVenue!, subtab.Id);
                 break;
             case MainPage.Finance:
-                financeTab.Draw(selectedVenue, requestedFinanceSettlementId);
+                financeTab.Draw(selectedVenue!, subtab.Id, requestedFinanceSettlementId);
                 requestedFinanceSettlementId = null;
                 break;
             case MainPage.Users:
             {
-                var snapshot = plugin.UserManagement.GetSnapshot(selectedVenue);
+                var snapshot = plugin.UserManagement.GetSnapshot(selectedVenue!);
                 if (snapshot.View?.Capabilities.CanView == true)
                 {
-                    DrawUsersPage(selectedVenue, snapshot);
+                    DrawUsersPage(selectedVenue!, snapshot, subtab.Id);
                 }
                 else
                 {
-                    PartyPulseUi.PageHeader("Users", snapshot.Message);
+                    ImGui.TextWrapped(snapshot.Message);
                 }
                 break;
             }
             case MainPage.MyAccount:
-                DrawMyAccountPage(selectedVenue);
+                DrawMyAccountPage(selectedVenue!, subtab.Id);
                 break;
+        }
+
+        ImGui.EndChild();
+
+        if (activePage != MainPage.Overview)
+        {
+            var now = DateTimeOffset.UtcNow;
+            refreshDeferral.Observe(ImGui.GetIO().WantTextInput, now);
+            RunActivePageAutoRefresh(selectedVenue!, activePage);
         }
     }
 
@@ -508,6 +702,11 @@ public sealed class MainWindow : Window, IDisposable
         }
 
         if (now - lastRefresh < interval)
+        {
+            return;
+        }
+
+        if (refreshDeferral.ShouldDefer(now))
         {
             return;
         }
@@ -579,45 +778,452 @@ public sealed class MainWindow : Window, IDisposable
         }
     }
 
-    private bool IsPageVisible(
-        MainPage page,
+    private void PrepareNavigationAccess(
+        VenueConnectionConfiguration? venue,
+        AuthenticationSnapshot? authentication,
+        bool authenticated)
+    {
+        if (venue is null)
+        {
+            return;
+        }
+
+        if (!authenticated)
+        {
+            navigationAccess.Reset(venue.ProfileId);
+            subtabVisibility.Clear(venue.ProfileId);
+            return;
+        }
+
+        if (authentication?.Status != AuthenticationStatus.Connected)
+        {
+            return;
+        }
+
+        var sessionStartedAt = authentication.LastAttemptAt ?? authentication.LastSuccessAt;
+        if (navigationAccess.ShouldStart(venue.ProfileId, sessionStartedAt))
+        {
+            // Let one authorized request establish or refresh the access token
+            // before starting the remaining capability requests in parallel.
+            plugin.RefreshVenueOpenings(venue);
+            return;
+        }
+
+        if (!navigationAccess.HasStartedRemainder(venue.ProfileId))
+        {
+            if (plugin.VenueOpenings.IsBusy(venue.ProfileId))
+            {
+                return;
+            }
+
+            if (navigationAccess.ShouldStartRemainder(venue.ProfileId))
+            {
+                RefreshRemainingNavigationAccess(venue);
+            }
+        }
+
+        if (navigationAccess.HasStartedRemainder(venue.ProfileId) &&
+            !navigationAccess.IsResolved(venue.ProfileId) &&
+            !IsNavigationAccessRefreshBusy(venue.ProfileId))
+        {
+            navigationAccess.MarkResolved(venue.ProfileId);
+        }
+    }
+
+    private void RefreshRemainingNavigationAccess(VenueConnectionConfiguration venue)
+    {
+        // Access tokens intentionally contain identity rather than the dynamic
+        // venue permission list. Resolve the existing capability views once per
+        // authenticated session before drawing permission-based navigation.
+        plugin.RefreshDjs(venue);
+        plugin.RefreshOpeningPublications(venue);
+        plugin.RefreshGreeter(venue);
+        plugin.RefreshVip(venue);
+        plugin.RefreshVipArrivals(venue);
+        plugin.RefreshVipPerks(venue);
+        plugin.RefreshPhotoshoots(venue);
+        plugin.RefreshBar(venue);
+        plugin.RefreshCourt(venue);
+        plugin.RefreshOtherSales(venue);
+        plugin.RefreshOtherGames(venue);
+        plugin.RefreshPurchases(venue);
+        plugin.RefreshStaff(venue);
+        plugin.RefreshTimedMacros(venue);
+        plugin.RefreshGiveaways(venue);
+        plugin.RefreshDiscordStatus(venue);
+        plugin.RefreshVenueUsers(venue);
+    }
+
+    private bool IsNavigationAccessRefreshBusy(Guid profileId) =>
+        plugin.VenueOpenings.IsBusy(profileId) ||
+        plugin.Djs.IsBusy(profileId) ||
+        plugin.OpeningPublications.IsBusy(profileId) ||
+        plugin.Greeter.IsBusy(profileId) ||
+        plugin.Vip.IsBusy(profileId) ||
+        plugin.VipArrivals.IsBusy(profileId) ||
+        plugin.VipPerks.IsBusy(profileId) ||
+        plugin.Photoshoots.IsBusy(profileId) ||
+        plugin.Bar.IsBusy(profileId) ||
+        plugin.Court.IsBusy(profileId) ||
+        plugin.OtherSales.IsBusy(profileId) ||
+        plugin.OtherGames.IsBusy(profileId) ||
+        plugin.Purchases.IsBusy(profileId) ||
+        plugin.Staff.IsBusy(profileId) ||
+        plugin.TimedMacros.IsBusy(profileId) ||
+        plugin.Giveaways.IsBusy(profileId) ||
+        plugin.DiscordStatus.IsBusy(profileId) ||
+        plugin.UserManagement.IsBusy(profileId);
+
+    private IReadOnlyList<MainSubtabDefinition> GetVisibleSubtabs(
+        NavigationItem item,
         VenueConnectionConfiguration? venue,
         bool authenticated)
     {
-        if (page == MainPage.Overview)
+        if (item.Page == MainPage.Overview)
         {
-            return true;
+            return item.Subtabs;
         }
 
         if (venue is null || !authenticated)
         {
-            return false;
+            return Array.Empty<MainSubtabDefinition>();
         }
 
-        return page switch
+        if (item.Page is MainPage.Finance or MainPage.MyAccount)
         {
-            MainPage.Djs => plugin.Djs.GetSnapshot(venue).View?.Capabilities.CanManageDirectory ?? true,
-            MainPage.Openings => plugin.VenueOpenings.GetSnapshot(venue).View?.Capabilities.CanManage ?? true,
-            MainPage.TimedMacros => plugin.TimedMacros.GetSnapshot(venue).View?.Capabilities is not { } capabilities ||
-                                    capabilities.CanExecuteAny || capabilities.CanManageAny,
-            MainPage.Giveaways => plugin.Giveaways.GetSnapshot(venue).View?.Capabilities.CanManage ?? true,
-            MainPage.DiscordStatus => plugin.DiscordStatus.GetSnapshot(venue).View?.Capabilities.CanManage ?? true,
-            MainPage.Shoutrunner => plugin.OpeningPublications.GetSnapshot(venue).View?.Capabilities.CanUseShoutrunner ?? true,
-            MainPage.PartyFinder => plugin.OpeningPublications.GetSnapshot(venue).View?.Capabilities.CanUsePartyFinder ?? true,
-            MainPage.Greeter => plugin.Greeter.GetSnapshot(venue).Context?.Capabilities.CanUse ?? true,
-            MainPage.Users => plugin.UserManagement.GetSnapshot(venue).View?.Capabilities.CanView == true,
-            _ => true,
-        };
+            return item.Subtabs;
+        }
+
+        if (!navigationAccess.IsResolved(venue.ProfileId))
+        {
+            return Array.Empty<MainSubtabDefinition>();
+        }
+
+        return item.Subtabs
+            .Where(subtab => IsSubtabVisible(subtab.Id, venue))
+            .ToArray();
     }
 
-    private void EnsureSelectedPageVisible(
+    private bool IsSubtabVisible(MainSubtab subtab, VenueConnectionConfiguration venue)
+    {
+        var visibilityKey = (venue.ProfileId, subtab);
+        if (IsSubtabDenied(subtab, venue))
+        {
+            return subtabVisibility.Resolve(visibilityKey, false);
+        }
+
+        bool? visibility = subtab switch
+        {
+            MainSubtab.OverviewStatus => true,
+
+            MainSubtab.OpeningsSchedule =>
+                plugin.VenueOpenings.GetSnapshot(venue).View?.Capabilities.CanManage,
+            MainSubtab.OpeningsHistory =>
+                plugin.VenueOpenings.GetSnapshot(venue).View?.Capabilities.CanManage,
+            MainSubtab.OpeningsDjs => CanManageOpeningDjs(),
+            MainSubtab.OpeningsPublications => CanManageOpeningPublications(),
+
+            MainSubtab.DjsSettings or MainSubtab.DjsDirectory or MainSubtab.DjsCharacters =>
+                plugin.Djs.GetSnapshot(venue).View?.Capabilities.CanManageDirectory,
+            MainSubtab.DjsPayments => CanManageDjPayments(),
+
+            MainSubtab.GreeterArrivals =>
+                plugin.Greeter.GetSnapshot(venue).Context?.Capabilities.CanUse,
+            MainSubtab.GreeterMacros =>
+                plugin.Greeter.GetSnapshot(venue).Context?.Capabilities.CanManageMacros,
+
+            MainSubtab.VipArrivals => CanUseVipArrivals(),
+            MainSubtab.VipSales =>
+                plugin.Vip.GetSnapshot(venue).View?.Capabilities.CanSell,
+            MainSubtab.VipPlayers =>
+                plugin.Vip.GetSnapshot(venue).View?.Capabilities.CanView,
+            MainSubtab.VipPackages =>
+                plugin.Vip.GetSnapshot(venue).View?.Capabilities.CanManagePackages,
+            MainSubtab.VipPerks => CanViewVipPerks(),
+
+            MainSubtab.PhotoshootsSales =>
+                plugin.Photoshoots.GetSnapshot(venue).View?.Capabilities.CanSell,
+            MainSubtab.PhotoshootsPackages =>
+                plugin.Photoshoots.GetSnapshot(venue).View?.Capabilities.CanManagePackages,
+            MainSubtab.PhotoshootsCommission =>
+                plugin.Photoshoots.GetSnapshot(venue).View?.Capabilities.CanManageCommission,
+            MainSubtab.PhotoshootsHistory =>
+                plugin.Photoshoots.GetSnapshot(venue).View?.Capabilities.CanView,
+
+            MainSubtab.BarBuyouts or
+                MainSubtab.BarBuyoutHistory or
+                MainSubtab.BarGambaSalesHistory or
+                MainSubtab.BarGambaGamesHistory or
+                MainSubtab.BarSettlements =>
+                plugin.Bar.GetSnapshot(venue).View?.Capabilities.CanView,
+            MainSubtab.BarGamba => CanUseBarGamba(),
+            MainSubtab.BarSettings or MainSubtab.BarPackages =>
+                plugin.Bar.GetSnapshot(venue).View?.Capabilities.CanManage,
+
+            MainSubtab.CourtSales =>
+                plugin.Court.GetSnapshot(venue).View?.Capabilities.CanSell,
+            MainSubtab.CourtSettlements or MainSubtab.CourtAccountants => CanManageCourtFinance(),
+            MainSubtab.CourtCommission =>
+                plugin.Court.GetSnapshot(venue).View?.Capabilities.CanManageCommission,
+            MainSubtab.CourtOffers =>
+                plugin.Court.GetSnapshot(venue).View?.Capabilities.CanManage,
+            MainSubtab.CourtTransactions or MainSubtab.CourtSalesHistory => true,
+
+            MainSubtab.OtherSalesSell =>
+                plugin.OtherSales.GetSnapshot(venue).View?.Capabilities.CanSell,
+            MainSubtab.OtherSalesCatalog =>
+                plugin.OtherSales.GetSnapshot(venue).View?.Capabilities.CanManageItems,
+            MainSubtab.OtherSalesHistory =>
+                plugin.OtherSales.GetSnapshot(venue).View?.Capabilities.CanView,
+            MainSubtab.OtherGamesSell =>
+                plugin.OtherGames.GetSnapshot(venue).View?.Capabilities.CanSell,
+            MainSubtab.OtherGamesCatalog =>
+                plugin.OtherGames.GetSnapshot(venue).View?.Capabilities.CanManageItems,
+            MainSubtab.OtherGamesHistory =>
+                plugin.OtherGames.GetSnapshot(venue).View?.Capabilities.CanView,
+
+            MainSubtab.PurchasesCreate =>
+                plugin.Purchases.GetSnapshot(venue).View?.Capabilities.CanCreate,
+            MainSubtab.PurchasesHistory =>
+                plugin.Purchases.GetSnapshot(venue).View?.Capabilities.CanView,
+
+            MainSubtab.StaffAttendance => CanManageStaffAttendance(),
+            MainSubtab.StaffDirectory or MainSubtab.StaffCharacters or MainSubtab.StaffLifecycle =>
+                plugin.Staff.GetSnapshot(venue).View?.Capabilities.CanManage,
+            MainSubtab.StaffJobs =>
+                plugin.Staff.GetSnapshot(venue).View?.Capabilities.CanManageJobs,
+            MainSubtab.StaffTimeEntries => true,
+            MainSubtab.StaffPayouts =>
+                plugin.Staff.GetSnapshot(venue).View?.Capabilities.CanPay,
+
+            MainSubtab.TimedMacrosRun =>
+                plugin.TimedMacros.GetSnapshot(venue).View?.Capabilities.CanExecuteAny,
+            MainSubtab.TimedMacrosSetup =>
+                plugin.TimedMacros.GetSnapshot(venue).View?.Capabilities.CanManageAny,
+
+            MainSubtab.GiveawaysManage or MainSubtab.GiveawaysScheduler =>
+                plugin.Giveaways.GetSnapshot(venue).View?.Capabilities.CanManage,
+            MainSubtab.DiscordStatusSettings or
+                MainSubtab.DiscordStatusNotifications or
+                MainSubtab.DiscordStatusPublication =>
+                plugin.DiscordStatus.GetSnapshot(venue).View?.Capabilities.CanManage,
+
+            MainSubtab.ShoutrunnerRun or MainSubtab.ShoutrunnerRoute =>
+                plugin.OpeningPublications.GetSnapshot(venue).View?.Capabilities.CanUseShoutrunner,
+            MainSubtab.ShoutrunnerTemplates =>
+                plugin.OpeningPublications.GetSnapshot(venue).View?.Capabilities.CanManageShoutrunnerTemplates,
+            MainSubtab.PartyFinderRun =>
+                plugin.OpeningPublications.GetSnapshot(venue).View?.Capabilities.CanUsePartyFinder,
+            MainSubtab.PartyFinderTemplates =>
+                plugin.OpeningPublications.GetSnapshot(venue).View?.Capabilities.CanManagePartyFinderTemplates,
+
+            MainSubtab.FinanceBalances or MainSubtab.FinanceSettlements => true,
+            MainSubtab.UsersCreate => CanCreateUsers(),
+            MainSubtab.UsersDirectory =>
+                plugin.UserManagement.GetSnapshot(venue).View?.Capabilities.CanView,
+            MainSubtab.MyAccountCharacters or
+                MainSubtab.MyAccountDevices or
+                MainSubtab.MyAccountAuthorization or
+                MainSubtab.MyAccountLocalData => true,
+            _ => true,
+        };
+
+        return subtabVisibility.Resolve(visibilityKey, visibility);
+
+        bool? CanManageOpeningDjs()
+        {
+            var openings = plugin.VenueOpenings.GetSnapshot(venue).View;
+            var djs = plugin.Djs.GetSnapshot(venue).View;
+            if (openings?.Capabilities.CanManage == false)
+            {
+                return false;
+            }
+
+            if (openings is null || djs is null)
+            {
+                return null;
+            }
+
+            return djs.Capabilities.CanManageSchedule || djs.Capabilities.CanManagePayments;
+        }
+
+        bool? CanManageOpeningPublications()
+        {
+            var openings = plugin.VenueOpenings.GetSnapshot(venue).View;
+            var publications = plugin.OpeningPublications.GetSnapshot(venue).View;
+            if (openings?.Capabilities.CanManage == false ||
+                publications?.Capabilities.CanManageOpenings == false)
+            {
+                return false;
+            }
+
+            return openings is null || publications is null ? null : true;
+        }
+
+        bool? CanManageDjPayments()
+        {
+            var djs = plugin.Djs.GetSnapshot(venue).View;
+            return djs is null
+                ? null
+                : djs.Capabilities.CanManageDirectory && djs.Capabilities.CanManagePayments;
+        }
+
+        bool? CanUseVipArrivals()
+        {
+            var arrivals = plugin.VipArrivals.GetSnapshot(venue).Context;
+            return arrivals is null
+                ? null
+                : arrivals.Capabilities.CanUseArrival ||
+                  arrivals.Capabilities.CanManageOpenings ||
+                  arrivals.Capabilities.CanManageMacros;
+        }
+
+        bool? CanViewVipPerks()
+        {
+            var vip = plugin.Vip.GetSnapshot(venue).View;
+            var perks = plugin.VipPerks.GetSnapshot(venue).View;
+            if (vip?.Capabilities.CanView == false || perks?.Capabilities.CanView == false)
+            {
+                return false;
+            }
+
+            return vip is null || perks is null ? null : true;
+        }
+
+        bool? CanUseBarGamba()
+        {
+            var bar = plugin.Bar.GetSnapshot(venue).View;
+            return bar is null
+                ? null
+                : bar.Capabilities.CanSell ||
+                  bar.Capabilities.CanManageGame ||
+                  bar.Capabilities.CanCancelGame;
+        }
+
+        bool? CanManageCourtFinance()
+        {
+            var court = plugin.Court.GetSnapshot(venue).View;
+            return court is null
+                ? null
+                : court.Capabilities.CanFinance || court.Capabilities.CanAccount;
+        }
+
+        bool? CanManageStaffAttendance()
+        {
+            var staff = plugin.Staff.GetSnapshot(venue).View;
+            return staff is null
+                ? null
+                : staff.Capabilities.CanManage || staff.Capabilities.CanManageCourtAttendance;
+        }
+
+        bool? CanCreateUsers()
+        {
+            var capabilities = plugin.UserManagement.GetSnapshot(venue).View?.Capabilities;
+            return capabilities is null ? null : capabilities.CanView && capabilities.CanCreate;
+        }
+    }
+
+    private bool IsSubtabDenied(MainSubtab subtab, VenueConnectionConfiguration venue) =>
+        subtab switch
+        {
+            MainSubtab.OpeningsSchedule or MainSubtab.OpeningsHistory =>
+                plugin.VenueOpenings.GetSnapshot(venue).Status ==
+                PartyPulse.VenueOpenings.VenueOpeningScheduleStatus.Denied,
+            MainSubtab.OpeningsDjs =>
+                plugin.VenueOpenings.GetSnapshot(venue).Status ==
+                    PartyPulse.VenueOpenings.VenueOpeningScheduleStatus.Denied ||
+                plugin.Djs.GetSnapshot(venue).Status == PartyPulse.Djs.DjManagementStatus.Denied,
+            MainSubtab.OpeningsPublications =>
+                plugin.VenueOpenings.GetSnapshot(venue).Status ==
+                    PartyPulse.VenueOpenings.VenueOpeningScheduleStatus.Denied ||
+                plugin.OpeningPublications.GetSnapshot(venue).Status ==
+                    PartyPulse.OpeningPublications.OpeningPublicationManagementStatus.Denied,
+            MainSubtab.DjsSettings or
+                MainSubtab.DjsDirectory or
+                MainSubtab.DjsCharacters or
+                MainSubtab.DjsPayments =>
+                plugin.Djs.GetSnapshot(venue).Status == PartyPulse.Djs.DjManagementStatus.Denied,
+            MainSubtab.GreeterArrivals or MainSubtab.GreeterMacros =>
+                plugin.Greeter.GetSnapshot(venue).Status == PartyPulse.Greeter.GreeterManagementStatus.Denied,
+            MainSubtab.VipArrivals =>
+                plugin.VipArrivals.GetSnapshot(venue).Status == PartyPulse.Vip.VipArrivalManagementStatus.Denied,
+            MainSubtab.VipSales or MainSubtab.VipPlayers or MainSubtab.VipPackages =>
+                plugin.Vip.GetSnapshot(venue).Status == PartyPulse.Vip.VipManagementStatus.Denied,
+            MainSubtab.VipPerks =>
+                plugin.Vip.GetSnapshot(venue).Status == PartyPulse.Vip.VipManagementStatus.Denied ||
+                plugin.VipPerks.GetSnapshot(venue).Status == PartyPulse.Vip.VipPerkManagementStatus.Denied,
+            MainSubtab.PhotoshootsSales or
+                MainSubtab.PhotoshootsPackages or
+                MainSubtab.PhotoshootsCommission or
+                MainSubtab.PhotoshootsHistory =>
+                plugin.Photoshoots.GetSnapshot(venue).Status == PartyPulse.Photoshoots.PhotoshootManagementStatus.Denied,
+            MainSubtab.BarBuyouts or
+                MainSubtab.BarGamba or
+                MainSubtab.BarSettlements or
+                MainSubtab.BarSettings or
+                MainSubtab.BarPackages or
+                MainSubtab.BarBuyoutHistory or
+                MainSubtab.BarGambaSalesHistory or
+                MainSubtab.BarGambaGamesHistory =>
+                plugin.Bar.GetSnapshot(venue).Status == PartyPulse.Bar.BarManagementStatus.Denied,
+            MainSubtab.CourtSales or
+                MainSubtab.CourtSettlements or
+                MainSubtab.CourtCommission or
+                MainSubtab.CourtOffers or
+                MainSubtab.CourtAccountants or
+                MainSubtab.CourtTransactions or
+                MainSubtab.CourtSalesHistory =>
+                plugin.Court.GetSnapshot(venue).Status == PartyPulse.Court.CourtManagementStatus.Denied,
+            MainSubtab.OtherSalesSell or MainSubtab.OtherSalesCatalog or MainSubtab.OtherSalesHistory =>
+                plugin.OtherSales.GetSnapshot(venue).Status == PartyPulse.OtherSales.OtherSalesManagementStatus.Denied,
+            MainSubtab.OtherGamesSell or MainSubtab.OtherGamesCatalog or MainSubtab.OtherGamesHistory =>
+                plugin.OtherGames.GetSnapshot(venue).Status == PartyPulse.OtherGames.OtherGamesManagementStatus.Denied,
+            MainSubtab.PurchasesCreate or MainSubtab.PurchasesHistory =>
+                plugin.Purchases.GetSnapshot(venue).Status == PartyPulse.Purchases.PurchaseManagementStatus.Denied,
+            MainSubtab.StaffAttendance or
+                MainSubtab.StaffDirectory or
+                MainSubtab.StaffCharacters or
+                MainSubtab.StaffLifecycle or
+                MainSubtab.StaffJobs or
+                MainSubtab.StaffTimeEntries or
+                MainSubtab.StaffPayouts =>
+                plugin.Staff.GetSnapshot(venue).Status == PartyPulse.Staff.StaffManagementStatus.Denied,
+            MainSubtab.TimedMacrosRun or MainSubtab.TimedMacrosSetup =>
+                plugin.TimedMacros.GetSnapshot(venue).Status ==
+                PartyPulse.TimedMacros.TimedMacroManagementStatus.Denied,
+            MainSubtab.GiveawaysManage or MainSubtab.GiveawaysScheduler =>
+                plugin.Giveaways.GetSnapshot(venue).Status ==
+                PartyPulse.Giveaways.GiveawayManagementStatus.Denied,
+            MainSubtab.DiscordStatusSettings or
+                MainSubtab.DiscordStatusNotifications or
+                MainSubtab.DiscordStatusPublication =>
+                plugin.DiscordStatus.GetSnapshot(venue).Status ==
+                PartyPulse.DiscordStatus.DiscordStatusManagementStatus.Denied,
+            MainSubtab.ShoutrunnerRun or
+                MainSubtab.ShoutrunnerRoute or
+                MainSubtab.ShoutrunnerTemplates or
+                MainSubtab.PartyFinderRun or
+                MainSubtab.PartyFinderTemplates =>
+                plugin.OpeningPublications.GetSnapshot(venue).Status ==
+                PartyPulse.OpeningPublications.OpeningPublicationManagementStatus.Denied,
+            MainSubtab.UsersCreate or MainSubtab.UsersDirectory =>
+                plugin.UserManagement.GetSnapshot(venue).Status == VenueUserManagementStatus.Denied,
+            _ => false,
+        };
+
+    private MainPage ResolveVisiblePage(
         VenueConnectionConfiguration? venue,
         bool authenticated)
     {
-        if (!IsPageVisible(selectedPage, venue, authenticated))
+        var selectedItem = NavigationItems.First(value => value.Page == selectedPage);
+        if (GetVisibleSubtabs(selectedItem, venue, authenticated).Count > 0)
         {
-            selectedPage = MainPage.Overview;
+            return selectedPage;
         }
+
+        return NavigationItems
+            .First(item => GetVisibleSubtabs(item, venue, authenticated).Count > 0)
+            .Page;
     }
 
     private static bool CanDrawAuthenticatedFeatures(AuthenticationSnapshot snapshot)
@@ -635,10 +1241,6 @@ public sealed class MainWindow : Window, IDisposable
 
     private void DrawOverviewPage(VenueConnectionConfiguration? selectedVenue)
     {
-        PartyPulseUi.PageHeader(
-            "Overview",
-            "Current character and venue status. Detailed venue connection information is available in Settings.");
-
         if (plugin.IdentityProvider.TryGetCurrent(out var identity, out var reason))
         {
             PartyPulseUi.SectionHeader("Current character");
@@ -665,12 +1267,10 @@ public sealed class MainWindow : Window, IDisposable
             "Use the navigation on the left to move between operational areas. Only pages available to this venue account are shown.");
     }
 
-    private void DrawMyAccountPage(VenueConnectionConfiguration venue)
+    private void DrawMyAccountPage(
+        VenueConnectionConfiguration venue,
+        MainSubtab subtab)
     {
-        PartyPulseUi.PageHeader(
-            "My Account",
-            "Manage your linked characters, additional devices, venue authorization, and local venue data.");
-
         var snapshot = plugin.SelfService.GetSnapshot(venue);
         if (snapshot.Status is SelfServiceStatus.NotLoaded or SelfServiceStatus.Loading)
         {
@@ -698,7 +1298,27 @@ public sealed class MainWindow : Window, IDisposable
             plugin.RefreshSelfService(venue);
         }
 
-        PartyPulseUi.SectionHeader("Registered characters");
+        switch (subtab)
+        {
+            case MainSubtab.MyAccountCharacters:
+                DrawAccountCharacters(venue, view);
+                break;
+            case MainSubtab.MyAccountDevices:
+                DrawAccountDevices(venue, snapshot);
+                break;
+            case MainSubtab.MyAccountAuthorization:
+                DrawAccountAuthorization(venue, view);
+                break;
+            case MainSubtab.MyAccountLocalData:
+                DrawAccountLocalData(venue);
+                break;
+        }
+    }
+
+    private void DrawAccountCharacters(
+        VenueConnectionConfiguration venue,
+        SelfServiceViewResponse view)
+    {
         var tableFlags = ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp;
         if (ImGui.BeginTable("SelfCharacters", 3, tableFlags))
         {
@@ -747,9 +1367,13 @@ public sealed class MainWindow : Window, IDisposable
 
             ImGui.EndTable();
         }
+    }
 
-        PartyPulseUi.SectionHeader(
-            "Register another device",
+    private void DrawAccountDevices(
+        VenueConnectionConfiguration venue,
+        SelfServiceSnapshot snapshot)
+    {
+        ImGui.TextWrapped(
             "Create a short-lived code, then add this venue on the second computer and choose Register with device code.");
         if (ImGui.Button("Create device pairing code"))
         {
@@ -765,8 +1389,12 @@ public sealed class MainWindow : Window, IDisposable
                 ImGui.SetClipboardText(pairing.PairingCode);
             }
         }
+    }
 
-        PartyPulseUi.SectionHeader("Venue authorization");
+    private void DrawAccountAuthorization(
+        VenueConnectionConfiguration venue,
+        SelfServiceViewResponse view)
+    {
         if (view.IsLastOwner)
         {
             ImGui.TextColored(
@@ -782,8 +1410,10 @@ public sealed class MainWindow : Window, IDisposable
         }
         ImGui.EndDisabled();
         ImGui.TextDisabled("Disables your venue user and revokes every registered device for that user.");
+    }
 
-        PartyPulseUi.SectionHeader("Local venue data");
+    private void DrawAccountLocalData(VenueConnectionConfiguration venue)
+    {
         if (ImGui.Button("Remove venue from this device"))
         {
             pendingLocalRemovalVenue = venue;
@@ -794,12 +1424,9 @@ public sealed class MainWindow : Window, IDisposable
 
     private void DrawUsersPage(
         VenueConnectionConfiguration venue,
-        VenueUserManagementSnapshot snapshot)
+        VenueUserManagementSnapshot snapshot,
+        MainSubtab subtab)
     {
-        PartyPulseUi.PageHeader(
-            "Users",
-            "Create venue users, review access, and open a user to manage profile, recovery, and permissions.");
-
         var view = snapshot.View!;
         var isBusy = plugin.UserManagement.IsBusy(venue.ProfileId);
         if (addUserProfileId != venue.ProfileId)
@@ -816,7 +1443,7 @@ public sealed class MainWindow : Window, IDisposable
         }
         ImGui.EndDisabled();
 
-        if (view.Capabilities.CanCreate)
+        if (subtab == MainSubtab.UsersCreate && view.Capabilities.CanCreate)
         {
             PartyPulseUi.SectionHeader("Add venue user");
             ImGui.SetNextItemWidth(250 * ImGuiHelpers.GlobalScale);
@@ -849,7 +1476,7 @@ public sealed class MainWindow : Window, IDisposable
             }
         }
 
-        if (snapshot.LastInviteCode is { } inviteCode)
+        if (subtab == MainSubtab.UsersCreate && snapshot.LastInviteCode is { } inviteCode)
         {
             ImGui.Spacing();
             ImGui.TextWrapped($"Invite code for {inviteCode.DisplayName}: {inviteCode.Code}");
@@ -858,6 +1485,11 @@ public sealed class MainWindow : Window, IDisposable
             {
                 ImGui.SetClipboardText(inviteCode.Code);
             }
+        }
+
+        if (subtab == MainSubtab.UsersCreate)
+        {
+            return;
         }
 
         PartyPulseUi.SectionHeader("Venue users");

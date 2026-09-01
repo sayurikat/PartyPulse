@@ -8,6 +8,7 @@ public enum DjManagementStatus
     NotLoaded,
     Loading,
     Ready,
+    Denied,
     Failed,
 }
 

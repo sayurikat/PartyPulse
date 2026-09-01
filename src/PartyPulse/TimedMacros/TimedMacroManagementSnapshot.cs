@@ -8,6 +8,7 @@ public enum TimedMacroManagementStatus
     NotLoaded,
     Loading,
     Ready,
+    Denied,
     Failed,
 }
 

@@ -27,7 +27,7 @@ public sealed class DjsTabRenderer(Plugin plugin)
     private bool balanceRefundConfirmed;
     private string payoutTargetKey = string.Empty;
 
-    public void Draw(VenueConnectionConfiguration venue)
+    public void Draw(VenueConnectionConfiguration venue, MainSubtab subtab)
     {
         ResetForVenueChange(venue);
         plugin.EnsureDjsLoaded(venue);
@@ -36,8 +36,6 @@ public sealed class DjsTabRenderer(Plugin plugin)
         var view = snapshot.View;
         if (view is not null && !view.Capabilities.CanManageDirectory)
             return;
-
-        PartyPulseUi.PageHeader("DJs", "Manage the venue DJ directory, linked characters, notes, and default hourly pricing.");
 
         var isBusy = plugin.Djs.IsBusy(venue.ProfileId);
         ImGui.BeginDisabled(isBusy);
@@ -53,23 +51,25 @@ public sealed class DjsTabRenderer(Plugin plugin)
         }
 
         EnsureSettingsDraft(view);
-        DrawVenueSettings(venue, view, isBusy);
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Spacing();
-        DrawEditor(venue, isBusy);
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Spacing();
-        DrawCharacterLinks(venue, view, isBusy);
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Spacing();
-        DrawBalancePayout(venue, view, isBusy);
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Spacing();
-        DrawDirectory(venue, view, isBusy);
+        switch (subtab)
+        {
+            case MainSubtab.DjsDirectory:
+                DrawEditor(venue, isBusy);
+                ImGui.Spacing();
+                ImGui.Separator();
+                ImGui.Spacing();
+                DrawDirectory(venue, view, isBusy);
+                break;
+            case MainSubtab.DjsCharacters:
+                DrawCharacterLinks(venue, view, isBusy);
+                break;
+            case MainSubtab.DjsPayments:
+                DrawBalancePayout(venue, view, isBusy);
+                break;
+            case MainSubtab.DjsSettings:
+                DrawVenueSettings(venue, view, isBusy);
+                break;
+        }
         DrawArchivePopup(venue, isBusy);
     }
 

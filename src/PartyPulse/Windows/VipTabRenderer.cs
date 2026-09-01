@@ -71,7 +71,7 @@ public sealed class VipTabRenderer(Plugin plugin)
     private bool openRedeemPerkPopup;
     private bool openUndoPerkPopup;
 
-    public void Draw(VenueConnectionConfiguration venue)
+    public void Draw(VenueConnectionConfiguration venue, MainSubtab subtab)
     {
         ResetForVenueChange(venue);
         plugin.EnsureVipLoaded(venue);
@@ -81,8 +81,6 @@ public sealed class VipTabRenderer(Plugin plugin)
 
         var snapshot = plugin.Vip.GetSnapshot(venue);
         var isBusy = plugin.Vip.IsBusy(venue.ProfileId);
-
-        PartyPulseUi.PageHeader("VIP", "Manage VIP players, subscriptions, arrivals, packages, perks, and related macros.");
 
         ImGui.BeginDisabled(isBusy);
         if (ImGui.Button("Refresh VIP data"))
@@ -97,53 +95,71 @@ public sealed class VipTabRenderer(Plugin plugin)
         ImGui.TextDisabled("Data is cached for this venue until refreshed or changed.");
 
         var vipDataReady = snapshot.View is not null;
-        DrawArrivalToolbar(venue, vipDataReady);
-        DrawNewVipOffer(venue);
-        DrawVipTimedMacro(venue);
+        if (subtab == MainSubtab.VipArrivals)
+        {
+            DrawArrivalToolbar(venue, vipDataReady);
+            DrawNewVipOffer(venue);
+            DrawVipTimedMacro(venue);
+            DrawArrivalAdministration(venue);
+            DrawPerkPopups(venue);
+            return;
+        }
 
         if (!vipDataReady)
         {
             ImGui.Spacing();
             ImGui.TextWrapped(snapshot.Message);
-            DrawArrivalAdministration(venue);
+            DrawPerkPopups(venue);
             return;
         }
 
         var view = snapshot.View!;
-        if (view.Capabilities.CanSell)
+        switch (subtab)
         {
-            ImGui.SameLine();
-            ImGui.TextUnformatted($"My unpaid VIP sales: {view.PersonalUnpaidGil:N0} gil");
-            if (view.PersonalPendingSettlementGil > 0)
+            case MainSubtab.VipSales when view.Capabilities.CanSell:
+                ImGui.TextUnformatted($"My unpaid VIP sales: {view.PersonalUnpaidGil:N0} gil");
+                if (view.PersonalPendingSettlementGil > 0)
+                {
+                    ImGui.SameLine();
+                    ImGui.TextDisabled($"Pending: {view.PersonalPendingSettlementGil:N0} gil");
+                }
+                DrawTargetSection(venue, view, isBusy);
+                DrawSettlementControls(venue, view, isBusy);
+                break;
+            case MainSubtab.VipPlayers:
+                DrawVipPlayerList(venue, view, isBusy);
+                break;
+            case MainSubtab.VipPackages when view.Capabilities.CanManagePackages:
+                DrawPackageManagement(venue, view, isBusy);
+                break;
+            case MainSubtab.VipPerks:
             {
-                ImGui.SameLine();
-                ImGui.TextDisabled($"Pending: {view.PersonalPendingSettlementGil:N0} gil");
+                DrawCurrentTargetPerks(venue, isBusy);
+                var perkSnapshot = plugin.VipPerks.GetSnapshot(venue);
+                if (perkSnapshot.Status == VipPerkManagementStatus.Ready &&
+                    perkSnapshot.View is { Capabilities.CanManage: true } perkView)
+                {
+                    ImGui.Spacing();
+                    ImGui.Separator();
+                    ImGui.Spacing();
+                    DrawPerkCatalog(
+                        venue,
+                        view,
+                        perkView,
+                        isBusy || plugin.VipPerks.IsBusy(venue.ProfileId));
+                }
+                break;
             }
         }
 
-        ImGui.Spacing();
-        DrawTargetSection(venue, view, isBusy);
-        DrawCurrentTargetPerks(venue, isBusy);
-        DrawSettlementControls(venue, view, isBusy);
+        DrawPerkPopups(venue);
+    }
 
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Spacing();
-        DrawVipPlayerList(venue, view, isBusy);
-
-        if (view.Capabilities.CanManagePackages)
-        {
-            ImGui.Spacing();
-            ImGui.Separator();
-            ImGui.Spacing();
-            DrawPackageManagement(venue, view, isBusy);
-        }
-
-        DrawArrivalAdministration(venue);
+    private void DrawPerkPopups(VenueConnectionConfiguration venue)
+    {
         OpenQueuedPerkPopups();
         DrawRedeemPerkPopup(venue);
         DrawUndoPerkPopup(venue);
-
     }
 
     private void DrawVipTimedMacro(VenueConnectionConfiguration venue)
@@ -316,11 +332,6 @@ public sealed class VipTabRenderer(Plugin plugin)
         ImGui.Spacing();
         ImGui.Separator();
         ImGui.Spacing();
-        if (!ImGui.CollapsingHeader("VIP arrival setup"))
-        {
-            return;
-        }
-
         var isBusy = plugin.VipArrivals.IsBusy(venue.ProfileId);
         if (context.Capabilities.CanManageOpenings)
         {
@@ -833,7 +844,7 @@ public sealed class VipTabRenderer(Plugin plugin)
                 "VipPlayers",
                 5,
                 flags,
-                new Vector2(0, 230 * ImGuiHelpers.GlobalScale)))
+                new Vector2(0, 630 * ImGuiHelpers.GlobalScale)))
         {
             return;
         }
@@ -1039,11 +1050,6 @@ public sealed class VipTabRenderer(Plugin plugin)
         VipManagementViewResponse view,
         bool isBusy)
     {
-        if (!ImGui.CollapsingHeader("VIP package definitions"))
-        {
-            return;
-        }
-
         if (ImGui.Button("New package"))
         {
             ResetPackageEditor();
@@ -1306,15 +1312,6 @@ public sealed class VipTabRenderer(Plugin plugin)
             "Configured VIP roles are fully managed by PartyPulse; manual assignments are removed during reconciliation.");
     
 
-        var perkSnapshot = plugin.VipPerks.GetSnapshot(venue);
-        if (perkSnapshot.Status == VipPerkManagementStatus.Ready &&
-            perkSnapshot.View is { Capabilities.CanManage: true } perkView)
-        {
-            ImGui.Spacing();
-            ImGui.Separator();
-            ImGui.Spacing();
-            DrawPerkCatalog(venue, view, perkView, isBusy || plugin.VipPerks.IsBusy(venue.ProfileId));
-        }
     }
 
     private static string GetSubscriptionStatus(VipSubscriptionSummary subscription)

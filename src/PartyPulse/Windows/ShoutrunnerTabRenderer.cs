@@ -21,15 +21,15 @@ public sealed class ShoutrunnerTabRenderer(Plugin plugin)
     private bool requestResetPopup;
     private bool requestReportPopup;
 
-    public void Draw(VenueConnectionConfiguration venue)
+    public void Draw(VenueConnectionConfiguration venue, MainSubtab subtab)
     {
         plugin.EnsureOpeningPublicationsLoaded(venue);
         var snapshot = plugin.OpeningPublications.GetSnapshot(venue);
         var view = snapshot.View;
-        if (view is not null && !view.Capabilities.CanUseShoutrunner)
+        if (view is not null &&
+            !view.Capabilities.CanUseShoutrunner &&
+            !view.Capabilities.CanManageShoutrunnerTemplates)
             return;
-
-        PartyPulseUi.PageHeader("Shoutrunner", "Plan world routes, execute opening advertisements, and track completed destinations.");
 
         SyncDrafts(venue, snapshot.ReceivedAt, view, "shoutrunner");
         var busy = plugin.OpeningPublications.IsBusy(venue.ProfileId);
@@ -45,11 +45,16 @@ public sealed class ShoutrunnerTabRenderer(Plugin plugin)
             return;
         }
 
-        DrawTools(venue, view, snapshot.EstimatedServerNow, busy);
-        DrawSetup(venue, view.Worlds);
-
-        if (view.Capabilities.CanManageShoutrunnerTemplates &&
-            ImGui.CollapsingHeader("Shoutrunner template editor"))
+        if (subtab == MainSubtab.ShoutrunnerRun && view.Capabilities.CanUseShoutrunner)
+        {
+            DrawTools(venue, view, snapshot.EstimatedServerNow, busy);
+        }
+        else if (subtab == MainSubtab.ShoutrunnerRoute && view.Capabilities.CanUseShoutrunner)
+        {
+            DrawSetup(venue, view.Worlds);
+        }
+        else if (subtab == MainSubtab.ShoutrunnerTemplates &&
+                 view.Capabilities.CanManageShoutrunnerTemplates)
         {
             ImGui.TextDisabled("Templates support <theme>, <djs>, <date>, and <time>.");
             foreach (var template in view.Templates.Where(value => value.ChannelCode == "shoutrunner"))
@@ -194,9 +199,6 @@ public sealed class ShoutrunnerTabRenderer(Plugin plugin)
         VenueConnectionConfiguration venue,
         IReadOnlyList<ShoutrunnerWorldSummary> worlds)
     {
-        if (!ImGui.CollapsingHeader("Shoutrunner setup"))
-            return;
-
         ImGui.TextWrapped("Select entire data centers, then expand them to add or remove individual worlds. This selection is stored only on this device.");
         var profile = plugin.ShoutrunnerDuty.GetProfile(venue);
         foreach (var datacenter in worlds

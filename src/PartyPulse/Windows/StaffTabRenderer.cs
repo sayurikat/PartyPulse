@@ -75,7 +75,7 @@ public sealed class StaffTabRenderer(Plugin plugin)
     private string pendingPayoutTargetWorld = string.Empty;
     private string cancelReason = string.Empty;
 
-    public void Draw(VenueConnectionConfiguration venue)
+    public void Draw(VenueConnectionConfiguration venue, MainSubtab subtab)
     {
         ResetForVenue(venue);
         plugin.EnsureStaffLoaded(venue);
@@ -84,8 +84,6 @@ public sealed class StaffTabRenderer(Plugin plugin)
         var snapshot = plugin.Staff.GetSnapshot(venue);
         var busy = plugin.Staff.IsBusy(venue.ProfileId) ||
                    plugin.Court.IsBusy(venue.ProfileId);
-
-        PartyPulseUi.PageHeader("Staff", "Account for attendance, manage staff and jobs, review time entries, and process payouts.");
 
         ImGui.BeginDisabled(busy);
         if (ImGui.Button("Refresh Staff"))
@@ -105,36 +103,31 @@ public sealed class StaffTabRenderer(Plugin plugin)
         var canManageAttendance =
             view.Capabilities.CanManage || view.Capabilities.CanManageCourtAttendance;
         SelectDefaults(view, venue);
-        DrawOpeningSelector(venue, view);
-
-        if (canManageAttendance)
+        switch (subtab)
         {
-            DrawClocking(venue, view, busy);
-        }
-
-        if (view.Capabilities.CanManage)
-        {
-            ImGui.Separator();
-            DrawStaffListings(venue, view, busy);
-            ImGui.Separator();
-            DrawLifecycleTaskDefinitions(venue, view, busy);
-            ImGui.Separator();
-            DrawCharacterLinks(venue, view, busy);
-        }
-
-        if (view.Capabilities.CanManageJobs)
-        {
-            ImGui.Separator();
-            DrawJobs(venue, view, busy);
-        }
-
-        ImGui.Separator();
-        DrawTimeEntries(venue, view, busy, canManageAttendance);
-
-        if (view.Capabilities.CanPay)
-        {
-            ImGui.Separator();
-            DrawPayout(venue, view, busy);
+            case MainSubtab.StaffAttendance when canManageAttendance:
+                DrawOpeningSelector(venue, view);
+                DrawClocking(venue, view, busy);
+                break;
+            case MainSubtab.StaffDirectory when view.Capabilities.CanManage:
+                DrawStaffListings(venue, view, busy);
+                break;
+            case MainSubtab.StaffCharacters when view.Capabilities.CanManage:
+                DrawCharacterLinks(venue, view, busy);
+                break;
+            case MainSubtab.StaffLifecycle when view.Capabilities.CanManage:
+                DrawLifecycleTaskDefinitions(venue, view, busy);
+                break;
+            case MainSubtab.StaffJobs when view.Capabilities.CanManageJobs:
+                DrawJobs(venue, view, busy);
+                break;
+            case MainSubtab.StaffTimeEntries:
+                DrawOpeningSelector(venue, view);
+                DrawTimeEntries(venue, view, busy, canManageAttendance);
+                break;
+            case MainSubtab.StaffPayouts when view.Capabilities.CanPay:
+                DrawPayout(venue, view, busy);
+                break;
         }
 
         DrawTimeEntryCancellationPopup(venue, busy);
@@ -188,13 +181,6 @@ public sealed class StaffTabRenderer(Plugin plugin)
         StaffManagementViewResponse view,
         bool busy)
     {
-        if (!ImGui.CollapsingHeader(
-                "Clock-ins / absences",
-                ImGuiTreeNodeFlags.DefaultOpen))
-        {
-            return;
-        }
-
         var opening = view.Openings.FirstOrDefault(
             candidate => candidate.OpeningId == selectedOpeningId);
         var activeStaff = view.StaffMembers
@@ -451,11 +437,6 @@ public sealed class StaffTabRenderer(Plugin plugin)
         StaffManagementViewResponse view,
         bool busy)
     {
-        if (!ImGui.CollapsingHeader("Staff listings"))
-        {
-            return;
-        }
-
         foreach (var member in view.StaffMembers
                      .OrderBy(member => member.ArchivedAt is not null)
                      .ThenBy(member => member.JobName)
@@ -573,11 +554,6 @@ public sealed class StaffTabRenderer(Plugin plugin)
         StaffManagementViewResponse view,
         bool busy)
     {
-        if (!ImGui.CollapsingHeader("Onboarding / offboarding task templates"))
-        {
-            return;
-        }
-
         ImGui.TextWrapped(
             "Active templates are copied to a Staff checklist when that lifecycle begins. " +
             "Changing a template does not rewrite existing checklists.");
@@ -726,11 +702,6 @@ public sealed class StaffTabRenderer(Plugin plugin)
         StaffManagementViewResponse view,
         bool busy)
     {
-        if (!ImGui.CollapsingHeader("Link target character to Staff"))
-        {
-            return;
-        }
-
         var staff = view.StaffMembers
             .Where(member => member.ArchivedAt is null)
             .OrderBy(member => member.DisplayName)
@@ -814,11 +785,6 @@ public sealed class StaffTabRenderer(Plugin plugin)
         StaffManagementViewResponse view,
         bool busy)
     {
-        if (!ImGui.CollapsingHeader("Job definitions (owner)"))
-        {
-            return;
-        }
-
         foreach (var job in view.Jobs
                      .OrderBy(job => job.ArchivedAt is not null)
                      .ThenBy(job => job.Name))
@@ -870,11 +836,6 @@ public sealed class StaffTabRenderer(Plugin plugin)
         bool busy,
         bool canManageAttendance)
     {
-        if (!ImGui.CollapsingHeader("Clock-in history", ImGuiTreeNodeFlags.DefaultOpen))
-        {
-            return;
-        }
-
         var opening = view.Openings.FirstOrDefault(
             candidate => candidate.OpeningId == selectedOpeningId);
         if (opening is null)
@@ -1272,13 +1233,6 @@ public sealed class StaffTabRenderer(Plugin plugin)
         StaffManagementViewResponse view,
         bool busy)
     {
-        if (!ImGui.CollapsingHeader(
-                "Pay Staff with Dropbox",
-                ImGuiTreeNodeFlags.DefaultOpen))
-        {
-            return;
-        }
-
         var staff = view.StaffMembers
             .Where(member => member.ArchivedAt is null && member.StandingBalanceGil != 0)
             .OrderBy(member => member.JobName)

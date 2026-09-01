@@ -7,6 +7,7 @@ public enum DiscordStatusManagementStatus
     NotLoaded,
     Loading,
     Ready,
+    Denied,
     Failed,
 }
 

@@ -7,6 +7,7 @@ public enum GiveawayManagementStatus
     NotLoaded,
     Loading,
     Ready,
+    Denied,
     Failed,
 }
 

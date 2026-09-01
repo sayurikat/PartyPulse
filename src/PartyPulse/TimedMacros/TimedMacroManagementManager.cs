@@ -298,7 +298,9 @@ public sealed class TimedMacroManagementManager : IDisposable
     {
         var existing = GetSnapshot(venue);
         snapshots[venue.ProfileId] = new TimedMacroManagementSnapshot(
-            TimedMacroManagementStatus.Failed,
+            failure.Kind == ApiFailureKind.Permission
+                ? TimedMacroManagementStatus.Denied
+                : TimedMacroManagementStatus.Failed,
             failure.Message,
             existing.View,
             attemptAt,

@@ -36,7 +36,7 @@ public sealed class GiveawaysTabRenderer(Plugin plugin)
     private int schedulerStartOffsetMinutes = 5;
     private bool schedulerEnabled = true;
 
-    public void Draw(VenueConnectionConfiguration venue)
+    public void Draw(VenueConnectionConfiguration venue, MainSubtab subtab)
     {
         ResetForVenueChange(venue);
         plugin.EnsureGiveawaysLoaded(venue);
@@ -44,9 +44,6 @@ public sealed class GiveawaysTabRenderer(Plugin plugin)
         var view = snapshot.View;
         var isBusy = plugin.Giveaways.IsBusy(venue.ProfileId);
 
-        PartyPulseUi.PageHeader(
-            "Giveaways",
-            "Create Discord giveaways, edit pending or posted messages, and define opening-based schedules.");
         ImGui.BeginDisabled(isBusy);
         if (ImGui.Button("Refresh giveaways")) plugin.RefreshGiveaways(venue);
         ImGui.EndDisabled();
@@ -77,27 +74,20 @@ public sealed class GiveawaysTabRenderer(Plugin plugin)
                 "No postable channel is available yet. Check the bot's channel permissions and wait for Discord metadata synchronization.");
         }
 
-        if (ImGui.BeginTabBar("GiveawaySections"))
+        switch (subtab)
         {
-            if (ImGui.BeginTabItem("Giveaways"))
-            {
+            case MainSubtab.GiveawaysManage:
                 DrawGiveawayEditor(venue, snapshot, view, isBusy);
                 ImGui.Spacing();
                 ImGui.Separator();
                 DrawGiveawayLists(venue, view, isBusy);
-                ImGui.EndTabItem();
-            }
-
-            if (ImGui.BeginTabItem("Scheduler"))
-            {
+                break;
+            case MainSubtab.GiveawaysScheduler:
                 DrawSchedulerEditor(venue, view, isBusy);
                 ImGui.Spacing();
                 ImGui.Separator();
                 DrawSchedulers(venue, view, isBusy);
-                ImGui.EndTabItem();
-            }
-
-            ImGui.EndTabBar();
+                break;
         }
     }
 

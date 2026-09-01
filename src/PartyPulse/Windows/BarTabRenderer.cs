@@ -47,7 +47,7 @@ public sealed class BarTabRenderer(Plugin plugin)
     private bool settingsInitialized;
     private DateTimeOffset? settingsUpdatedAt;
 
-    public void Draw(VenueConnectionConfiguration venue)
+    public void Draw(VenueConnectionConfiguration venue, MainSubtab subtab)
     {
         ResetForVenue(venue);
 
@@ -56,8 +56,6 @@ public sealed class BarTabRenderer(Plugin plugin)
         var snapshot = plugin.Bar.GetSnapshot(venue);
         var view = snapshot.View;
         var busy = plugin.Bar.IsBusy(venue.ProfileId) || plugin.IsGameMacroBusy;
-
-        PartyPulseUi.PageHeader("Bar", "Run buyouts and Gamba Shot, manage bar products, and review settlement-ready sales.");
 
         ImGui.BeginDisabled(plugin.Bar.IsBusy(venue.ProfileId));
         if (ImGui.Button("Refresh bar"))
@@ -72,21 +70,28 @@ public sealed class BarTabRenderer(Plugin plugin)
         }
 
         SyncDefaults(view);
-        DrawBarAdvertisementMacro(venue, busy);
-        DrawActiveBuyout(venue, view, busy);
-        DrawGamba(venue, view, busy);
-        DrawSettlement(venue, view, busy);
-
-        if (view.Capabilities.CanManage)
+        switch (subtab)
         {
-            ImGui.Spacing();
-            ImGui.Separator();
-            DrawManagement(venue, view, busy);
+            case MainSubtab.BarBuyouts:
+                DrawBarAdvertisementMacro(venue, busy);
+                DrawActiveBuyout(venue, view, busy);
+                break;
+            case MainSubtab.BarGamba:
+                DrawGamba(venue, view, busy);
+                break;
+            case MainSubtab.BarSettlements:
+                DrawSettlement(venue, view, busy);
+                break;
+            case MainSubtab.BarSettings or MainSubtab.BarPackages
+                when view.Capabilities.CanManage:
+                DrawManagement(venue, view, busy, subtab);
+                break;
+            case MainSubtab.BarBuyoutHistory or
+                 MainSubtab.BarGambaSalesHistory or
+                 MainSubtab.BarGambaGamesHistory:
+                DrawHistory(venue, view, busy, subtab);
+                break;
         }
-
-        ImGui.Spacing();
-        ImGui.Separator();
-        DrawHistory(venue, view, busy);
         DrawPopups(venue, view, busy);
     }
 
@@ -264,11 +269,11 @@ public sealed class BarTabRenderer(Plugin plugin)
     private void DrawSettlement(VenueConnectionConfiguration venue, BarManagementViewResponse view, bool busy)
     {
         if (view.PersonalUnpaidGil <= 0)
+        {
+            ImGui.TextDisabled("You have no unsettled bar money.");
             return;
+        }
 
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Spacing();
         ImGui.TextUnformatted($"Your unsettled bar money: {view.PersonalUnpaidGil:N0} gil");
         if (view.PersonalPendingGil > 0)
             ImGui.TextDisabled($"Already pending: {view.PersonalPendingGil:N0} gil");
@@ -290,9 +295,13 @@ public sealed class BarTabRenderer(Plugin plugin)
         }
     }
 
-    private void DrawManagement(VenueConnectionConfiguration venue, BarManagementViewResponse view, bool busy)
+    private void DrawManagement(
+        VenueConnectionConfiguration venue,
+        BarManagementViewResponse view,
+        bool busy,
+        MainSubtab subtab)
     {
-        if (ImGui.CollapsingHeader("Bar settings"))
+        if (subtab == MainSubtab.BarSettings)
         {
             ImGui.TextDisabled("Percentages are snapshotted on every sale. Existing sales never change when settings are edited.");
             ImGui.SetNextItemWidth(180 * ImGuiHelpers.GlobalScale);
@@ -314,9 +323,10 @@ public sealed class BarTabRenderer(Plugin plugin)
             if (ImGui.Button("Save bar settings"))
                 plugin.UpdateBarSettings(venue, new UpdateBarSettingsRequest((decimal)buyoutSellerPercentage, gambaTicketPriceGil, (decimal)gambaHousePercentage));
             ImGui.EndDisabled();
+            return;
         }
 
-        if (!ImGui.CollapsingHeader("Buyout packages"))
+        if (subtab != MainSubtab.BarPackages)
             return;
 
         foreach (var package in view.BuyoutPackages.OrderBy(value => value.Name, StringComparer.OrdinalIgnoreCase))
@@ -398,9 +408,13 @@ public sealed class BarTabRenderer(Plugin plugin)
         ImGui.EndDisabled();
     }
 
-    private void DrawHistory(VenueConnectionConfiguration venue, BarManagementViewResponse view, bool busy)
+    private void DrawHistory(
+        VenueConnectionConfiguration venue,
+        BarManagementViewResponse view,
+        bool busy,
+        MainSubtab subtab)
     {
-        if (ImGui.CollapsingHeader("Recent buyout sales", ImGuiTreeNodeFlags.DefaultOpen))
+        if (subtab == MainSubtab.BarBuyoutHistory)
         {
             foreach (var sale in view.BuyoutSales.OrderByDescending(value => value.SoldAt).Take(100))
             {
@@ -426,7 +440,7 @@ public sealed class BarTabRenderer(Plugin plugin)
             }
         }
 
-        if (ImGui.CollapsingHeader("Recent Gamba ticket sales"))
+        if (subtab == MainSubtab.BarGambaSalesHistory)
         {
             foreach (var sale in view.GambaTicketSales.OrderByDescending(value => value.SoldAt).Take(100))
             {
@@ -452,7 +466,7 @@ public sealed class BarTabRenderer(Plugin plugin)
             }
         }
 
-        if (ImGui.CollapsingHeader("Gamba Shot history"))
+        if (subtab == MainSubtab.BarGambaGamesHistory)
         {
             foreach (var game in view.GambaGameHistory.OrderByDescending(value => value.StartedAt).Take(50))
             {

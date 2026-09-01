@@ -8,6 +8,7 @@ public enum VenueOpeningScheduleStatus
     NotLoaded,
     Loading,
     Ready,
+    Denied,
     Failed,
 }
 
