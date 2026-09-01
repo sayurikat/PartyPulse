@@ -194,7 +194,8 @@ internal static class Program
         AssertMini(MiniTabId.NewPurchase, "New Purchase", MainPage.Purchases, MainSubtab.PurchasesCreate, MiniTabCondition.None);
         AssertMini(MiniTabId.PayStaff, "Pay Staff", MainPage.Staff, MainSubtab.StaffPayouts, MiniTabCondition.LinkedStaffTarget);
         AssertMini(MiniTabId.Settlements, "Settlements", MainPage.Finance, MainSubtab.FinanceSettlements, MiniTabCondition.PendingSettlement);
-        Equal(14, MiniTabCatalog.Features.Length, nameof(MiniTabCatalogMatchesRequestedOperations));
+        AssertMini(MiniTabId.Macros, "Macros", MainPage.TimedMacros, MainSubtab.TimedMacrosRun, MiniTabCondition.None);
+        Equal(15, MiniTabCatalog.Features.Length, nameof(MiniTabCatalogMatchesRequestedOperations));
     }
 
     private static void MiniTabMoveUsesPermittedNeighbors()

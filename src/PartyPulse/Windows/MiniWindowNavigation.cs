@@ -20,6 +20,7 @@ internal enum MiniTabId
     NewPurchase,
     PayStaff,
     Settlements,
+    Macros,
     Configuration,
 }
 
@@ -60,6 +61,7 @@ internal static class MiniTabCatalog
         new(MiniTabId.NewPurchase, "New Purchase", MainPage.Purchases, MainSubtab.PurchasesCreate, MiniTabCondition.None),
         new(MiniTabId.PayStaff, "Pay Staff", MainPage.Staff, MainSubtab.StaffPayouts, MiniTabCondition.LinkedStaffTarget),
         new(MiniTabId.Settlements, "Settlements", MainPage.Finance, MainSubtab.FinanceSettlements, MiniTabCondition.PendingSettlement),
+        new(MiniTabId.Macros, "Macros", MainPage.TimedMacros, MainSubtab.TimedMacrosRun, MiniTabCondition.None),
     ];
 
     private static readonly Dictionary<MiniTabId, MiniTabDefinition> FeaturesById =
