@@ -36,3 +36,4 @@ appsettings.Development.json
 
 # Private local agent inventory, reference copies and task deliveries
 .local/
+/AGENTS.md
