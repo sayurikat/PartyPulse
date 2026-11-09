@@ -95,10 +95,13 @@ public enum MainSubtab
     FinanceSettlements,
     UsersCreate,
     UsersDirectory,
+    UsersArchived,
     MyAccountCharacters,
     MyAccountDevices,
     MyAccountAuthorization,
     MyAccountLocalData,
+    VipArrivalTracker,
+    DjsPaymentHistory,
 }
 
 internal sealed record MainSubtabDefinition(MainSubtab Id, string Label);

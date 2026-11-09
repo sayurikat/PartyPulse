@@ -308,6 +308,34 @@ public sealed class PartyPulseApiClient : IDisposable
             ValidateCreateRecoveryCodeResponse,
             cancellationToken);
 
+    public Task<ApiResult<VenueUserOperationResponse>> ArchiveVenueUserAsync(
+        Uri baseUri,
+        string accessToken,
+        int userId,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<VenueUserOperationResponse>(
+            baseUri,
+            HttpMethod.Post,
+            $"api/v1/venue-users/{userId}/archive",
+            accessToken,
+            null,
+            payload => payload.UserId == userId,
+            cancellationToken);
+
+    public Task<ApiResult<CreateRecoveryCodeResponse>> RestoreVenueUserWithRecoveryAsync(
+        Uri baseUri,
+        string accessToken,
+        int userId,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<CreateRecoveryCodeResponse>(
+            baseUri,
+            HttpMethod.Post,
+            $"api/v1/venue-users/{userId}/restore-with-recovery",
+            accessToken,
+            null,
+            payload => payload.UserId == userId && ValidateCreateRecoveryCodeResponse(payload),
+            cancellationToken);
+
     public Task<ApiResult<RestoreVenueUserResponse>> RestoreVenueUserAsync(
         Uri baseUri,
         string accessToken,
@@ -319,7 +347,7 @@ public sealed class PartyPulseApiClient : IDisposable
             $"api/v1/venue-users/{userId}/restore",
             accessToken,
             null,
-            ValidateRestoreVenueUserResponse,
+            payload => payload.UserId == userId && ValidateRestoreVenueUserResponse(payload),
             cancellationToken);
 
     public Task<ApiResult<VipManagementViewResponse>> GetVipAsync(
@@ -378,6 +406,20 @@ public sealed class PartyPulseApiClient : IDisposable
             ValidateVipSaleResponse,
             cancellationToken);
 
+    public Task<ApiResult<VipCharacterOperationResponse>> RegisterVipPlayerAsync(
+        Uri baseUri,
+        string accessToken,
+        RegisterVipPlayerRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<VipCharacterOperationResponse>(
+            baseUri,
+            HttpMethod.Post,
+            "api/v1/vip/players/register",
+            accessToken,
+            request,
+            ValidateVipCharacterOperationResponse,
+            cancellationToken);
+
     public Task<ApiResult<VipCharacterOperationResponse>> LinkVipCharacterAsync(
         Uri baseUri,
         string accessToken,
@@ -390,9 +432,7 @@ public sealed class PartyPulseApiClient : IDisposable
             $"api/v1/vip/players/{vipPlayerId}/characters",
             accessToken,
             request,
-            static payload => payload.VipPlayerId > 0 &&
-                              payload.CharacterId > 0 &&
-                              payload.PreferredCharacterId > 0,
+            ValidateVipCharacterOperationResponse,
             cancellationToken);
 
     public Task<ApiResult<VipPreferredCharacterResponse>> SetVipPreferredCharacterAsync(
@@ -437,9 +477,7 @@ public sealed class PartyPulseApiClient : IDisposable
             $"api/v1/vip/players/{vipPlayerId}/characters/{characterId}",
             accessToken,
             null,
-            static payload => payload.VipPlayerId > 0 &&
-                              payload.CharacterId > 0 &&
-                              payload.PreferredCharacterId > 0,
+            ValidateVipCharacterOperationResponse,
             cancellationToken);
 
     public Task<ApiResult<VipSubscriptionCancellationResponse>> CancelVipSubscriptionAsync(
@@ -765,6 +803,25 @@ public sealed class PartyPulseApiClient : IDisposable
             ValidateDjViewResponse,
             cancellationToken);
 
+    public Task<ApiResult<DjPaymentHistoryResponse>> GetDjPaymentHistoryAsync(
+        Uri baseUri,
+        string accessToken,
+        long? djId,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<DjPaymentHistoryResponse>(
+            baseUri,
+            HttpMethod.Get,
+            djId is { } id ? $"api/v1/djs/payments/history?djId={id}" : "api/v1/djs/payments/history",
+            accessToken,
+            null,
+            payload => payload.Djs is not null &&
+                       payload.Djs.All(dj => dj.DjId > 0 && !string.IsNullOrWhiteSpace(dj.DjName)) &&
+                       payload.Entries is not null &&
+                       payload.Entries.All(entry => entry.BookingId > 0 && entry.DjId == djId &&
+                                                    entry.EndsAt > entry.StartsAt && entry.AmountGil >= 0 &&
+                                                    !string.IsNullOrWhiteSpace(entry.Status)),
+            cancellationToken);
+
     public Task<ApiResult<DjSummary>> SaveDjAsync(
         Uri baseUri,
         string accessToken,
@@ -879,6 +936,35 @@ public sealed class PartyPulseApiClient : IDisposable
             accessToken,
             request,
             ValidateDjBalancePaymentResponse,
+            cancellationToken);
+
+    public Task<ApiResult<DjPaymentOperationResponse>> MarkDjPaymentTradedAsync(
+        Uri baseUri,
+        string accessToken,
+        long paymentId,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<DjPaymentOperationResponse>(
+            baseUri,
+            HttpMethod.Post,
+            $"api/v1/djs/payments/{paymentId}/traded",
+            accessToken,
+            null,
+            ValidateDjPaymentResponse,
+            cancellationToken);
+
+    public Task<ApiResult<CloseOutDjPaymentResponse>> CloseOutDjPaymentAsync(
+        Uri baseUri,
+        string accessToken,
+        long bookingId,
+        CloseOutDjPaymentRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<CloseOutDjPaymentResponse>(
+            baseUri,
+            HttpMethod.Post,
+            $"api/v1/djs/bookings/{bookingId}/payments/close-out",
+            accessToken,
+            request,
+            payload => payload.BookingId == bookingId && payload.PaymentId > 0 && payload.CancelledAt != default,
             cancellationToken);
 
     public Task<ApiResult<DjPaymentOperationResponse>> ConfirmDjPaymentAsync(
@@ -2455,7 +2541,7 @@ public sealed class PartyPulseApiClient : IDisposable
         !string.IsNullOrWhiteSpace(booking.DjName) &&
         booking.TimedMacroId > 0 &&
         booking.PriceGil >= 0 &&
-        (booking.PaymentId is null ||
+        (booking.PaymentId is null || booking.IsPaymentClosedOut ||
          (!string.IsNullOrWhiteSpace(booking.PaymentStatus) &&
           !string.IsNullOrWhiteSpace(booking.PaymentTargetCharacterName) &&
           !string.IsNullOrWhiteSpace(booking.PaymentTargetWorldName) &&
@@ -2621,6 +2707,11 @@ public sealed class PartyPulseApiClient : IDisposable
         (payload.Lifetime ? payload.EndsAt is null : payload.EndsAt > payload.StartsAt) &&
         payload.PersonalUnpaidGil >= 0 &&
         (!payload.WasNewVip || payload.OpeningId is null or > 0);
+
+    private static bool ValidateVipCharacterOperationResponse(VipCharacterOperationResponse payload) =>
+        payload.VipPlayerId > 0 &&
+        payload.CharacterId > 0 &&
+        payload.PreferredCharacterId > 0;
 
     private static bool ValidateSelfServiceViewResponse(SelfServiceViewResponse payload) =>
         payload.Characters is not null &&

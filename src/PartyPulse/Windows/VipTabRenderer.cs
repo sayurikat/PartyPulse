@@ -15,6 +15,7 @@ namespace PartyPulse.Windows;
 
 public sealed class VipTabRenderer(Plugin plugin)
 {
+    private const int RegisterOnlyOption = -1;
     private const string DiscordRoleManagementPopupName =
         "Confirm VIP Discord role management###PartyPulseVipDiscordRoleManagement";
     private const string RedeemPerkPopupName = "Confirm VIP perk redemption###PartyPulseVipPerkRedeem";
@@ -22,6 +23,8 @@ public sealed class VipTabRenderer(Plugin plugin)
 
     private static readonly Vector4 AvailableColor = new(0.35f, 0.85f, 0.45f, 1f);
     private static readonly Vector4 UnavailableColor = new(0.65f, 0.18f, 0.18f, 1f);
+
+    private readonly VipArrivalTrackerRenderer arrivalTracker = new(plugin);
 
     private Guid activeProfileId;
     private string lastTargetKey = string.Empty;
@@ -73,6 +76,12 @@ public sealed class VipTabRenderer(Plugin plugin)
 
     public void Draw(VenueConnectionConfiguration venue, MainSubtab subtab)
     {
+        if (subtab == MainSubtab.VipArrivalTracker)
+        {
+            arrivalTracker.Draw(venue);
+            return;
+        }
+
         ResetForVenueChange(venue);
         plugin.EnsureVipLoaded(venue);
         plugin.EnsureVipPerksLoaded(venue);
@@ -97,7 +106,7 @@ public sealed class VipTabRenderer(Plugin plugin)
         var vipDataReady = snapshot.View is not null;
         if (subtab == MainSubtab.VipArrivals)
         {
-            DrawArrivalToolbar(venue, vipDataReady);
+            DrawArrivalStatus(venue);
             DrawNewVipOffer(venue);
             DrawVipTimedMacro(venue);
             DrawArrivalAdministration(venue);
@@ -243,40 +252,18 @@ public sealed class VipTabRenderer(Plugin plugin)
         return $"{remaining.Minutes:00}:{remaining.Seconds:00}";
     }
 
-    private void DrawArrivalToolbar(VenueConnectionConfiguration venue, bool vipDataReady)
+    private void DrawArrivalStatus(VenueConnectionConfiguration venue)
     {
-        var snapshot = plugin.VipArrivals.GetSnapshot(venue);
-        if (snapshot.Context is null)
+        var context = plugin.VipArrivals.GetSnapshot(venue).Context;
+        if (context?.Capabilities.CanUseArrival != true)
         {
             return;
         }
 
-        var context = snapshot.Context;
-        if (context.Capabilities.CanUseArrival)
-        {
-            ImGui.SameLine();
-            ImGui.BeginDisabled(!vipDataReady);
-            if (ImGui.Button("Open arrival tracker"))
-            {
-                plugin.OpenVipArrivalTracker(venue);
-            }
-            ImGui.EndDisabled();
-            if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled) && !vipDataReady)
-            {
-                ImGui.SetTooltip("VIP player data permission is also required to run the arrival tracker.");
-            }
-
-            if (context.CurrentOpening is { } opening)
-            {
-                ImGui.SameLine();
-                ImGui.TextDisabled($"Opening #{opening.OpeningId} until {VenueTimeZone.Format(venue, opening.ClosesAt, "g")}");
-            }
-            else
-            {
-                ImGui.SameLine();
-                ImGui.TextDisabled("No active opening");
-            }
-        }
+        ImGui.SameLine();
+        ImGui.TextDisabled(context.CurrentOpening is { } opening
+            ? $"Opening #{opening.OpeningId} until {VenueTimeZone.Format(venue, opening.ClosesAt, "g")}"
+            : "No active opening");
     }
 
     private void DrawNewVipOffer(VenueConnectionConfiguration venue)
@@ -456,20 +443,20 @@ public sealed class VipTabRenderer(Plugin plugin)
     {
         ImGui.TextUnformatted("Targeted player");
 
-        if (!plugin.TargetProvider.TryGetCurrentTarget(out var target, out var targetReason))
+        if (!plugin.TargetProvider.TryGetCurrentTarget(out var target, out var targetReason) || target is null)
         {
             lastTargetKey = string.Empty;
             ImGui.TextDisabled(targetReason);
             return;
         }
 
-        var targetKey = $"{target!.CharacterName}\n{target.WorldName}";
         var targetCharacter = view.Characters.FirstOrDefault(character =>
             string.Equals(character.CharacterName, target.CharacterName, StringComparison.OrdinalIgnoreCase) &&
             string.Equals(character.WorldName, target.WorldName, StringComparison.OrdinalIgnoreCase));
         var targetPlayer = targetCharacter is null
             ? null
             : view.Players.FirstOrDefault(player => player.VipPlayerId == targetCharacter.VipPlayerId);
+        var targetKey = $"{target.CharacterName}\n{target.WorldName}\n{targetPlayer?.VipPlayerId}";
 
         if (!string.Equals(lastTargetKey, targetKey, StringComparison.Ordinal))
         {
@@ -483,7 +470,7 @@ public sealed class VipTabRenderer(Plugin plugin)
 
         if (targetPlayer is not null && targetCharacter is not null)
         {
-            DrawRegisteredTarget(venue, view, targetPlayer, targetCharacter, isBusy);
+            DrawRegisteredTarget(venue, view, target, targetPlayer, targetCharacter, isBusy);
         }
         else
         {
@@ -494,6 +481,7 @@ public sealed class VipTabRenderer(Plugin plugin)
     private void DrawRegisteredTarget(
         VenueConnectionConfiguration venue,
         VipManagementViewResponse view,
+        PlayerIdentity target,
         VipPlayerSummary player,
         VipCharacterSummary targetCharacter,
         bool isBusy)
@@ -558,7 +546,7 @@ public sealed class VipTabRenderer(Plugin plugin)
         if (view.Capabilities.CanSell)
         {
             ImGui.Spacing();
-            DrawSaleControls(venue, view, player.VipPlayerId, isBusy);
+            DrawSaleControls(venue, view, target, player.VipPlayerId, isBusy);
         }
     }
 
@@ -577,6 +565,13 @@ public sealed class VipTabRenderer(Plugin plugin)
 
         var selectedPlayer = view.Players.FirstOrDefault(
             player => player.VipPlayerId == selectedExistingVipPlayerId);
+        if (selectedPlayer is null && selectedExistingVipPlayerId > 0)
+        {
+            selectedExistingVipPlayerId = 0;
+            saleDiscordUsername = string.Empty;
+            customerPaymentConfirmed = false;
+        }
+
         var preview = selectedPlayer?.CharacterDisplay ?? "Create a new VIP player";
 
         ImGui.SetNextItemWidth(340 * ImGuiHelpers.GlobalScale);
@@ -586,6 +581,7 @@ public sealed class VipTabRenderer(Plugin plugin)
             {
                 selectedExistingVipPlayerId = 0;
                 saleDiscordUsername = string.Empty;
+                customerPaymentConfirmed = false;
             }
 
             foreach (var player in view.Players.OrderBy(player => player.DisplayCharacterName ?? player.DiscordUsername))
@@ -597,6 +593,7 @@ public sealed class VipTabRenderer(Plugin plugin)
                 {
                     selectedExistingVipPlayerId = player.VipPlayerId;
                     saleDiscordUsername = player.DiscordUsername ?? string.Empty;
+                    customerPaymentConfirmed = false;
                 }
             }
 
@@ -606,7 +603,7 @@ public sealed class VipTabRenderer(Plugin plugin)
         if (selectedExistingVipPlayerId > 0)
         {
             ImGui.BeginDisabled(isBusy);
-            if (ImGui.Button("Link target without a sale"))
+            if (ImGui.Button("Link target without a sale") && IsCurrentTarget(target))
             {
                 plugin.LinkVipCharacter(
                     venue,
@@ -620,6 +617,7 @@ public sealed class VipTabRenderer(Plugin plugin)
         DrawSaleControls(
             venue,
             view,
+            target,
             selectedExistingVipPlayerId > 0 ? selectedExistingVipPlayerId : null,
             isBusy);
     }
@@ -627,6 +625,7 @@ public sealed class VipTabRenderer(Plugin plugin)
     private void DrawSaleControls(
         VenueConnectionConfiguration venue,
         VipManagementViewResponse view,
+        PlayerIdentity target,
         int? vipPlayerId,
         bool isBusy)
     {
@@ -637,33 +636,41 @@ public sealed class VipTabRenderer(Plugin plugin)
             .ThenBy(package => package.PackageId)
             .ToArray();
 
-        if (activePackages.Length == 0)
+        VipPackageSummary? selectedPackage = null;
+        if (selectedPackageId != RegisterOnlyOption)
         {
-            ImGui.TextDisabled("No active VIP package is available.");
-            return;
+            selectedPackage = activePackages.FirstOrDefault(package => package.PackageId == selectedPackageId)
+                ?? activePackages.FirstOrDefault();
+            var availablePackageId = selectedPackage?.PackageId ?? 0;
+            if (availablePackageId != selectedPackageId)
+            {
+                selectedPackageId = availablePackageId;
+                customerPaymentConfirmed = false;
+            }
         }
 
-        if (activePackages.All(package => package.PackageId != selectedPackageId))
-        {
-            selectedPackageId = activePackages[0].PackageId;
-        }
-
-        var selectedPackage = activePackages.First(package => package.PackageId == selectedPackageId);
-        ImGui.TextUnformatted("Sell VIP subscription");
+        ImGui.TextUnformatted("Register or sell VIP");
 
         ImGui.SetNextItemWidth(340 * ImGuiHelpers.GlobalScale);
         if (ImGui.BeginCombo(
                 "Package",
-                $"{selectedPackage.Name} — {selectedPackage.PriceGil:N0} gil — {selectedPackage.DurationDisplay}"))
+                selectedPackage is null ? "Register only" : FormatSalePackage(selectedPackage)))
         {
+            if (ImGui.Selectable("Register only", selectedPackage is null))
+            {
+                selectedPackageId = RegisterOnlyOption;
+                selectedPackage = null;
+                customerPaymentConfirmed = false;
+            }
+
             foreach (var package in activePackages)
             {
                 var selected = package.PackageId == selectedPackageId;
-                if (ImGui.Selectable(
-                        $"{package.Name} — {package.PriceGil:N0} gil — {package.DurationDisplay}##VipPackage{package.PackageId}",
-                        selected))
+                if (ImGui.Selectable($"{FormatSalePackage(package)}##VipPackage{package.PackageId}", selected))
                 {
                     selectedPackageId = package.PackageId;
+                    selectedPackage = package;
+                    customerPaymentConfirmed = false;
                 }
             }
 
@@ -672,31 +679,49 @@ public sealed class VipTabRenderer(Plugin plugin)
 
         ImGui.SetNextItemWidth(300 * ImGuiHelpers.GlobalScale);
         ImGui.InputText("Discord username", ref saleDiscordUsername, 100);
-        ImGui.Checkbox("I confirm the targeted player paid the seller", ref customerPaymentConfirmed);
+        var discordUsername = saleDiscordUsername.Trim();
+        var hasDiscord = discordUsername.Length > 0;
 
-        var hasDiscord = !string.IsNullOrWhiteSpace(saleDiscordUsername);
-        ImGui.BeginDisabled(isBusy || !hasDiscord || !customerPaymentConfirmed);
-        if (ImGui.Button($"Record paid sale ({selectedPackage.PriceGil:N0} gil)"))
+        if (selectedPackage is null)
         {
-            if (plugin.TargetProvider.TryGetCurrentTarget(out var target, out _))
+            ImGui.BeginDisabled(isBusy || !hasDiscord);
+            if (ImGui.Button("Register target") && IsCurrentTarget(target))
             {
-                plugin.SellVipSubscription(
+                plugin.RegisterVipPlayer(
                     venue,
-                    new SellVipSubscriptionRequest(
-                        target!.CharacterName,
-                        target.WorldName,
-                        selectedPackage.PackageId,
-                        saleDiscordUsername.Trim(),
-                        vipPlayerId,
-                        true));
-                customerPaymentConfirmed = false;
+                    new RegisterVipPlayerRequest(target.CharacterName, target.WorldName, discordUsername, vipPlayerId));
             }
+            ImGui.EndDisabled();
+            ImGui.TextWrapped("Register the targeted character and Discord username without a purchase.");
+            return;
+        }
+
+        ImGui.Checkbox("I confirm the targeted player paid the seller", ref customerPaymentConfirmed);
+        ImGui.BeginDisabled(isBusy || !hasDiscord || !customerPaymentConfirmed);
+        if (ImGui.Button($"Record paid sale ({selectedPackage.PriceGil:N0} gil)") && IsCurrentTarget(target))
+        {
+            plugin.SellVipSubscription(
+                venue,
+                new SellVipSubscriptionRequest(
+                    target.CharacterName,
+                    target.WorldName,
+                    selectedPackage.PackageId,
+                    discordUsername,
+                    vipPlayerId,
+                    true));
+            customerPaymentConfirmed = false;
         }
         ImGui.EndDisabled();
 
         ImGui.TextDisabled(
             "The sale is added to your unpaid-to-club total. Shift settlement will be implemented separately.");
     }
+
+    private bool IsCurrentTarget(PlayerIdentity expectedTarget) =>
+        plugin.TargetProvider.TryGetCurrentTarget(out var currentTarget, out _) && currentTarget == expectedTarget;
+
+    private static string FormatSalePackage(VipPackageSummary package) =>
+        $"{package.Name} — {package.PriceGil:N0} gil — {package.DurationDisplay}";
 
     private static void DrawSubscriptionHistory(VipManagementViewResponse view, int vipPlayerId, VenueConnectionConfiguration venue)
     {

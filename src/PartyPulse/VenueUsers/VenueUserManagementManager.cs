@@ -46,19 +46,30 @@ public sealed class VenueUserManagementManager : IDisposable
             : VenueUserManagementSnapshot.NotLoaded;
 
     public IssuedOneTimeCode? GetLastRecoveryCode(Guid profileId, int userId) =>
-        recoveryCodes.TryGetValue(GetRecoveryKey(profileId, userId), out var code) ? code : null;
+        recoveryCodes.TryGetValue(GetRecoveryKey(profileId, userId), out var code) &&
+        code.ExpiresAt > DateTimeOffset.UtcNow
+            ? code
+            : GetLastRestoreCode(profileId, userId, isRecoveryCode: true);
 
     public IssuedOneTimeCode? GetLastInviteCode(Guid profileId, int userId)
     {
-        if (!snapshots.TryGetValue(profileId, out var snapshot) ||
-            snapshot.LastInviteCode is not { } code ||
-            code.UserId != userId)
+        if (snapshots.TryGetValue(profileId, out var snapshot) &&
+            snapshot.LastInviteCode is { } code &&
+            code.UserId == userId && code.ExpiresAt > DateTimeOffset.UtcNow)
         {
-            return null;
+            return code;
         }
 
-        return code;
+        return GetLastRestoreCode(profileId, userId, isRecoveryCode: false);
     }
+
+    private IssuedOneTimeCode? GetLastRestoreCode(Guid profileId, int userId, bool isRecoveryCode) =>
+        snapshots.TryGetValue(profileId, out var snapshot) &&
+        snapshot.LastRestoreCode is { } restored &&
+        restored.IsRecoveryCode == isRecoveryCode &&
+        restored.Code.UserId == userId && restored.Code.ExpiresAt > DateTimeOffset.UtcNow
+            ? restored.Code
+            : null;
 
     public bool IsBusy(Guid profileId) =>
         gates.TryGetValue(profileId, out var gate) && gate.CurrentCount == 0;
@@ -249,13 +260,19 @@ public sealed class VenueUserManagementManager : IDisposable
                         user.DisplayName,
                         result.Value.RecoveryCode,
                         result.Value.RecoveryCodeExpiresAt);
+                    if (snapshots.TryGetValue(venue.ProfileId, out var snapshot) &&
+                        snapshot.LastRestoreCode is { IsRecoveryCode: true } previous &&
+                        previous.Code.UserId == user.UserId)
+                    {
+                        snapshots.TryUpdate(venue.ProfileId, snapshot with { LastRestoreCode = null }, snapshot);
+                    }
                 }
 
                 return result;
             },
             cancellationToken);
 
-    public Task<ApiResult<RestoreVenueUserResponse>> RestoreAsync(
+    public Task<ApiResult<VenueUserOperationResponse>> ArchiveAsync(
         VenueConnectionConfiguration venue,
         VenueUserSummary user,
         CancellationToken cancellationToken) =>
@@ -266,34 +283,95 @@ public sealed class VenueUserManagementManager : IDisposable
                 var context = await GetAuthorizedContextAsync(venue, cancellationToken);
                 if (!context.Success)
                 {
-                    return ApiResult<RestoreVenueUserResponse>.Failed(context.Failure!);
+                    return ApiResult<VenueUserOperationResponse>.Failed(context.Failure!);
                 }
 
-                var result = await apiClient.RestoreVenueUserAsync(
+                var result = await apiClient.ArchiveVenueUserAsync(
                     context.BaseUri!,
                     context.AccessToken!,
                     user.UserId,
                     cancellationToken);
 
-                if (result.Success && result.Value is not null)
+                if (result.Success)
                 {
-                    var code = new IssuedOneTimeCode(
-                        result.Value.UserId,
-                        user.DisplayName,
-                        result.Value.InviteCode,
-                        result.Value.InviteExpiresAt);
-
-                    snapshots.AddOrUpdate(
-                        venue.ProfileId,
-                        _ => VenueUserManagementSnapshot.NotLoaded with { LastInviteCode = code },
-                        (_, previous) => previous with { LastInviteCode = code });
-
+                    ApplyLifecycleMutation(venue, user.UserId, null);
                     await RefreshAfterMutationAsync(venue, context, cancellationToken);
                 }
 
                 return result;
             },
             cancellationToken);
+
+    public Task<ApiResult<RestoredVenueUserCode>> RestoreAsync(
+        VenueConnectionConfiguration venue,
+        VenueUserSummary user,
+        CancellationToken cancellationToken) =>
+        WithGateAsync(
+            venue,
+            async () =>
+            {
+                var context = await GetAuthorizedContextAsync(venue, cancellationToken);
+                if (!context.Success)
+                {
+                    return ApiResult<RestoredVenueUserCode>.Failed(context.Failure!);
+                }
+
+                RestoredVenueUserCode restored;
+                if (user.CanRestoreWithRecoveryCode)
+                {
+                    var result = await apiClient.RestoreVenueUserWithRecoveryAsync(
+                        context.BaseUri!, context.AccessToken!, user.UserId, cancellationToken);
+                    if (!result.Success)
+                    {
+                        return ApiResult<RestoredVenueUserCode>.Failed(result.Failure!);
+                    }
+
+                    var code = result.Value!;
+                    restored = new RestoredVenueUserCode(
+                        new IssuedOneTimeCode(code.UserId, user.DisplayName, code.RecoveryCode, code.RecoveryCodeExpiresAt),
+                        IsRecoveryCode: true);
+                }
+                else
+                {
+                    var result = await apiClient.RestoreVenueUserAsync(
+                        context.BaseUri!, context.AccessToken!, user.UserId, cancellationToken);
+                    if (!result.Success)
+                    {
+                        return ApiResult<RestoredVenueUserCode>.Failed(result.Failure!);
+                    }
+
+                    var code = result.Value!;
+                    restored = new RestoredVenueUserCode(
+                        new IssuedOneTimeCode(code.UserId, user.DisplayName, code.InviteCode, code.InviteExpiresAt),
+                        IsRecoveryCode: false);
+                }
+
+                ApplyLifecycleMutation(venue, user.UserId, restored);
+                await RefreshAfterMutationAsync(venue, context, cancellationToken);
+                return ApiResult<RestoredVenueUserCode>.Succeeded(restored);
+            },
+            cancellationToken);
+
+    private void ApplyLifecycleMutation(
+        VenueConnectionConfiguration venue,
+        int userId,
+        RestoredVenueUserCode? restored)
+    {
+        recoveryCodes.TryRemove(GetRecoveryKey(venue.ProfileId, userId), out _);
+        snapshots.AddOrUpdate(
+            venue.ProfileId,
+            _ => VenueUserManagementSnapshot.NotLoaded with { LastRestoreCode = restored },
+            (_, previous) => previous with
+            {
+                // A failed follow-up read must not leave the former action available on a stale row.
+                View = previous.View is { } view
+                    ? view with { Users = view.Users.Where(user => user.UserId != userId).ToArray() }
+                    : null,
+                LastInviteCode = previous.LastInviteCode?.UserId == userId ? null : previous.LastInviteCode,
+                LastRestoreCode = restored ??
+                    (previous.LastRestoreCode?.Code.UserId == userId ? null : previous.LastRestoreCode),
+            });
+    }
 
     public void Clear(string message)
     {

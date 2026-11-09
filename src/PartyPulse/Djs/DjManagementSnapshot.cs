@@ -12,6 +12,8 @@ public enum DjManagementStatus
     Failed,
 }
 
+public sealed record DjPaymentHistorySnapshot(long? DjId, DjPaymentHistoryResponse? View, string Message);
+
 public sealed record DjManagementSnapshot(
     DjManagementStatus Status,
     string Message,

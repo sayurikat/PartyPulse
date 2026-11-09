@@ -183,6 +183,7 @@ internal static class Program
         AssertMini(MiniTabId.Dj, "DJ", MainPage.Djs, MainSubtab.DjsPayments, MiniTabCondition.LinkedDjTarget);
         AssertMini(MiniTabId.Greet, "Greet", MainPage.Greeter, MainSubtab.GreeterArrivals, MiniTabCondition.None);
         AssertMini(MiniTabId.Vip, "VIP", MainPage.Vip, MainSubtab.VipSales, MiniTabCondition.AnyTarget);
+        AssertMini(MiniTabId.VipArrivals, "VIP Arrivals", MainPage.Vip, MainSubtab.VipArrivalTracker, MiniTabCondition.None);
         AssertMini(MiniTabId.Photo, "Photo", MainPage.Photoshoots, MainSubtab.PhotoshootsSales, MiniTabCondition.AnyTarget);
         AssertMini(MiniTabId.BarBuyout, "Bar Buyout", MainPage.Bar, MainSubtab.BarBuyouts, MiniTabCondition.AnyTarget);
         AssertMini(MiniTabId.GambaShot, "Gamba Shot", MainPage.Bar, MainSubtab.BarGamba, MiniTabCondition.AnyTarget);
@@ -195,7 +196,7 @@ internal static class Program
         AssertMini(MiniTabId.PayStaff, "Pay Staff", MainPage.Staff, MainSubtab.StaffPayouts, MiniTabCondition.LinkedStaffTarget);
         AssertMini(MiniTabId.Settlements, "Settlements", MainPage.Finance, MainSubtab.FinanceSettlements, MiniTabCondition.PendingSettlement);
         AssertMini(MiniTabId.Macros, "Macros", MainPage.TimedMacros, MainSubtab.TimedMacrosRun, MiniTabCondition.None);
-        Equal(15, MiniTabCatalog.Features.Length, nameof(MiniTabCatalogMatchesRequestedOperations));
+        Equal(16, MiniTabCatalog.Features.Length, nameof(MiniTabCatalogMatchesRequestedOperations));
     }
 
     private static void MiniTabMoveUsesPermittedNeighbors()

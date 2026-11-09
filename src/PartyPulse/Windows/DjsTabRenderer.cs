@@ -9,7 +9,7 @@ using PartyPulse.Models;
 
 namespace PartyPulse.Windows;
 
-public sealed class DjsTabRenderer(Plugin plugin)
+public sealed partial class DjsTabRenderer(Plugin plugin)
 {
     private Guid activeProfileId;
     private long? editingDjId;
@@ -39,8 +39,15 @@ public sealed class DjsTabRenderer(Plugin plugin)
 
         var isBusy = plugin.Djs.IsBusy(venue.ProfileId);
         ImGui.BeginDisabled(isBusy);
-        if (ImGui.Button("Refresh DJs"))
+        if (subtab == MainSubtab.DjsPaymentHistory)
+        {
+            if (ImGui.Button("Refresh payment history"))
+                plugin.LoadDjPaymentHistory(venue, selectedHistoryDjId, forceRefresh: true);
+        }
+        else if (ImGui.Button("Refresh DJs"))
+        {
             plugin.RefreshDjs(venue);
+        }
         ImGui.EndDisabled();
 
         if (view is null)
@@ -65,6 +72,14 @@ public sealed class DjsTabRenderer(Plugin plugin)
                 break;
             case MainSubtab.DjsPayments:
                 DrawBalancePayout(venue, view, isBusy);
+                if (view.Capabilities.CanManagePayments)
+                    DrawPaymentOptOuts(venue, view, isBusy);
+                DrawPaymentCloseOutPopup(venue, isBusy);
+                break;
+            case MainSubtab.DjsPaymentHistory:
+                if (view.Capabilities.CanManagePayments)
+                    DrawPaymentHistory(venue, isBusy);
+                DrawPaymentCloseOutPopup(venue, isBusy);
                 break;
             case MainSubtab.DjsSettings:
                 DrawVenueSettings(venue, view, isBusy);
@@ -243,7 +258,7 @@ public sealed class DjsTabRenderer(Plugin plugin)
         bool isBusy)
     {
         ImGui.TextUnformatted("DJ balance payout");
-        ImGui.TextDisabled("Completed unpaid bookings are combined into one Dropbox trade. Confirm the payment after the trade succeeds.");
+        ImGui.TextWrapped("Unpaid bookings become eligible one hour before the set starts. Eligible bookings are combined into one Dropbox trade.");
 
         if (!view.Capabilities.CanManagePayments)
         {
@@ -318,13 +333,13 @@ public sealed class DjsTabRenderer(Plugin plugin)
         var startedPayments = view.Bookings
             .Where(booking => booking.DjId == selectedDj.DjId &&
                               booking.PaymentId is not null &&
-                              string.Equals(booking.PaymentStatus, DjPaymentStatusCodes.Started, StringComparison.OrdinalIgnoreCase))
+                              IsAwaitingPaymentConfirmation(booking))
             .OrderBy(booking => booking.PaymentStartedAt)
             .ThenBy(booking => booking.PaymentId)
             .ToArray();
         var pendingBalance = startedPayments.Sum(booking => booking.PriceGil);
 
-        ImGui.TextUnformatted($"Outstanding: {outstandingBalance:N0} gil");
+        ImGui.TextUnformatted($"Eligible balance: {outstandingBalance:N0} gil");
         ImGui.SameLine();
         ImGui.TextDisabled($"Trade awaiting confirmation: {pendingBalance:N0} gil");
 
@@ -343,14 +358,18 @@ public sealed class DjsTabRenderer(Plugin plugin)
             }
             ImGui.EndDisabled();
 
-            ImGui.Checkbox("I confirm any gil already traded was refunded", ref balanceRefundConfirmed);
-            ImGui.BeginDisabled(isBusy || !balanceRefundConfirmed);
-            if (ImGui.Button("Cancel payout attempt"))
+            if (startedPayments.All(booking => booking.PaymentStatus == DjPaymentStatusCodes.Started))
             {
-                balanceRefundConfirmed = false;
-                plugin.CancelDjPayments(venue, paymentIds);
+                ImGui.Checkbox("I confirm any gil already traded was refunded", ref balanceRefundConfirmed);
+                ImGui.BeginDisabled(isBusy || !balanceRefundConfirmed);
+                if (ImGui.Button("Discard payout attempt"))
+                {
+                    balanceRefundConfirmed = false;
+                    plugin.CancelDjPayments(venue, paymentIds);
+                }
+                ImGui.EndDisabled();
             }
-            ImGui.EndDisabled();
+            ImGui.TextWrapped("Use Payment History to mark a trade completed or cancel a payment and record the set as unpaid.");
             return;
         }
 
@@ -373,21 +392,21 @@ public sealed class DjsTabRenderer(Plugin plugin)
         ImGui.EndDisabled();
     }
 
-    private static long GetOutstandingBalance(DjViewResponse view, long djId) =>
-        view.Bookings
-            .Where(booking => booking.DjId == djId &&
-                              booking.EndsAt <= view.ServerNow &&
-                              booking.PriceGil > 0 &&
-                              !booking.HasActivePayment &&
-                              !string.Equals(booking.StatusCode, DjBookingStatusCodes.Unavailable, StringComparison.OrdinalIgnoreCase) &&
-                              !string.Equals(booking.StatusCode, DjBookingStatusCodes.Cancelled, StringComparison.OrdinalIgnoreCase))
+    private static long GetOutstandingBalance(DjViewResponse view, long djId)
+    {
+        var now = DateTimeOffset.UtcNow;
+        return view.Bookings
+            .Where(booking => booking.DjId == djId && booking.IsPaymentEligible(now))
             .Sum(booking => booking.PriceGil);
+    }
 
     private static long GetPendingBalance(DjViewResponse view, long djId) =>
         view.Bookings
-            .Where(booking => booking.DjId == djId &&
-                              string.Equals(booking.PaymentStatus, DjPaymentStatusCodes.Started, StringComparison.OrdinalIgnoreCase))
+            .Where(booking => booking.DjId == djId && IsAwaitingPaymentConfirmation(booking))
             .Sum(booking => booking.PriceGil);
+
+    private static bool IsAwaitingPaymentConfirmation(DjBookingSummary booking) =>
+        booking.PaymentStatus is DjPaymentStatusCodes.Started or DjPaymentStatusCodes.Traded;
 
     private void DrawDirectory(
         VenueConnectionConfiguration venue,
@@ -519,6 +538,9 @@ public sealed class DjsTabRenderer(Plugin plugin)
         defaultHourlyRateGil = "0";
         selectedLinkDjId = 0;
         selectedPayoutDjId = 0;
+        selectedHistoryDjId = null;
+        pendingCloseOut = null;
+        closeOutRefundConfirmed = false;
         proxyPayoutConfirmed = false;
         balanceRefundConfirmed = false;
         payoutTargetKey = string.Empty;

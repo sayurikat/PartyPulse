@@ -66,7 +66,6 @@ public sealed class Plugin : IDalamudPlugin
     private readonly VenueUserEditWindow venueUserEditWindow;
     private readonly VipPlayerEditWindow vipPlayerEditWindow;
     private readonly StaffLifecycleWindow staffLifecycleWindow;
-    private readonly VipArrivalWindow vipArrivalWindow;
     private readonly NotificationToastWindow notificationToastWindow;
     private readonly SettlementTradeService settlementTradeService;
     private readonly GameMacroExecutionService gameMacroExecutionService;
@@ -210,7 +209,6 @@ public sealed class Plugin : IDalamudPlugin
         venueUserEditWindow = new VenueUserEditWindow(this);
         vipPlayerEditWindow = new VipPlayerEditWindow(this);
         staffLifecycleWindow = new StaffLifecycleWindow(this);
-        vipArrivalWindow = new VipArrivalWindow(this);
         notificationToastWindow = new NotificationToastWindow(this);
         WindowSystem.AddWindow(configWindow);
         WindowSystem.AddWindow(mainWindow);
@@ -218,7 +216,6 @@ public sealed class Plugin : IDalamudPlugin
         WindowSystem.AddWindow(venueUserEditWindow);
         WindowSystem.AddWindow(vipPlayerEditWindow);
         WindowSystem.AddWindow(staffLifecycleWindow);
-        WindowSystem.AddWindow(vipArrivalWindow);
         WindowSystem.AddWindow(notificationToastWindow);
 
         CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
@@ -328,7 +325,6 @@ public sealed class Plugin : IDalamudPlugin
         venueUserEditWindow.Dispose();
         vipPlayerEditWindow.Dispose();
         staffLifecycleWindow.Dispose();
-        vipArrivalWindow.Dispose();
         notificationToastWindow.Dispose();
         Notifications.Dispose();
         Finance.Dispose();
@@ -608,6 +604,11 @@ public sealed class Plugin : IDalamudPlugin
             CreateVenueUserRecoveryCodeAndReportAsync(venue, user),
             $"create recovery code for venue user {user.UserId} at {venue.VenueCode}");
 
+    public void ArchiveVenueUser(VenueConnectionConfiguration venue, VenueUserSummary user) =>
+        Observe(
+            ArchiveVenueUserAndReportAsync(venue, user),
+            $"archive venue user {user.UserId} at {venue.VenueCode}");
+
     public void RestoreVenueUser(
         VenueConnectionConfiguration venue,
         VenueUserSummary user) =>
@@ -657,6 +658,13 @@ public sealed class Plugin : IDalamudPlugin
         Observe(
             SellVipSubscriptionAndReportAsync(venue, request),
             $"sell VIP subscription for {venue.VenueCode}");
+
+    public void RegisterVipPlayer(
+        VenueConnectionConfiguration venue,
+        RegisterVipPlayerRequest request) =>
+        Observe(
+            RegisterVipPlayerAndReportAsync(venue, request),
+            $"register VIP player for {venue.VenueCode}");
 
     public void LinkVipCharacter(
         VenueConnectionConfiguration venue,
@@ -724,12 +732,6 @@ public sealed class Plugin : IDalamudPlugin
         Observe(
             VipArrivals.LoadAsync(venue, true, LifetimeToken),
             $"refresh VIP arrival data for {venue.VenueCode}");
-    }
-
-    public void OpenVipArrivalTracker(VenueConnectionConfiguration venue)
-    {
-        EnsureVipArrivalsLoaded(venue);
-        vipArrivalWindow.Open(venue.ProfileId);
     }
 
     public void SubmitVipArrivalObservations(
@@ -915,6 +917,11 @@ public sealed class Plugin : IDalamudPlugin
             Djs.LoadAsync(venue, true, LifetimeToken),
             $"refresh DJs for {venue.VenueCode}");
 
+    public void LoadDjPaymentHistory(VenueConnectionConfiguration venue, long? djId, bool forceRefresh = false) =>
+        Observe(
+            Djs.LoadPaymentHistoryAsync(venue, djId, forceRefresh, LifetimeToken),
+            $"load DJ payment history for {venue.VenueCode}");
+
     public void SaveDj(
         VenueConnectionConfiguration venue,
         long? djId,
@@ -1000,6 +1007,15 @@ public sealed class Plugin : IDalamudPlugin
         Observe(
             CancelDjPaymentsAndReportAsync(venue, paymentIds),
             $"cancel DJ payment batch for {venue.VenueCode}");
+
+    public void MarkDjPaymentTraded(VenueConnectionConfiguration venue, long paymentId) =>
+        Observe(MarkDjPaymentTradedAndReportAsync(venue, paymentId), $"record completed DJ trade {paymentId}");
+
+    public void CloseOutDjPayment(
+        VenueConnectionConfiguration venue,
+        long bookingId,
+        CloseOutDjPaymentRequest request) =>
+        Observe(CloseOutDjPaymentAndReportAsync(venue, bookingId, request), $"close out DJ payment for booking {bookingId}");
 
     public void ConfirmDjPayment(
         VenueConnectionConfiguration venue,
@@ -1645,7 +1661,7 @@ public sealed class Plugin : IDalamudPlugin
             $"mark notification {queued.Notification.NotificationId} seen");
 
     public void OpenVenueUserEditor(VenueConnectionConfiguration venue, VenueUserSummary user) =>
-        venueUserEditWindow.Open(venue.ProfileId, user.UserId);
+        venueUserEditWindow.Open(venue.ProfileId, user);
 
     private bool TryGetCurrentIdentity(
         VenueConnectionConfiguration venue,
@@ -2065,6 +2081,20 @@ public sealed class Plugin : IDalamudPlugin
         ReportUserManagementFailure(result.Failure, "The recovery code could not be created.");
     }
 
+    private async Task ArchiveVenueUserAndReportAsync(
+        VenueConnectionConfiguration venue,
+        VenueUserSummary user)
+    {
+        var result = await UserManagement.ArchiveAsync(venue, user, LifetimeToken);
+        if (result.Success)
+        {
+            ChatGui.Print($"Archived venue user '{user.DisplayName}'. You can find them under Users > Archived.", "PartyPulse");
+            return;
+        }
+
+        ReportUserManagementFailure(result.Failure, "The venue user could not be archived.");
+    }
+
     private async Task RestoreVenueUserAndReportAsync(
         VenueConnectionConfiguration venue,
         VenueUserSummary user)
@@ -2076,8 +2106,12 @@ public sealed class Plugin : IDalamudPlugin
 
         if (result.Success && result.Value is not null)
         {
+            var codeType = result.Value.IsRecoveryCode ? "recovery code" : "invite";
+            var permissionNote = result.Value.IsRecoveryCode
+                ? "Their previous permissions were kept."
+                : "Assign permissions again as needed.";
             ChatGui.Print(
-                $"Restored venue user '{user.DisplayName}'. Invite code: {result.Value.InviteCode} (expires {VenueTimeZone.Format(venue, result.Value.InviteExpiresAt, "g")}). Permissions remain cleared until reassigned.",
+                $"Restored venue user '{user.DisplayName}'. Copy their new {codeType} from Users > Archived. {permissionNote}",
                 "PartyPulse");
             return;
         }
@@ -2164,6 +2198,24 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         ReportVipFailure(result.Failure, "The VIP subscription could not be sold.");
+    }
+
+    private async Task RegisterVipPlayerAndReportAsync(
+        VenueConnectionConfiguration venue,
+        RegisterVipPlayerRequest request)
+    {
+        var result = await Vip.RegisterPlayerAsync(venue, request, LifetimeToken);
+        if (result.Success)
+        {
+            ChatGui.Print($"Registered {request.CharacterName} @ {request.WorldName}.", "PartyPulse");
+            await VipPerks.LoadAsync(venue, true, LifetimeToken);
+            await RefreshPhotoshootsIfLoadedAsync(venue);
+            await RefreshOtherSalesIfLoadedAsync(venue);
+            await RefreshOtherGamesIfLoadedAsync(venue);
+            return;
+        }
+
+        ReportVipFailure(result.Failure, "The VIP player could not be registered.");
     }
 
     private async Task LinkVipCharacterAndReportAsync(
@@ -2958,6 +3010,36 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         ReportVipFailure(result.Failure, "The DJ payment batch could not be fully cancelled. Refresh before retrying.");
+    }
+
+    private async Task MarkDjPaymentTradedAndReportAsync(VenueConnectionConfiguration venue, long paymentId)
+    {
+        var result = await Djs.MarkPaymentTradedAsync(venue, paymentId, LifetimeToken);
+        if (result.Success)
+        {
+            await RefreshOpeningHistoryIfLoadedAsync(venue);
+            ChatGui.Print($"Recorded the completed trade for DJ payment #{paymentId}.", "PartyPulse");
+            return;
+        }
+
+        ReportVipFailure(result.Failure, "The completed DJ trade could not be recorded.");
+    }
+
+    private async Task CloseOutDjPaymentAndReportAsync(
+        VenueConnectionConfiguration venue,
+        long bookingId,
+        CloseOutDjPaymentRequest request)
+    {
+        var result = await Djs.CloseOutPaymentAsync(venue, bookingId, request, LifetimeToken);
+        if (result.Success)
+        {
+            await RefreshOpeningHistoryIfLoadedAsync(venue);
+            var reason = request.Reason == DjPaymentCancellationReasons.OptedOut ? "DJ opted out" : "payment cancelled";
+            ChatGui.Print($"DJ booking #{bookingId} was recorded as unpaid ({reason}).", "PartyPulse");
+            return;
+        }
+
+        ReportVipFailure(result.Failure, "The DJ booking could not be recorded as unpaid. Refresh before retrying.");
     }
 
     private async Task ConfirmDjPaymentAndReportAsync(

@@ -18,6 +18,8 @@ public sealed record IssuedOneTimeCode(
     string Code,
     DateTimeOffset ExpiresAt);
 
+public sealed record RestoredVenueUserCode(IssuedOneTimeCode Code, bool IsRecoveryCode);
+
 public sealed record VenueUserManagementSnapshot(
     VenueUserManagementStatus Status,
     string Message,
@@ -25,6 +27,8 @@ public sealed record VenueUserManagementSnapshot(
     IssuedOneTimeCode? LastInviteCode,
     DateTimeOffset? LastAttemptAt)
 {
+    public RestoredVenueUserCode? LastRestoreCode { get; init; }
+
     public static VenueUserManagementSnapshot NotLoaded { get; } = new(
         VenueUserManagementStatus.NotLoaded,
         "Venue users have not been loaded.",

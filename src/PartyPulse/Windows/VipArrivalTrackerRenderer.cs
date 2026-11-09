@@ -3,7 +3,6 @@ using System.Linq;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Utility;
-using Dalamud.Interface.Windowing;
 using PartyPulse.Api;
 using PartyPulse.Models;
 using PartyPulse.Services;
@@ -11,46 +10,17 @@ using PartyPulse.Vip;
 
 namespace PartyPulse.Windows;
 
-public sealed class VipArrivalWindow : Window, IDisposable
+internal sealed class VipArrivalTrackerRenderer(Plugin plugin)
 {
-    private readonly Plugin plugin;
-    private Guid venueProfileId;
-
-    public VipArrivalWindow(Plugin plugin)
-        : base("VIP arrival tracker###PartyPulseVipArrivalTracker")
+    public void Draw(VenueConnectionConfiguration venue)
     {
-        this.plugin = plugin;
-        IsOpen = false;
-        SizeConstraints = new WindowSizeConstraints
-        {
-            MinimumSize = new Vector2(620, 360),
-            MaximumSize = new Vector2(float.MaxValue, float.MaxValue),
-        };
-    }
-
-    public void Open(Guid profileId)
-    {
-        venueProfileId = profileId;
-        IsOpen = true;
-    }
-
-    public override void Draw()
-    {
-        var venue = plugin.Configuration.VenueConnections.FirstOrDefault(
-            value => value.ProfileId == venueProfileId);
-        if (venue is null)
-        {
-            ImGui.TextWrapped("This venue is no longer configured on this device.");
-            return;
-        }
-
         plugin.EnsureVipLoaded(venue);
         plugin.EnsureVipArrivalsLoaded(venue);
 
         var vipSnapshot = plugin.Vip.GetSnapshot(venue);
         var arrivalSnapshot = plugin.VipArrivals.GetSnapshot(venue);
 
-        DrawHeader(venue, arrivalSnapshot);
+        DrawHeader(venue);
 
         if (vipSnapshot.Status != VipManagementStatus.Ready || vipSnapshot.View is null)
         {
@@ -74,7 +44,7 @@ public sealed class VipArrivalWindow : Window, IDisposable
         if (context.CurrentOpening is not { } opening)
         {
             plugin.VipArrivalNearby.Clear();
-            ImGui.TextWrapped("There is no active venue opening. Start a temporary opening from the VIP tab, or wait for a future scheduled opening.");
+            ImGui.TextWrapped("There is no active venue opening. Start a temporary opening under VIP > Arrivals in Main mode, or wait for a scheduled opening.");
             return;
         }
 
@@ -245,13 +215,7 @@ public sealed class VipArrivalWindow : Window, IDisposable
         ImGui.EndTable();
     }
 
-    public void Dispose()
-    {
-    }
-
-    private void DrawHeader(
-        VenueConnectionConfiguration venue,
-        VipArrivalManagementSnapshot snapshot)
+    private void DrawHeader(VenueConnectionConfiguration venue)
     {
         ImGui.TextUnformatted(venue.DisplayLabel);
         ImGui.SameLine();

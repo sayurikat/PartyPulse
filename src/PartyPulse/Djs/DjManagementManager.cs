@@ -19,6 +19,7 @@ public sealed class DjManagementManager : IDisposable
     private readonly PlayerIdentityProvider identityProvider;
     private readonly IPluginLog log;
     private readonly ConcurrentDictionary<Guid, DjManagementSnapshot> snapshots = new();
+    private readonly ConcurrentDictionary<Guid, DjPaymentHistorySnapshot> paymentHistories = new();
     private readonly ConcurrentDictionary<Guid, SemaphoreSlim> gates = new();
     private readonly ConcurrentDictionary<Guid, DateTimeOffset> lastSuccessfulBookingSaveAt = new();
 
@@ -87,6 +88,29 @@ public sealed class DjManagementManager : IDisposable
                 "DJ data loaded.",
                 result.Value,
                 attemptAt);
+            return result;
+        }, cancellationToken);
+
+    public DjPaymentHistorySnapshot? GetPaymentHistory(VenueConnectionConfiguration venue) =>
+        paymentHistories.TryGetValue(venue.ProfileId, out var history) ? history : null;
+
+    public Task<ApiResult<DjPaymentHistoryResponse>> LoadPaymentHistoryAsync(
+        VenueConnectionConfiguration venue,
+        long? djId,
+        bool forceRefresh,
+        CancellationToken cancellationToken) =>
+        WithGateAsync(venue, async () =>
+        {
+            if (!forceRefresh && GetPaymentHistory(venue) is { View: { } existing } current && current.DjId == djId)
+                return ApiResult<DjPaymentHistoryResponse>.Succeeded(existing);
+
+            paymentHistories[venue.ProfileId] = new(djId, null, "Loading payment history…");
+            var context = await GetAuthorizedContextAsync(venue, cancellationToken);
+            var result = context.Success
+                ? await apiClient.GetDjPaymentHistoryAsync(context.BaseUri!, context.AccessToken!, djId, cancellationToken)
+                : ApiResult<DjPaymentHistoryResponse>.Failed(context.Failure!);
+            paymentHistories[venue.ProfileId] = new(
+                djId, result.Value, result.Failure?.Message ?? "Payment history loaded.");
             return result;
         }, cancellationToken);
 
@@ -293,6 +317,41 @@ public sealed class DjManagementManager : IDisposable
             ApiResult<IReadOnlyList<DjPaymentOperationResponse>>.Failed,
             cancellationToken);
 
+    public Task<ApiResult<DjPaymentOperationResponse>> MarkPaymentTradedAsync(
+        VenueConnectionConfiguration venue,
+        long paymentId,
+        CancellationToken cancellationToken) =>
+        WithMutationAsync(
+            venue,
+            async context =>
+            {
+                var result = await apiClient.MarkDjPaymentTradedAsync(
+                    context.BaseUri!, context.AccessToken!, paymentId, cancellationToken);
+                if (result.Success)
+                    await RefreshCoreAsync(venue, context, cancellationToken);
+                return result;
+            },
+            ApiResult<DjPaymentOperationResponse>.Failed,
+            cancellationToken);
+
+    public Task<ApiResult<CloseOutDjPaymentResponse>> CloseOutPaymentAsync(
+        VenueConnectionConfiguration venue,
+        long bookingId,
+        CloseOutDjPaymentRequest request,
+        CancellationToken cancellationToken) =>
+        WithMutationAsync(
+            venue,
+            async context =>
+            {
+                var result = await apiClient.CloseOutDjPaymentAsync(
+                    context.BaseUri!, context.AccessToken!, bookingId, request, cancellationToken);
+                if (result.Success)
+                    await RefreshCoreAsync(venue, context, cancellationToken);
+                return result;
+            },
+            ApiResult<CloseOutDjPaymentResponse>.Failed,
+            cancellationToken);
+
     public Task<ApiResult<DjPaymentOperationResponse>> ConfirmPaymentAsync(
         VenueConnectionConfiguration venue,
         long paymentId,
@@ -331,11 +390,13 @@ public sealed class DjManagementManager : IDisposable
     public void RemoveProfile(Guid profileId)
     {
         snapshots.TryRemove(profileId, out _);
+        paymentHistories.TryRemove(profileId, out _);
         lastSuccessfulBookingSaveAt.TryRemove(profileId, out _);
     }
 
     public void Clear(string message = "DJ data was cleared.")
     {
+        paymentHistories.Clear();
         foreach (var pair in snapshots)
             snapshots[pair.Key] = DjManagementSnapshot.NotLoaded with { Message = message };
         lastSuccessfulBookingSaveAt.Clear();
@@ -346,6 +407,7 @@ public sealed class DjManagementManager : IDisposable
         foreach (var gate in gates.Values) gate.Dispose();
         gates.Clear();
         snapshots.Clear();
+        paymentHistories.Clear();
         lastSuccessfulBookingSaveAt.Clear();
     }
 
@@ -354,6 +416,7 @@ public sealed class DjManagementManager : IDisposable
         AuthorizedContext context,
         CancellationToken cancellationToken)
     {
+        paymentHistories.TryRemove(venue.ProfileId, out _);
         var result = await apiClient.GetDjsAsync(
             context.BaseUri!, context.AccessToken!, cancellationToken);
         if (result.Success && result.Value is not null)

@@ -44,6 +44,7 @@ public sealed class MainWindow : Window, IDisposable
                 new(MainSubtab.DjsDirectory, "Directory"),
                 new(MainSubtab.DjsCharacters, "Characters"),
                 new(MainSubtab.DjsPayments, "Payments"),
+                new(MainSubtab.DjsPaymentHistory, "Payment History"),
                 new(MainSubtab.DjsSettings, "Pricing"),
             ]),
         new(MainPage.Greeter, "GUESTS & SALES", "Greeter", "GR",
@@ -56,6 +57,7 @@ public sealed class MainWindow : Window, IDisposable
             "Manage VIP arrivals, sales, players, packages, and perks.",
             [
                 new(MainSubtab.VipArrivals, "Arrivals"),
+                new(MainSubtab.VipArrivalTracker, "Arrival Tracker"),
                 new(MainSubtab.VipSales, "Sales"),
                 new(MainSubtab.VipPlayers, "Players"),
                 new(MainSubtab.VipPackages, "Packages"),
@@ -162,10 +164,11 @@ public sealed class MainWindow : Window, IDisposable
                 new(MainSubtab.FinanceSettlements, "Settlements"),
             ]),
         new(MainPage.Users, "ADMINISTRATION", "Users", "USR",
-            "Create venue users and review access.",
+            "Create venue users, review access, and restore archived accounts.",
             [
                 new(MainSubtab.UsersCreate, "Add user"),
                 new(MainSubtab.UsersDirectory, "Directory"),
+                new(MainSubtab.UsersArchived, "Archived"),
             ]),
         new(MainPage.MyAccount, "ADMINISTRATION", "My Account", "ME",
             "Manage characters, devices, and venue authorization.",
@@ -642,7 +645,7 @@ public sealed class MainWindow : Window, IDisposable
         {
             var now = DateTimeOffset.UtcNow;
             refreshDeferral.Observe(ImGui.GetIO().WantTextInput, now);
-            RunActivePageAutoRefresh(selectedVenue!, activePage);
+            RunActivePageAutoRefresh(selectedVenue!, activePage, subtab.Id);
         }
     }
 
@@ -727,13 +730,21 @@ public sealed class MainWindow : Window, IDisposable
             throw new InvalidOperationException($"Mini tab {definition.Id} does not map to a shared renderer.");
         }
 
-        RunActivePageAutoRefresh(venue, definition.Page);
+        RunActivePageAutoRefresh(venue, definition.Page, definition.Subtab);
     }
 
     private void RunActivePageAutoRefresh(
         VenueConnectionConfiguration venue,
-        MainPage page)
+        MainPage page,
+        MainSubtab subtab)
     {
+        // The tracker polls its arrival context while open. The periodic VIP
+        // page refresh would clear its nearby observations and submit them again.
+        if (subtab == MainSubtab.VipArrivalTracker)
+        {
+            return;
+        }
+
         var interval = page switch
         {
             MainPage.TimedMacros => TimeSpan.FromSeconds(10),
@@ -992,7 +1003,7 @@ public sealed class MainWindow : Window, IDisposable
 
             MainSubtab.DjsSettings or MainSubtab.DjsDirectory or MainSubtab.DjsCharacters =>
                 plugin.Djs.GetSnapshot(venue).View?.Capabilities.CanManageDirectory,
-            MainSubtab.DjsPayments => CanManageDjPayments(),
+            MainSubtab.DjsPayments or MainSubtab.DjsPaymentHistory => CanManageDjPayments(),
 
             MainSubtab.GreeterArrivals =>
                 plugin.Greeter.GetSnapshot(venue).Context?.Capabilities.CanUse,
@@ -1000,6 +1011,8 @@ public sealed class MainWindow : Window, IDisposable
                 plugin.Greeter.GetSnapshot(venue).Context?.Capabilities.CanManageMacros,
 
             MainSubtab.VipArrivals => CanUseVipArrivals(),
+            MainSubtab.VipArrivalTracker =>
+                plugin.VipArrivals.GetSnapshot(venue).Context?.Capabilities.CanUseArrival,
             MainSubtab.VipSales =>
                 plugin.Vip.GetSnapshot(venue).View?.Capabilities.CanSell,
             MainSubtab.VipPlayers =>
@@ -1086,7 +1099,7 @@ public sealed class MainWindow : Window, IDisposable
 
             MainSubtab.FinanceBalances or MainSubtab.FinanceSettlements => true,
             MainSubtab.UsersCreate => CanCreateUsers(),
-            MainSubtab.UsersDirectory =>
+            MainSubtab.UsersDirectory or MainSubtab.UsersArchived =>
                 plugin.UserManagement.GetSnapshot(venue).View?.Capabilities.CanView,
             MainSubtab.MyAccountCharacters or
                 MainSubtab.MyAccountDevices or
@@ -1208,12 +1221,16 @@ public sealed class MainWindow : Window, IDisposable
             MainSubtab.DjsSettings or
                 MainSubtab.DjsDirectory or
                 MainSubtab.DjsCharacters or
-                MainSubtab.DjsPayments =>
+                MainSubtab.DjsPayments or
+                MainSubtab.DjsPaymentHistory =>
                 plugin.Djs.GetSnapshot(venue).Status == PartyPulse.Djs.DjManagementStatus.Denied,
             MainSubtab.GreeterArrivals or MainSubtab.GreeterMacros =>
                 plugin.Greeter.GetSnapshot(venue).Status == PartyPulse.Greeter.GreeterManagementStatus.Denied,
             MainSubtab.VipArrivals =>
                 plugin.VipArrivals.GetSnapshot(venue).Status == PartyPulse.Vip.VipArrivalManagementStatus.Denied,
+            MainSubtab.VipArrivalTracker =>
+                plugin.VipArrivals.GetSnapshot(venue).Status == PartyPulse.Vip.VipArrivalManagementStatus.Denied ||
+                plugin.Vip.GetSnapshot(venue).Status == PartyPulse.Vip.VipManagementStatus.Denied,
             MainSubtab.VipSales or MainSubtab.VipPlayers or MainSubtab.VipPackages =>
                 plugin.Vip.GetSnapshot(venue).Status == PartyPulse.Vip.VipManagementStatus.Denied,
             MainSubtab.VipPerks =>
@@ -1273,7 +1290,7 @@ public sealed class MainWindow : Window, IDisposable
                 MainSubtab.PartyFinderTemplates =>
                 plugin.OpeningPublications.GetSnapshot(venue).Status ==
                 PartyPulse.OpeningPublications.OpeningPublicationManagementStatus.Denied,
-            MainSubtab.UsersCreate or MainSubtab.UsersDirectory =>
+            MainSubtab.UsersCreate or MainSubtab.UsersDirectory or MainSubtab.UsersArchived =>
                 plugin.UserManagement.GetSnapshot(venue).Status == VenueUserManagementStatus.Denied,
             _ => false,
         };
@@ -1559,7 +1576,34 @@ public sealed class MainWindow : Window, IDisposable
             return;
         }
 
-        PartyPulseUi.SectionHeader("Venue users");
+        var archived = subtab == MainSubtab.UsersArchived;
+        PartyPulseUi.SectionHeader(archived ? "Archived venue users" : "Venue users");
+        if (archived)
+        {
+            ImGui.TextWrapped("Restoring keeps the existing account and history. Previous devices and permissions remain cleared.");
+            if (view.Capabilities.CanRestore &&
+                snapshot.LastRestoreCode is { } restored &&
+                (!restored.IsRecoveryCode || view.Capabilities.CanRecover) &&
+                restored.Code.ExpiresAt > DateTimeOffset.UtcNow)
+            {
+                var codeLabel = restored.IsRecoveryCode ? "Recovery code" : "Invite code";
+                ImGui.Spacing();
+                ImGui.TextWrapped($"{codeLabel} for {restored.Code.DisplayName}: {restored.Code.Code}");
+                ImGui.TextDisabled($"Expires: {VenueTimeZone.Format(venue, restored.Code.ExpiresAt, "g")}");
+                if (ImGui.Button(restored.IsRecoveryCode ? "Copy recovery code" : "Copy invite code"))
+                {
+                    ImGui.SetClipboardText(restored.Code.Code);
+                }
+            }
+        }
+
+        var users = view.Users.Where(user => user.DisabledAt.HasValue == archived).ToArray();
+        if (users.Length == 0)
+        {
+            ImGui.TextDisabled(archived ? "No archived venue users." : "No active venue users.");
+            return;
+        }
+
         var tableFlags =
             ImGuiTableFlags.Borders |
             ImGuiTableFlags.RowBg |
@@ -1567,27 +1611,22 @@ public sealed class MainWindow : Window, IDisposable
             ImGuiTableFlags.ScrollY |
             ImGuiTableFlags.SizingStretchProp;
 
-        if (ImGui.BeginTable("VenueUsers", 5, tableFlags, new Vector2(0, 340 * ImGuiHelpers.GlobalScale)))
+        if (ImGui.BeginTable(archived ? "ArchivedVenueUsers" : "VenueUsers", 5, tableFlags, new Vector2(0, 340 * ImGuiHelpers.GlobalScale)))
         {
             ImGui.TableSetupColumn("Display name");
             ImGui.TableSetupColumn("Discord");
             ImGui.TableSetupColumn("Character");
-            ImGui.TableSetupColumn("Access");
-            ImGui.TableSetupColumn("##Actions", ImGuiTableColumnFlags.WidthFixed, 70 * ImGuiHelpers.GlobalScale);
+            ImGui.TableSetupColumn(archived ? "Archived" : "Access");
+            ImGui.TableSetupColumn("##Actions", ImGuiTableColumnFlags.WidthFixed, (archived ? 175 : 70) * ImGuiHelpers.GlobalScale);
             ImGui.TableHeadersRow();
 
-            foreach (var user in view.Users)
+            foreach (var user in users)
             {
                 ImGui.PushID(user.UserId);
                 ImGui.TableNextRow();
 
                 ImGui.TableSetColumnIndex(0);
                 ImGui.TextUnformatted(user.DisplayName);
-                if (user.DisabledAt is not null)
-                {
-                    ImGui.SameLine();
-                    ImGui.TextDisabled("(disabled)");
-                }
 
                 ImGui.TableSetColumnIndex(1);
                 ImGui.TextUnformatted(user.DiscordDisplay);
@@ -1600,7 +1639,11 @@ public sealed class MainWindow : Window, IDisposable
                 ImGui.TextUnformatted(user.CharacterDisplay);
 
                 ImGui.TableSetColumnIndex(3);
-                if (user.IsOwner)
+                if (user.DisabledAt is { } archivedAt)
+                {
+                    ImGui.TextUnformatted(VenueTimeZone.Format(venue, archivedAt, "g"));
+                }
+                else if (user.IsOwner)
                 {
                     ImGui.TextColored(PartyPulseUi.Warning, "Owner");
                 }
@@ -1610,17 +1653,30 @@ public sealed class MainWindow : Window, IDisposable
                 }
 
                 ImGui.TableSetColumnIndex(4);
-                var canOpenEditor =
-                    view.Capabilities.CanEdit ||
-                    view.Capabilities.CanRecover ||
-                    view.Capabilities.CanRestore ||
-                    view.Capabilities.CanManagePermissions;
-                ImGui.BeginDisabled(!canOpenEditor);
-                if (ImGui.SmallButton("Edit"))
+                if (archived)
                 {
-                    plugin.OpenVenueUserEditor(venue, user);
+                    var usesRecovery = user.CanRestoreWithRecoveryCode;
+                    var canRestore = view.Capabilities.CanRestore && (!usesRecovery || view.Capabilities.CanRecover);
+                    ImGui.BeginDisabled(isBusy || !canRestore);
+                    if (ImGui.SmallButton(usesRecovery ? "Restore + recovery code" : "Restore + invite"))
+                    {
+                        plugin.RestoreVenueUser(venue, user);
+                    }
+                    ImGui.EndDisabled();
                 }
-                ImGui.EndDisabled();
+                else
+                {
+                    var canOpenEditor = view.Capabilities.CanEdit ||
+                        view.Capabilities.CanRecover ||
+                        view.Capabilities.CanManagePermissions ||
+                        (view.Capabilities.CanArchive && !user.IsOwner);
+                    ImGui.BeginDisabled(!canOpenEditor);
+                    if (ImGui.SmallButton("Edit"))
+                    {
+                        plugin.OpenVenueUserEditor(venue, user);
+                    }
+                    ImGui.EndDisabled();
+                }
 
                 ImGui.PopID();
             }

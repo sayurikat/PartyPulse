@@ -215,17 +215,23 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
     {
         ImGui.TextUnformatted(editingOpeningId is null ? "Schedule opening" : $"Edit opening #{editingOpeningId}");
 
+        var original = view.Openings.FirstOrDefault(opening => opening.OpeningId == editingOpeningId);
+        var startLocked = original is not null && original.OpensAt <= DateTimeOffset.UtcNow;
+        ImGui.BeginDisabled(startLocked);
         ImGui.SetNextItemWidth(210 * ImGuiHelpers.GlobalScale);
         var openingStartChanged = ImGui.InputText("Starts (venue time)", ref startsAtLocal, 17);
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip($"Format: {LocalDateTimeFormat}");
+        ImGui.EndDisabled();
+        if (startLocked)
+            ImGui.TextDisabled("The start time is fixed once the opening begins.");
 
         ImGui.SetNextItemWidth(160 * ImGuiHelpers.GlobalScale);
         var openingDurationChanged = ImGui.InputInt("Duration (minutes)", ref durationMinutes);
         if (openingDurationChanged)
             durationMinutes = Math.Clamp(durationMinutes, 30, 2880);
         if ((openingStartChanged || openingDurationChanged) &&
-            TryParseLocalDateTime(venue, startsAtLocal, out var calculatedOpeningStart, out _))
+            TryGetDraftTime(venue, startsAtLocal, original?.OpensAt, startLocked, out var calculatedOpeningStart, out _))
         {
             var synchronizedDuration = openingDurationChanged
                 ? durationMinutes
@@ -240,8 +246,8 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
         ImGui.SetNextItemWidth(210 * ImGuiHelpers.GlobalScale);
         var openingEndChanged = ImGui.InputText("Ends (venue time)", ref endsAtLocal, 17);
         if (openingEndChanged &&
-            TryParseLocalDateTime(venue, startsAtLocal, out var durationOpeningStart, out _) &&
-            TryParseLocalDateTime(venue, endsAtLocal, out var durationOpeningEnd, out _) &&
+            TryGetDraftTime(venue, startsAtLocal, original?.OpensAt, startLocked, out var durationOpeningStart, out _) &&
+            TryGetDraftTime(venue, endsAtLocal, original?.ClosesAt, false, out var durationOpeningEnd, out _) &&
             durationOpeningEnd > durationOpeningStart)
         {
             durationMinutes = (int)Math.Round(
@@ -317,8 +323,8 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
             ImGui.TextDisabled("Reads your current housing ward and plot.");
         }
 
-        var validStart = TryParseLocalDateTime(venue, startsAtLocal, out var startsAt, out var dateError);
-        var validEnd = TryParseLocalDateTime(venue, endsAtLocal, out var closesAt, out var endDateError);
+        var validStart = TryGetDraftTime(venue, startsAtLocal, original?.OpensAt, startLocked, out var startsAt, out var dateError);
+        var validEnd = TryGetDraftTime(venue, endsAtLocal, original?.ClosesAt, false, out var closesAt, out var endDateError);
         var actualDurationMinutes = validStart && validEnd
             ? (closesAt - startsAt).TotalMinutes
             : 0;
@@ -333,8 +339,10 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
                     validEnd &&
                     closesAt > startsAt &&
                     actualDurationMinutes is >= 30 and <= 2880 &&
-                    !string.IsNullOrWhiteSpace(themeName) &&
-                    locationValid;
+                    (!string.IsNullOrWhiteSpace(themeName) || (original is not null && original.ThemeName is null)) &&
+                    locationValid &&
+                    (editingOpeningId is null ||
+                     (original is { IsCancelled: false } && original.ClosesAt > DateTimeOffset.UtcNow));
 
         if (!validStart)
             ImGui.TextColored(new Vector4(1f, 0.45f, 0.4f, 1f), dateError);
@@ -364,10 +372,9 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
                     AddressPlot = isOutdoorEvent ? 0 : addressPlot,
                     LocationType = isOutdoorEvent ? VenueOpeningLocationTypes.Outdoor : VenueOpeningLocationTypes.Housing,
                     OutdoorLocationName = isOutdoorEvent ? outdoorLocationName.Trim() : null,
-                    ThemeName = themeName.Trim(),
+                    ThemeName = string.IsNullOrWhiteSpace(themeName) ? null : themeName.Trim(),
                     Title = string.IsNullOrWhiteSpace(openingTitle) ? null : openingTitle.Trim()
                 });
-            editingOpeningId = null;
         }
         ImGui.EndDisabled();
 
@@ -463,11 +470,11 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
                 RequestedSubtab = MainSubtab.OpeningsPublications;
             }
             ImGui.SameLine();
+            if (ImGui.SmallButton("Edit"))
+                LoadOpeningDraft(venue, opening);
+            ImGui.SameLine();
             if (isFuture)
             {
-                if (ImGui.SmallButton("Edit"))
-                    LoadOpeningDraft(venue, opening);
-                ImGui.SameLine();
                 if (ImGui.SmallButton("Cancel"))
                 {
                     pendingCancelOpeningId = opening.OpeningId;
@@ -611,7 +618,7 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
             .OrderBy(value => value.StartsAt)
             .ThenBy(value => value.BookingId)
             .ToArray();
-        var allowScheduleEditing = historicalBookings is null;
+        var allowScheduleEditing = historicalBookings is null && !opening.IsCancelled && opening.ClosesAt > DateTimeOffset.UtcNow;
         var coverage = CalculateCoverage(opening, bookings);
         DrawCoverage(coverage);
         ImGui.SameLine();
@@ -653,8 +660,8 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
         ImGui.Spacing();
         ImGui.TextUnformatted(editingBookingId is null ? "Add DJ slot" : $"Edit DJ slot #{editingBookingId}");
 
-        var activePaymentLocksPrice = editingBookingId is { } editedId &&
-                                      bookings.FirstOrDefault(value => value.BookingId == editedId)?.HasActivePayment == true;
+        var originalBooking = bookings.FirstOrDefault(value => value.BookingId == editingBookingId);
+        var activePaymentLocksPrice = originalBooking?.HasActivePayment == true;
         var selectedDj = view.Djs.FirstOrDefault(value => value.DjId == selectedDjId) ?? view.Djs.First();
         if (selectedDjId <= 0)
             selectedDjId = selectedDj.DjId;
@@ -747,8 +754,10 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
             new Vector2(0, 90 * ImGuiHelpers.GlobalScale));
         ImGui.TextDisabled("Leave blank to use the regular/resident generic timed macro. Both generic and override macros support <name> and <twitch>.");
 
-        var startValid = TryParseLocalDateTime(venue, bookingStartsAtLocal, out var startsAt, out var startError);
-        var endValid = TryParseLocalDateTime(venue, bookingEndsAtLocal, out var endsAt, out var endError);
+        var startValid = TryGetDraftTime(
+            venue, bookingStartsAtLocal, originalBooking?.StartsAt ?? opening.OpensAt, false, out var startsAt, out var startError);
+        var endValid = TryGetDraftTime(
+            venue, bookingEndsAtLocal, originalBooking?.EndsAt ?? opening.ClosesAt, false, out var endsAt, out var endError);
         var macroValid = ValidateMacroText(bookingMacroOverride, 15, 180, out var lines, out var longestLine);
         var actualBookingDurationMinutes = startValid && endValid
             ? (endsAt - startsAt).TotalMinutes
@@ -883,9 +892,11 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
     {
         var paymentLabel = booking.PaymentStatus switch
         {
-            DjPaymentStatusCodes.Started => "Trade started",
-            DjPaymentStatusCodes.Paid => "Paid",
-            DjPaymentStatusCodes.Cancelled => "Cancelled",
+            DjPaymentStatusCodes.Started => "Pending",
+            DjPaymentStatusCodes.Traded => "Traded",
+            DjPaymentStatusCodes.Paid => "Confirmed",
+            DjPaymentStatusCodes.Cancelled when booking.PaymentCancellationReason == DjPaymentCancellationReasons.OptedOut => "DJ opted out",
+            DjPaymentStatusCodes.Cancelled when booking.IsPaymentClosedOut => "Cancelled",
             _ => "Unpaid"
         };
         ImGui.TextUnformatted(paymentLabel);
@@ -894,33 +905,38 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
             ImGui.TextDisabled($"{booking.PaymentTargetCharacterName} @ {booking.PaymentTargetWorldName}{(booking.PaymentViaProxy ? " (proxy)" : string.Empty)}");
         }
 
-        if (!view.Capabilities.CanManagePayments)
+        if (!view.Capabilities.CanManagePayments || booking.IsPaymentClosedOut)
             return;
 
         if (booking.HasActivePayment && booking.PaymentId is { } activePaymentId)
         {
-            if (string.Equals(booking.PaymentStatus, DjPaymentStatusCodes.Started, StringComparison.OrdinalIgnoreCase))
+            if (booking.PaymentStatus is DjPaymentStatusCodes.Started or DjPaymentStatusCodes.Traded)
             {
                 ImGui.BeginDisabled(isBusy);
                 if (ImGui.SmallButton("Confirm paid"))
                     plugin.ConfirmDjPayment(venue, activePaymentId);
                 ImGui.EndDisabled();
-                ImGui.SameLine();
             }
 
-            ImGui.BeginDisabled(isBusy);
-            if (ImGui.SmallButton("Cancel payment"))
+            if (booking.PaymentStatus == DjPaymentStatusCodes.Started)
             {
-                pendingCancelDjPaymentId = activePaymentId;
-                pendingCancelDjPaymentAmount = booking.PriceGil;
-                requestCancelDjPaymentPopup = true;
+                ImGui.SameLine();
+                ImGui.BeginDisabled(isBusy);
+                if (ImGui.SmallButton("Discard attempt"))
+                {
+                    pendingCancelDjPaymentId = activePaymentId;
+                    pendingCancelDjPaymentAmount = booking.PriceGil;
+                    requestCancelDjPaymentPopup = true;
+                }
+                ImGui.EndDisabled();
             }
-            ImGui.EndDisabled();
             return;
         }
 
+        var now = DateTimeOffset.UtcNow;
+        var eligible = booking.IsPaymentEligible(now);
         var hasTarget = plugin.TargetProvider.TryGetCurrentTarget(out var target, out var reason);
-        ImGui.BeginDisabled(isBusy || booking.PriceGil <= 0 || !hasTarget);
+        ImGui.BeginDisabled(isBusy || !eligible || !hasTarget);
         if (ImGui.SmallButton("Pay via Dropbox") && target is not null)
         {
             var linked = view.Characters.Any(character =>
@@ -946,10 +962,15 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
             }
         }
         ImGui.EndDisabled();
-        if (!hasTarget && ImGui.IsItemHovered())
-            ImGui.SetTooltip(reason);
-        else if (booking.PriceGil <= 0 && ImGui.IsItemHovered())
-            ImGui.SetTooltip("Set a positive booking price before paying the DJ.");
+        if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+        {
+            if (booking.PriceGil <= 0)
+                ImGui.SetTooltip("Set a positive booking price before paying the DJ.");
+            else if (booking.StartsAt - now > TimeSpan.FromHours(1))
+                ImGui.SetTooltip("Payment opens one hour before the set starts.");
+            else if (!hasTarget)
+                ImGui.SetTooltip(reason);
+        }
     }
 
     private void ProcessPendingSuggestions(
@@ -965,6 +986,7 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
             openingLoadedAt >= openingRequestedAt)
         {
             pendingOpeningSuggestionAfter = null;
+            editingOpeningId = null;
             LoadSuggestedDraft(venue, view);
         }
 
@@ -1223,10 +1245,10 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
         if (ImGui.BeginPopupModal("Cancel DJ payment###PartyPulseCancelDjPayment", ImGuiWindowFlags.AlwaysAutoResize))
         {
             ImGui.TextWrapped(
-                $"Cancel this {pendingCancelDjPaymentAmount:N0} gil DJ payment? " +
-                "This confirms that the DJ has refunded the venue in full. The audit record is retained and the booking can then be paid again.");
+                $"Discard this {pendingCancelDjPaymentAmount:N0} gil payment attempt? " +
+                "Confirm any gil traded has already been returned in full. The set remains eligible for payment.");
             ImGui.BeginDisabled(isBusy || pendingCancelDjPaymentId is null);
-            if (ImGui.Button("Confirm refund and cancel"))
+            if (ImGui.Button("Confirm and discard attempt"))
             {
                 plugin.CancelDjPayment(venue, pendingCancelDjPaymentId!.Value);
                 pendingCancelDjPaymentId = null;
@@ -1483,6 +1505,7 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
     {
         draftInitialized = true;
         editingOpeningId = opening.OpeningId;
+        pendingOpeningSuggestionAfter = null;
         startsAtLocal = VenueTimeZone.Format(venue, opening.OpensAt, LocalDateTimeFormat, CultureInfo.InvariantCulture);
         durationMinutes = Math.Clamp((int)Math.Round(opening.Duration.TotalMinutes), 30, 2880);
         endsAtLocal = VenueTimeZone.Format(venue, opening.ClosesAt, LocalDateTimeFormat, CultureInfo.InvariantCulture);
@@ -1576,6 +1599,25 @@ public sealed class VenueOpeningsTabRenderer(Plugin plugin)
         lineCount = lines.Length == 1 && lines[0].Length == 0 ? 0 : lines.Length;
         longestLine = lines.Length == 0 ? 0 : lines.Max(value => value.Length);
         return lineCount <= maxLines && longestLine <= maxLineLength;
+    }
+
+    private static bool TryGetDraftTime(
+        VenueConnectionConfiguration venue,
+        string text,
+        DateTimeOffset? original,
+        bool locked,
+        out DateTimeOffset value,
+        out string error)
+    {
+        if (original is { } time &&
+            (locked || text == VenueTimeZone.Format(venue, time, LocalDateTimeFormat, CultureInfo.InvariantCulture)))
+        {
+            value = time;
+            error = string.Empty;
+            return true;
+        }
+
+        return TryParseLocalDateTime(venue, text, out value, out error);
     }
 
     private static bool TryParseLocalDateTime(

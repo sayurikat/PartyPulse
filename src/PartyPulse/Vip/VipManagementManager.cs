@@ -217,6 +217,34 @@ public sealed class VipManagementManager : IDisposable
             },
             cancellationToken);
 
+    public Task<ApiResult<VipCharacterOperationResponse>> RegisterPlayerAsync(
+        VenueConnectionConfiguration venue,
+        RegisterVipPlayerRequest request,
+        CancellationToken cancellationToken) =>
+        WithGateAsync(
+            venue,
+            async () =>
+            {
+                var context = await GetAuthorizedContextAsync(venue, cancellationToken);
+                if (!context.Success)
+                {
+                    return ApiResult<VipCharacterOperationResponse>.Failed(context.Failure!);
+                }
+
+                var result = await apiClient.RegisterVipPlayerAsync(
+                    context.BaseUri!,
+                    context.AccessToken!,
+                    request,
+                    cancellationToken);
+                if (result.Success)
+                {
+                    await RefreshAfterMutationAsync(venue, context, cancellationToken);
+                }
+
+                return result;
+            },
+            cancellationToken);
+
     public Task<ApiResult<VipCharacterOperationResponse>> LinkCharacterAsync(
         VenueConnectionConfiguration venue,
         int vipPlayerId,

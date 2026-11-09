@@ -22,6 +22,7 @@ internal enum MiniTabId
     Settlements,
     Macros,
     Configuration,
+    VipArrivals,
 }
 
 internal enum MiniTabCondition
@@ -43,13 +44,14 @@ internal sealed record MiniTabDefinition(
 
 internal static class MiniTabCatalog
 {
-    public const int TabsPerRow = 8;
+    public const int TabsPerRow = 9;
 
     public static readonly MiniTabDefinition[] Features =
     [
         new(MiniTabId.Dj, "DJ", MainPage.Djs, MainSubtab.DjsPayments, MiniTabCondition.LinkedDjTarget),
         new(MiniTabId.Greet, "Greet", MainPage.Greeter, MainSubtab.GreeterArrivals, MiniTabCondition.None),
         new(MiniTabId.Vip, "VIP", MainPage.Vip, MainSubtab.VipSales, MiniTabCondition.AnyTarget),
+        new(MiniTabId.VipArrivals, "VIP Arrivals", MainPage.Vip, MainSubtab.VipArrivalTracker, MiniTabCondition.None),
         new(MiniTabId.Photo, "Photo", MainPage.Photoshoots, MainSubtab.PhotoshootsSales, MiniTabCondition.AnyTarget),
         new(MiniTabId.BarBuyout, "Bar Buyout", MainPage.Bar, MainSubtab.BarBuyouts, MiniTabCondition.AnyTarget),
         new(MiniTabId.GambaShot, "Gamba Shot", MainPage.Bar, MainSubtab.BarGamba, MiniTabCondition.AnyTarget),

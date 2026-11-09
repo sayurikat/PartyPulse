@@ -12,18 +12,21 @@ namespace PartyPulse.Windows;
 
 public sealed class VenueUserEditWindow : Window, IDisposable
 {
+    private const string ArchivePopupName = "Archive venue user###PartyPulseArchiveVenueUser";
     private readonly Plugin plugin;
     private Guid profileId;
     private int userId;
     private string displayName = string.Empty;
     private string discordHandle = string.Empty;
     private readonly HashSet<string> selectedPermissions = new(StringComparer.Ordinal);
+    private bool archiveRequested;
 
     public VenueUserEditWindow(Plugin plugin)
         : base("Edit Venue User###PartyPulseVenueUserEdit")
     {
         this.plugin = plugin;
         IsOpen = false;
+        CollapsedCondition = ImGuiCond.Always;
 
         SizeConstraints = new WindowSizeConstraints
         {
@@ -32,23 +35,16 @@ public sealed class VenueUserEditWindow : Window, IDisposable
         };
     }
 
-    public void Open(Guid venueProfileId, int venueUserId)
+    public void Open(Guid venueProfileId, VenueUserSummary user)
     {
-        profileId = venueProfileId;
-        userId = venueUserId;
-        displayName = string.Empty;
-        discordHandle = string.Empty;
-        selectedPermissions.Clear();
-
-        var venue = plugin.Configuration.VenueConnections.FirstOrDefault(value => value.ProfileId == profileId);
-        var user = venue is null
-            ? null
-            : plugin.UserManagement.GetSnapshot(venue).View?.Users.FirstOrDefault(value => value.UserId == userId);
-
-        if (user is not null)
+        if (!IsOpen || profileId != venueProfileId || userId != user.UserId)
         {
+            profileId = venueProfileId;
+            userId = user.UserId;
             displayName = user.DisplayName;
             discordHandle = user.DiscordHandle ?? string.Empty;
+            archiveRequested = false;
+            selectedPermissions.Clear();
             foreach (var permission in user.Permissions.Where(static value => value != "venue.owner"))
             {
                 selectedPermissions.Add(permission);
@@ -56,7 +52,11 @@ public sealed class VenueUserEditWindow : Window, IDisposable
         }
 
         IsOpen = true;
+        Collapsed = false;
+        BringToFront();
     }
+
+    public override void PostDraw() => Collapsed = null;
 
     public void Dispose()
     {
@@ -76,12 +76,31 @@ public sealed class VenueUserEditWindow : Window, IDisposable
         var isBusy = plugin.UserManagement.IsBusy(venue.ProfileId);
         var view = snapshot.View;
         var user = view?.Users.FirstOrDefault(value => value.UserId == userId);
+        if (archiveRequested && !isBusy)
+        {
+            archiveRequested = false;
+            if (user is null || user.DisabledAt is not null)
+            {
+                IsOpen = false;
+                return;
+            }
+        }
+
         if (view is null || user is null)
         {
             ImGui.TextDisabled("The venue user is no longer available.");
             if (ImGui.Button("Refresh"))
             {
                 plugin.RefreshVenueUsers(venue);
+            }
+            return;
+        }
+        if (user.DisabledAt is not null)
+        {
+            ImGui.TextWrapped("This user is archived. Restore them from Users > Archived.");
+            if (ImGui.Button("Close"))
+            {
+                IsOpen = false;
             }
             return;
         }
@@ -135,10 +154,7 @@ public sealed class VenueUserEditWindow : Window, IDisposable
             ImGui.TextWrapped("This user has venue.owner. That permission is controlled outside the normal permission checklist and satisfies every venue permission check.");
         }
 
-        ImGui.BeginDisabled(
-            isBusy ||
-            !view.Capabilities.CanManagePermissions ||
-            user.DisabledAt is not null);
+        ImGui.BeginDisabled(isBusy || !view.Capabilities.CanManagePermissions);
         foreach (var permission in view.AvailablePermissions)
         {
             var selected = selectedPermissions.Contains(permission.PermissionKey);
@@ -173,60 +189,33 @@ public sealed class VenueUserEditWindow : Window, IDisposable
         {
             ImGui.TextDisabled("You do not have permission to change permission assignments.");
         }
-        else if (user.DisabledAt is not null)
-        {
-            ImGui.TextDisabled("Restore the user before assigning permissions.");
-        }
 
         ImGui.Spacing();
+        ImGui.TextUnformatted("Account recovery");
+        ImGui.Separator();
+        ImGui.TextWrapped("Creating a new recovery code invalidates older unused recovery codes. Devices are revoked only when the user redeems the new code.");
 
-        if (user.DisabledAt is not null)
+        ImGui.BeginDisabled(isBusy || !view.Capabilities.CanRecover);
+        if (ImGui.Button("Create recovery code"))
         {
-            ImGui.TextUnformatted("Account restoration");
-            ImGui.Separator();
-            ImGui.TextWrapped(
-                "Restoring this venue user keeps the existing account identity and history, but does not restore old devices or permissions. A fresh one-time invite code will be created.");
-
-            ImGui.BeginDisabled(isBusy || !view.Capabilities.CanRestore);
-            if (ImGui.Button("Restore user and create invite"))
-            {
-                plugin.RestoreVenueUser(venue, user);
-            }
-            ImGui.EndDisabled();
-
-            if (!view.Capabilities.CanRestore)
-            {
-                ImGui.TextDisabled("You do not have permission to restore disabled venue users.");
-            }
+            plugin.CreateVenueUserRecoveryCode(venue, user);
         }
-        else
+        ImGui.EndDisabled();
+
+        if (view.Capabilities.CanRecover &&
+            plugin.UserManagement.GetLastRecoveryCode(profileId, user.UserId) is { } recoveryCode)
         {
-            ImGui.TextUnformatted("Account recovery");
-            ImGui.Separator();
-            ImGui.TextWrapped("Creating a new recovery code invalidates older unused recovery codes. Devices are revoked only when the user redeems the new code.");
-
-            ImGui.BeginDisabled(isBusy || !view.Capabilities.CanRecover);
-            if (ImGui.Button("Create recovery code"))
+            ImGui.Spacing();
+            ImGui.TextWrapped($"Recovery code: {recoveryCode.Code}");
+            ImGui.TextDisabled($"Expires: {VenueTimeZone.Format(venue, recoveryCode.ExpiresAt, "g")}");
+            if (ImGui.Button("Copy recovery code"))
             {
-                plugin.CreateVenueUserRecoveryCode(venue, user);
-            }
-            ImGui.EndDisabled();
-
-            var recoveryCode = plugin.UserManagement.GetLastRecoveryCode(profileId, user.UserId);
-            if (recoveryCode is not null)
-            {
-                ImGui.Spacing();
-                ImGui.TextWrapped($"Recovery code: {recoveryCode.Code}");
-                ImGui.TextDisabled($"Expires: {VenueTimeZone.Format(venue, recoveryCode.ExpiresAt, "g")}");
-                if (ImGui.Button("Copy recovery code"))
-                {
-                    ImGui.SetClipboardText(recoveryCode.Code);
-                }
+                ImGui.SetClipboardText(recoveryCode.Code);
             }
         }
 
         var latestInviteCode = plugin.UserManagement.GetLastInviteCode(profileId, user.UserId);
-        if (latestInviteCode is not null)
+        if ((view.Capabilities.CanCreate || view.Capabilities.CanRestore) && latestInviteCode is not null)
         {
             ImGui.Spacing();
             ImGui.TextWrapped($"Invite code: {latestInviteCode.Code}");
@@ -235,6 +224,40 @@ public sealed class VenueUserEditWindow : Window, IDisposable
             {
                 ImGui.SetClipboardText(latestInviteCode.Code);
             }
+        }
+
+        var canArchive = view.Capabilities.CanArchive && !user.IsOwner;
+        if (canArchive)
+        {
+            ImGui.Spacing();
+            ImGui.TextUnformatted("Archive account");
+            ImGui.Separator();
+            ImGui.BeginDisabled(isBusy);
+            if (ImGui.Button("Archive user…"))
+            {
+                ImGui.OpenPopup(ArchivePopupName);
+            }
+            ImGui.EndDisabled();
+        }
+
+        if (ImGui.BeginPopupModal(ArchivePopupName, ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            ImGui.TextWrapped($"Archive {user.DisplayName}?");
+            ImGui.TextWrapped("This revokes their devices and staff access. Their permissions, account, and history are kept.");
+            ImGui.BeginDisabled(isBusy || !canArchive);
+            if (ImGui.Button("Archive user"))
+            {
+                archiveRequested = true;
+                plugin.ArchiveVenueUser(venue, user);
+                ImGui.CloseCurrentPopup();
+            }
+            ImGui.EndDisabled();
+            ImGui.SameLine();
+            if (ImGui.Button("Cancel"))
+            {
+                ImGui.CloseCurrentPopup();
+            }
+            ImGui.EndPopup();
         }
 
         ImGui.Spacing();

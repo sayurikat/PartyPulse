@@ -45,6 +45,7 @@ public sealed class StaffTabRenderer(Plugin plugin)
     private int fixedAmount;
     private string staffNote = string.Empty;
     private bool staffArchived;
+    private bool showAllArchivedStaff;
 
     private long editingLifecycleTaskId;
     private string lifecycleTaskName = string.Empty;
@@ -437,19 +438,28 @@ public sealed class StaffTabRenderer(Plugin plugin)
         StaffManagementViewResponse view,
         bool busy)
     {
+        ImGui.Checkbox("Show all archived staff", ref showAllArchivedStaff);
+
+        var lifecycleTasksByMemberAndType = (view.LifecycleTaskAssignments ?? [])
+            .ToLookup(task => (task.StaffMemberId, task.LifecycleType));
         foreach (var member in view.StaffMembers
                      .OrderBy(member => member.ArchivedAt is not null)
                      .ThenBy(member => member.JobName)
                      .ThenBy(member => member.DisplayName))
         {
-            ImGui.PushID($"staff-member-{member.StaffMemberId}");
             var lifecycleType = member.ArchivedAt is null
                 ? StaffLifecycleTypes.Onboarding
                 : StaffLifecycleTypes.Offboarding;
-            var incompleteTaskCount = view.LifecycleTaskAssignments.Count(task =>
-                task.StaffMemberId == member.StaffMemberId &&
-                task.LifecycleType == lifecycleType &&
-                task.CompletedAt is null);
+            var lifecycleTasks = lifecycleTasksByMemberAndType[(member.StaffMemberId, lifecycleType)];
+            var incompleteTaskCount = lifecycleTasks.Count(task => task.CompletedAt is null);
+            if (!showAllArchivedStaff &&
+                member.ArchivedAt is not null &&
+                incompleteTaskCount == 0)
+            {
+                continue;
+            }
+
+            ImGui.PushID($"staff-member-{member.StaffMemberId}");
             var memberLabel =
                 $"{member.JobName} — {member.DisplayName} — " +
                 $"{member.EffectiveHourlyRateGil:N0}/h + " +
@@ -1724,6 +1734,7 @@ public sealed class StaffTabRenderer(Plugin plugin)
         jobName = string.Empty;
         jobRate = 0;
         jobArchived = false;
+        showAllArchivedStaff = false;
         ClearMember();
         ClearLifecycleTask();
         attendanceRows.Clear();
