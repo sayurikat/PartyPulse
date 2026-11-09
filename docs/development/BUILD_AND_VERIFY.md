@@ -53,11 +53,22 @@ SQL builds do not run rollback tests or verify deployed schema. API and Contract
 
 ## PartyPulse plugin releases
 
-For an authorized plugin release, check GitHub for the latest published version and existing tags. Increase the four-part version in `src/PartyPulse/PartyPulse.csproj` and match it in the Party Pulse entry's `AssemblyVersion`, `DownloadLinkInstall`, and `DownloadLinkUpdate` in `repo/pluginmaster.json`.
+Use this sequence when the owner authorizes a PartyPulse plugin release to `sayurikat/PartyPulse`.
 
-Build the plugin project directly in Release to produce `src/PartyPulse/bin/Release/PartyPulse/latest.zip`. Verify that the archive contains the plugin DLL, its manifest and the Contracts DLL. Check that the assembly and manifest versions match the new listing and that the runtime bridge is excluded.
+1. Inspect local status, the remote `master`, the public plugin listing, published and draft GitHub releases, and local and remote tags. Use `gh release list --repo sayurikat/PartyPulse` and `git ls-remote --heads --tags origin`. Choose an unused four-part version higher than the current listing and releases. Increase `<Version>` in `src/PartyPulse/PartyPulse.csproj`. Set the Party Pulse entry's `AssemblyVersion` to that version and both download links in `repo/pluginmaster.json` to `https://github.com/sayurikat/PartyPulse/releases/download/<version>/latest.zip`.
+2. Commit the scoped release changes and record the exact PartyPulse commit and the sibling Contracts revision. With dependencies restored, run the following from the PartyPulse root.
 
-Tag the exact release commit with the bare version number. Use `v` followed by the same number for the GitHub release title and upload `latest.zip`. Verify the published download before advancing `master` with the new listing, so Dalamud sees an available package when it offers the update.
+   ```powershell
+   dotnet build src/PartyPulse/PartyPulse.csproj -c Release --no-restore
+   dotnet run --project tests/PartyPulse.NavigationTests/PartyPulse.NavigationTests.csproj -c Release --no-restore
+   ```
+
+   The direct project build produces `src/PartyPulse/bin/Release/PartyPulse/latest.zip`. Verify that the archive contains `PartyPulse.dll`, `PartyPulse.json` and `PartyPulse.Contracts.dll`. Compare the DLL's assembly version and source revision, the packaged manifest's version and API level, and the new listing. Confirm that the Release DLL excludes the runtime bridge. Keep `IconUrl` in both `repo/pluginmaster.json` and the packaged `PartyPulse.json` so the catalog and installed views can load the same icon. Verify the public icon URL serves the expected PNG. Record the ZIP's byte count and SHA-256 under `.local/`.
+3. Verify the Git and GitHub CLI identities before publishing. If needed, temporarily select the existing `sayurikat` sign-in with `gh auth switch --hostname github.com --user sayurikat` and confirm it with `gh api user --jq .login`. Scope Git credential changes to the release commands and restore the previously active CLI account on completion or failure. If authorized access is missing, have the owner sign in or grant Contents write access to `sayurikat/PartyPulse` through a repository-scoped credential. Keep credentials out of source, logs and chat.
+4. Push the bare version tag at the exact release commit. Create a GitHub draft release for that tag with `gh release create --verify-tag --draft`, title it `v<version>`, and attach the verified `latest.zip`. Check the draft's tag, asset name and size. Compare GitHub's asset SHA-256 digest with the local hash or download the draft asset with authenticated access and hash it.
+5. Publish the verified draft. Download `latest.zip` from the public release URL without credentials and compare its SHA-256. Then fast-forward `master` to the release commit so Dalamud only sees the new listing once the download works. Confirm the public listing and remote refs, and record the release and asset URLs in the local release record.
+
+If publication stops partway, inspect the remote tag, draft or published release, asset digest and `master` before retrying. Resume only when existing release objects match the reviewed commit and package. If the asset is public and verified, finish the pending fast-forward. If the commit or package must change, use a higher version and leave existing tags intact.
 
 ## Change-specific verification
 

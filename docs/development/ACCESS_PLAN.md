@@ -10,6 +10,7 @@ Updated 2026-10-15. Proposed capabilities remain separate from authorization. SS
 | Builds/tests | Installed .NET, Node, working Python, SQL model tools; build/package caches | .NET SDK/MSBuild, Node and bundled Python ran; application builds/restore unverified |
 | Restore/documentation network | Relevant package feeds, official docs, later selected API/SSH targets | Network restricted; feed authentication unverified |
 | Git | Status/history/diffs and task-specific patches | Available; protected .git directories are read-only in this profile; user handles pushes |
+| Requested plugin release | PartyPulse GitHub tag, release asset and fast-forward of `master` | Verified for `0.1.7.2` with the existing repository owner sign-in and scoped access. The [release runbook](BUILD_AND_VERIFY.md#partypulse-plugin-releases) records the checks and publication order. |
 | Dalamud assets/logs | Relevant runtime assets and sanitized diagnostic files | Development Dalamud.dll metadata reports 15.0.3.2; SDK/build/load compatibility unverified |
 | PartyPulse status bridge | Debug build loaded as a Dev Plugin, Windows desktop account and local pipe | Verified in the running client on 2026-11-09. The restricted command runner could not connect. A scoped desktop-account probe passed. |
 

@@ -13,7 +13,7 @@ Read [shared standards](docs/development/PartyPulse_Development_Standards.md) an
 - Preserve unrelated work, keep secrets out of output and provide separate task-only patches per affected repo.
 - For SQL changes, provide separate scripts, synchronize complete and model definitions, add safe rollback verification and state application order.
 - Report checks actually run separately from static/manual checks. Do not claim source changes are deployed.
-- Maintain shared guides/decisions after meaningful changes; keep credentials and machine-specific runtime data outside source control.
+- Keep the relevant shared guides and decisions current as part of each task. Use the [plugin release runbook](docs/development/BUILD_AND_VERIFY.md#partypulse-plugin-releases) for requested releases. Keep credentials and machine-specific runtime data outside source control.
 
 ## Repository orientation
 

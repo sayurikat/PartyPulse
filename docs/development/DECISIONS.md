@@ -133,3 +133,9 @@ Apply the Discord identity procedure, then the VIP procedure, then the API with 
 VIP package creation and updates preserve the caller's Discord role management confirmation when normalizing the request. SQL uses that value to require confirmation when creating a package with a role or adding, replacing, or removing a role on an existing package.
 
 On API base 5d9a5989, the offline service check dropped all three explicit confirmations. With the fix, all nine cases passed for package creation with a role, role changes, and role removal with true, false, and omitted confirmation. Contracts Debug, API Release, and five API auth checks passed. Deployed verification remains pending.
+
+## 2026-11-09 - Plugin release workflow and installed icon
+
+Use the [plugin release runbook](BUILD_AND_VERIFY.md#partypulse-plugin-releases) for each requested release and update the shared guides as the workflow changes. The `0.1.7.2` release verified the staged order on GitHub. The release asset was published and downloaded successfully before `master` advanced to the new listing.
+
+Dalamud uses the catalog `IconUrl` before install and the packaged `PartyPulse.json` `IconUrl` in the installed view. The `0.1.7.3` icon fix keeps the same PNG URL in both manifests. Include their match in the archive verification for future releases.
