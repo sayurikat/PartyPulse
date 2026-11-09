@@ -8,7 +8,7 @@ Keep the six checkouts as siblings. .NET SDK 10.0.401/runtime 10.0.12, Node 24.1
 
 Contracts targets net10.0, package version 0.3.0. Plugin uses Dalamud.NET.Sdk/15.0.0 and a sibling Contracts ProjectReference. API, website and bot target net10.0 but reference the sibling Contracts bin/Debug/net10.0/PartyPulse.Contracts.dll.
 
-Build Contracts **Debug first**, including before Release consumer builds; rebuild it after contract edits. The website's PartyPulseContractsProject property is unused by the active reference. Do not rely on its older README reference description. Reference cleanup is a separate change.
+Build Contracts **in Debug before publishing the API or website**, including when publishing in Release. Build it in Debug before other consumer builds as well, and rebuild it after contract edits. The website's PartyPulseContractsProject property is unused by the active reference. Do not rely on its older README reference description. Reference cleanup is a separate change.
 
 The bot's local csproj includes Microsoft.Extensions.Http 11.0.0-preview.6.26359.118; restore/build compatibility is unverified. SQL uses Microsoft.Build.Sql/2.1.0 and Sql170DatabaseSchemaProvider. Plugin compilation needs matching local Dalamud assets. Package restore may need scoped network/feed permission; do not install tools or change dependencies merely to hide an environment error.
 
@@ -78,3 +78,7 @@ Used the existing verified Debug build, with no new build or deployment. The loc
 Built Contracts Debug followed by Release builds of the plugin, website, API and SQL model using existing restored dependencies. All passed; the plugin reported 42 compiler warnings and zero errors, and the other build invocations reported zero warnings/errors. All 16 navigation checks, website source validation and reporting JavaScript checks passed. The navigation build used scoped local execution after the sandbox could not overwrite an existing output DLL. These checks do not load the plugin into the game, sign into the website, apply SQL changes, or deploy anything.
 
 The one-venue fixture was parsed successfully with SQL Server 170 ScriptDom. It is staged for user-run SSMS only and was not executed. The API's previously verified read-only lookup is the follow-up check after the sample row exists.
+
+## 2026-11-09 opening edits and DJ payments rollout
+
+The user reported applying the SQL updates. The first API publish failed. After building Contracts in Debug, the user published the API and website, built the plugin, and confirmed PartyPulse was running.

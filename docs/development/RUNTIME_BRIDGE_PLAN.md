@@ -1,6 +1,27 @@
-# Proposed FFXIV runtime bridge
+# FFXIV runtime bridge
 
-Design outline only, 2026-10-14. No bridge built, loaded or connected during setup.
+## Local development status probe
+
+The first implementation exposes one read-only status request inside PartyPulse. A PowerShell client connects to the selected game process over a Windows named pipe. The pipe grants access to the Windows account running the game and denies the Windows Network SID, which blocks remote SMB clients. The client verifies the server process ID through Windows before sending the request.
+
+In Visual Studio, select **Debug | x64** and build PartyPulse. Debug includes the status bridge by default. The bridge starts when Dalamud loads the DLL as a Dev Plugin on Windows. Release builds exclude the bridge. To build the same Debug DLL from the repository root with restored dependencies, run the following command.
+
+```powershell
+dotnet build src/PartyPulse/PartyPulse.csproj -c Debug --no-restore -p:Platform=x64
+```
+
+Load the resulting `src/PartyPulse/bin/x64/Debug/PartyPulse.dll` through Dalamud Settings → Experimental → Dev Plugin Locations. If the game uses your regular production-linked PartyPulse profile, run this smoke check from character selection to keep login-driven PartyPulse work idle. The status request samples the running plugin directly through the pipe.
+
+From PowerShell 7 on the game PC, identify the intended game process and substitute its actual ID in the second command.
+
+```powershell
+Get-Process -Name ffxiv_dx11 | Select-Object Id, StartTime
+./scripts/Get-PartyPulseRuntimeStatus.ps1 -GameProcessId 12345
+```
+
+The JSON response reports the protocol version, game PID, bridge session ID, plugin version, build ID (module MVID), framework-thread UTC sample time, and logged-in state. The server allows three seconds for each connected request, and the client allows five seconds for the round trip. Repeated probes should report the same session ID and a fresh sample time. Reloading the Dev Plugin should create a new session ID. To disable the probe in a Debug build, pass `-p:PartyPulseRuntimeStatus=false` and reload the resulting DLL. The same client command should then fail to connect within its deadline.
+
+On 2026-11-09 the opted-in Debug x64 build compiled with 42 existing warnings and no errors. Dalamud hot-reloaded the watched DLL. Two probes from the Windows desktop account verified the game process ID, a matching on-disk module MVID, the same session ID and advancing sample times. The client was logged in. The restricted Codex command runner received Windows access denied. A scoped desktop-account command passed with the same pipe permissions. A Release build with the opt-in property set contained no bridge type.
 
 ## Observed Valheim reference
 
@@ -14,25 +35,24 @@ Tools include status/logs, types/assemblies, reflection/handles, scenes/objects,
 
 Mutation/evaluation are enabled by default in the reference. Evaluation has full game-process privileges, without a sandbox or safe forced cancellation. Its defaults, Valheim adapters and machine-specific SSH/standing permissions do not transfer automatically to PartyPulse.
 
-## Proposed adaptation
+## Remaining design
 
-Reuse protocol/session/authentication, CLI/MCP, bounds/watch/audit patterns after checking licensing/source boundaries. Replace BepInEx/Unity adapters with Dalamud and typed PartyPulse diagnostic adapters. Consider a sibling PartyPulse.RuntimeTools checkout when requested; embedding into PartyPulse versus a separate development plugin remains an implementation choice.
+Reuse protocol/session/authentication, CLI/MCP, bounds/watch/audit patterns after checking licensing/source boundaries. Replace BepInEx/Unity adapters with Dalamud and typed PartyPulse diagnostic adapters. A future expansion could stay embedded in PartyPulse or move to a dedicated development plugin in a sibling PartyPulse.RuntimeTools checkout.
 
 Use existing Dalamud services first and framework-thread scheduling for relevant game/plugin access. Managed reflection does not expose every native game object. Follow [game interaction guidance](https://dalamud.dev/plugin-development/interaction/) and [IFramework API](https://dalamud.dev/api/Dalamud.Plugin.Services/Interfaces/IFramework/) while compiling against the installed local version.
 
-Proposed first tools:
+Potential additions beyond the status probe:
 
-- Session/version/status and clear disconnected/logged-out/reload handling.
 - PartyPulse window/navigation and feature-manager snapshots.
 - Bounded sanitized logs/errors.
 - Selected player/target/location observations for PartyPulse debugging.
 - Bounded event watches with cancellation, retention limits and timestamps.
 
-Later add named debug actions, config edits and game-window screenshots when scope is established. Arbitrary evaluation, unrestricted private reflection and native-memory tooling need separate design. Valheim's Mono evaluator is not a drop-in Dalamud component.
+Named in-game tests, debug actions, config edits and game-window screenshots are future work. API-backed tests need an isolated development configuration pointing to the local test API and a dedicated test character and venue. Arbitrary evaluation, unrestricted private reflection and native-memory tooling need separate design. Valheim's Mono evaluator is not a drop-in Dalamud component.
 
 ## Integration requirements
 
-Prefer a local named pipe and CLI initially. No Internet-facing listener or OpenAI API key is needed for this proposed local bridge. MCP registration can follow to expose typed tools.
+Keep the bridge on the local named pipe. MCP registration can follow to expose typed tools.
 
 Keep session credentials, audits and player/runtime data outside source control; redact access/refresh tokens. Use explicit session selection, request identity/expiry, bounded payloads/queues and reliable disposal. Distinguish not-started timeouts from unknown outcomes; do not automatically retry uncertain mutations.
 

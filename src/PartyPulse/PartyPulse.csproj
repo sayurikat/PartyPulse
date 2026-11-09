@@ -8,6 +8,9 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
       <PathMap>$(MSBuildProjectDirectory)=/_/src</PathMap>
   </PropertyGroup>
+    <PropertyGroup Condition="'$(Configuration)' == 'Debug' And ('$(PartyPulseRuntimeStatus)' == '' Or '$(PartyPulseRuntimeStatus)' == 'true')">
+        <DefineConstants>$(DefineConstants);PARTYPULSE_RUNTIME_STATUS</DefineConstants>
+    </PropertyGroup>
     <ItemGroup>
         <Content Include="Assets\icon.png">
             <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

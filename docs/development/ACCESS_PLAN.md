@@ -11,7 +11,7 @@ Updated 2026-10-15. Proposed capabilities remain separate from authorization. SS
 | Restore/documentation network | Relevant package feeds, official docs, later selected API/SSH targets | Network restricted; feed authentication unverified |
 | Git | Status/history/diffs and task-specific patches | Available; protected .git directories are read-only in this profile; user handles pushes |
 | Dalamud assets/logs | Relevant runtime assets and sanitized diagnostic files | Development Dalamud.dll metadata reports 15.0.3.2; SDK/build/load compatibility unverified |
-| Future bridge | New runtime-tool checkout, development output, private session directory/pipe | Not provisioned |
+| PartyPulse status bridge | Debug build loaded as a Dev Plugin, Windows desktop account and local pipe | Verified in the running client on 2026-11-09. The restricted command runner could not connect. A scoped desktop-account probe passed. |
 
 This chat starts in the local PartyPulse checkout. All six connected PartyPulse repositories are explicitly listed as writable roots; the previous project-mirror limitation is obsolete here. Read-only local inspection and documentation edits are within the requested work. AGENTS.md cannot change Codex's permission profile.
 
@@ -26,7 +26,7 @@ Verified tool availability: .NET SDK 10.0.401/runtime 10.0.12 and MSBuild 18.9; 
 | Now | Stable local command runner; source/build-output/cache access for the six repos | Routine development; source roots are already available, normal runner needs recheck |
 | When restoring | Scoped package-feed network access and any required feed authentication | NuGet/Dalamud/SQL SDK restore; no tool installation assumed |
 | SSH: verified | Dedicated standard account, public-key authentication and pinned server identity | Login and selected deployment metadata reads work; live IIS/service/task management queries and selected log access remain unavailable |
-| Next: runtime | Installed game/Dalamud details, development output and plugin-load path, sanitized logs, test character/venue | Build and load a local diagnostic bridge in the selected game session |
+| Runtime status: verified | Debug Dev Plugin and selected local game process | Run the read-only status probe. See the [runtime guide](RUNTIME_BRIDGE_PLAN.md). |
 | For integration checks | Local/staging API URL, test venue/device identity and website test session | Auth and feature checks against a known test target |
 | For SQL tests | Separate test database plus scoped diagnostic/test rights | Remote partypulse_test creation/schema verification completed through user-run SSMS; separate test database identities and application integration remain pending |
 | For bot tests | Test guild/channels/roles, dedicated API HMAC identity and locally stored bot token | Requested Discord integration work with specified effects |
@@ -83,11 +83,11 @@ Only the API connects to the database as an application. Diagnostic tooling acce
 
 ## FFXIV development
 
-Identify the game process account, installed Dalamud/API/runtime versions, development-plugin/output path, test character/world/venue and initial telemetry. Later request build/load access for the development plugin, private session discovery and named-pipe connection.
+Use the [runtime status probe](RUNTIME_BRIDGE_PLAN.md) from the game PC. Identify the development DLL and game process in the current session. Feature checks that call the API need an isolated development configuration, test character and test venue.
 
 Define screenshot capture, configuration writes, UI/game commands, chat, trades, native memory access and arbitrary evaluation as distinct capabilities. Begin with typed diagnostics, then add requested actions. See [runtime plan](RUNTIME_BRIDGE_PLAN.md).
 
-The proposed agent bridge runs beside the user's local game. The remote IIS website cannot directly use that local named pipe; website game integration would need a separately designed transport. Existing Dalamud assets give a starting point, not permission to load a plugin or inspect a live game process in this setup task.
+The status bridge runs beside the user's local game. Website game integration from the remote IIS host would need its own transport.
 
 No passwords, private keys, JWT keys, bot tokens or SQL connection secrets belong in docs/chat. Use appropriate local/server secret configuration and record names/status only.
 

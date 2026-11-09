@@ -69,6 +69,9 @@ public sealed class Plugin : IDalamudPlugin
     private readonly NotificationToastWindow notificationToastWindow;
     private readonly SettlementTradeService settlementTradeService;
     private readonly GameMacroExecutionService gameMacroExecutionService;
+#if PARTYPULSE_RUNTIME_STATUS
+    private readonly RuntimeStatusBridge? runtimeStatusBridge;
+#endif
 
     private PlayerIdentity? observedIdentity;
     private bool autoConnectStarted;
@@ -228,6 +231,13 @@ public sealed class Plugin : IDalamudPlugin
         PluginInterface.UiBuilder.OpenMainUi += ToggleMainUi;
         Framework.Update += OnFrameworkUpdate;
 
+#if PARTYPULSE_RUNTIME_STATUS
+        if (OperatingSystem.IsWindows() && PluginInterface.IsDev)
+        {
+            runtimeStatusBridge = RuntimeStatusBridge.TryStart(Framework, ClientState, Log, LifetimeToken);
+        }
+#endif
+
         Log.Information("Party Pulse initialized.");
     }
 
@@ -311,6 +321,9 @@ public sealed class Plugin : IDalamudPlugin
 
         disposed = true;
         lifetimeCancellation.Cancel();
+#if PARTYPULSE_RUNTIME_STATUS
+        runtimeStatusBridge?.Dispose();
+#endif
 
         Framework.Update -= OnFrameworkUpdate;
         PluginInterface.UiBuilder.Draw -= WindowSystem.Draw;
