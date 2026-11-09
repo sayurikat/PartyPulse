@@ -207,7 +207,7 @@ public sealed partial class Plugin : IDalamudPlugin
             Log);
 
         configWindow = new ConfigWindow(this);
-        mainWindow = new MainWindow(this);
+        mainWindow = new MainWindow(this, apiClient);
         miniWindow = new MiniWindow(this, mainWindow);
         venueUserEditWindow = new VenueUserEditWindow(this);
         vipPlayerEditWindow = new VipPlayerEditWindow(this);

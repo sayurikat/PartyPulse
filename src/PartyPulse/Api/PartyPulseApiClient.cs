@@ -75,6 +75,28 @@ public sealed class PartyPulseApiClient : IDisposable
             cancellationToken);
     }
 
+    public Task<ApiResult<PublicVenueOpeningResponse>> GetPublicVenueOpeningAsync(
+        Uri baseUri,
+        string venueCode,
+        CancellationToken cancellationToken)
+    {
+        var normalizedCode = VenueConnectionConfiguration.NormalizeVenueCode(venueCode);
+        var path = $"api/v1/venues/code/{Uri.EscapeDataString(normalizedCode)}/opening";
+        return SendJsonAsync<PublicVenueOpeningResponse>(
+            new HttpRequestMessage(HttpMethod.Get, new Uri(baseUri, path)),
+            payload => string.Equals(payload.VenueCode, normalizedCode, StringComparison.OrdinalIgnoreCase) &&
+                (payload.Opening is null || IsValidPublicOpening(payload.Opening)),
+            cancellationToken);
+    }
+
+    private static bool IsValidPublicOpening(PublicOpeningSummary opening) =>
+        !string.IsNullOrWhiteSpace(opening.Title) &&
+        opening.ClosesAtUtc > opening.OpensAtUtc &&
+        opening.Location is not null &&
+        opening.Djs is not null && opening.Djs.All(dj => dj is not null && !string.IsNullOrWhiteSpace(dj.Name)) &&
+        opening.Giveaways is not null && opening.Giveaways.All(giveaway => giveaway is not null &&
+            !string.IsNullOrWhiteSpace(giveaway.Title));
+
     public Task<ApiResult<PublicVenueResponse>> GetPublicVenueByAddressAsync(
         Uri baseUri,
         VenueAddress address,

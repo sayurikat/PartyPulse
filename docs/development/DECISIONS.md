@@ -147,3 +147,11 @@ The exact `venue.finance.settlements` permission uses the existing venue owner i
 Use the [plugin release runbook](BUILD_AND_VERIFY.md#partypulse-plugin-releases) for each requested release and update the shared guides as the workflow changes. The `0.1.7.2` release verified the staged order on GitHub. The release asset was published and downloaded successfully before `master` advanced to the new listing.
 
 Dalamud uses the catalog `IconUrl` before install and the packaged `PartyPulse.json` `IconUrl` in the installed view. The `0.1.7.3` icon fix keeps the same PNG URL in both manifests. Include their match in the archive verification for future releases.
+
+The owner set the default release scope with `0.1.8.0`. Include all current changes in the canonical PartyPulse checkout and build with the current sibling Contracts source. Use an isolated checkout or a narrower scope only at the owner's explicit request.
+
+## 2026-11-09 - Public opening Overview
+
+Visitors use the selected venue's public code to load the Overview. The opening appears one hour before its start and disappears at close. An active opening takes precedence when the next opening is also within the hour. The feed includes temporary openings under the same rules as scheduled ones. The plugin refreshes while the Overview is visible and advances the countdown and set labels locally.
+
+Use the opening address for travel. Lifestream takes housing destinations through its typed API. Outdoor openings store a world and a free-text place, so the travel action for them goes to the destination world. Twitch media uses optional server-side app credentials and the official Twitch image host. Signup buttons open the posted Discord giveaway message.

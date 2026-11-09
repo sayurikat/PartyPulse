@@ -55,8 +55,10 @@ SQL builds do not run rollback tests or verify deployed schema. API and Contract
 
 Use this sequence when the owner authorizes a PartyPulse plugin release to `sayurikat/PartyPulse`.
 
+Release from the canonical PartyPulse checkout and include all of its current changes by default. Review the tracked and untracked source, keep ignored local files private, and leave the canonical checkout on the release commit. Build with the current sibling Contracts source and record its base revision and any local changes needed to reproduce the bundled DLL. Use an isolated or narrower release scope only when the owner explicitly asks for it.
+
 1. Inspect local status, the remote `master`, the public plugin listing, published and draft GitHub releases, and local and remote tags. Use `gh release list --repo sayurikat/PartyPulse` and `git ls-remote --heads --tags origin`. Choose an unused four-part version higher than the current listing and releases. Increase `<Version>` in `src/PartyPulse/PartyPulse.csproj`. Set the Party Pulse entry's `AssemblyVersion` to that version and both download links in `repo/pluginmaster.json` to `https://github.com/sayurikat/PartyPulse/releases/download/<version>/latest.zip`.
-2. Commit the scoped release changes and record the exact PartyPulse commit and the sibling Contracts revision. With dependencies restored, run the following from the PartyPulse root.
+2. Commit the release changes and record the exact PartyPulse commit and the sibling Contracts source used in the build. When a prior release is ahead of the canonical checkout, preserve the current source and verify that the new release descends from public `master`. With dependencies restored, run the following from the PartyPulse root.
 
    ```powershell
    dotnet build src/PartyPulse/PartyPulse.csproj -c Release --no-restore
@@ -75,6 +77,14 @@ If publication stops partway, inspect the remote tag, draft or published release
 For auth changes, check save-before-confirm, lost response/confirmation recovery, preserved expiry, cancelled/expired/revoked credentials, disabled users, venue/device isolation, character-link conflicts and concurrent refresh.
 
 For other cross-component changes, check shapes, both client mappings, SQL permissions and bot dependencies. Report actual builds/tests, static inspection, environment failures and pending live/manual checks separately.
+
+### Public opening Overview
+
+Apply `stored-procedures-source/api.Venue_GetPublicOpeningByCode.sql` in the target database using administrator SSMS. The script creates the new read-only procedure and grants the API identity object-level execute access. Its optional rollback fixture is restricted to `partypulse_test`. Build Contracts Debug, then deploy the API before releasing the plugin. To remove the procedure, first roll back the API that calls it.
+
+For Twitch profile pictures and periodically refreshed live stills, set `Twitch__ClientId` and `Twitch__ClientSecret` in the API's private runtime configuration. The API reads them at startup through its configuration providers. DJ names and links work when those settings are absent or Twitch is unavailable.
+
+In an isolated test profile, add a venue by its public code and check the Overview as a visitor. Check the one-hour boundary, the transition to open, cancellation and early close, venue switching, an alternate opening address, and a giveaway's direct signup message. Verify housing travel from another plot and from the destination plot, with Lifestream available, busy and unloaded. For an outdoor opening, verify world travel from a different world and the displayed outdoor location on arrival.
 
 The website's current publish-iis.ps1 removes its chosen output directory without a containment check. Inspect/fix its output-path handling in a separately requested task before relying on it. Do not run deployment scripts during orientation.
 

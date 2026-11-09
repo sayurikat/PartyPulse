@@ -33,6 +33,8 @@ Existing website references: [architecture](../../../PartyPulse.Web-repo/docs/AR
 
 Bot entry points include GuildReconciler.cs, DiscordIdentityMatcher.cs, DiscordRolePlanner.cs, PartyPulseBotApiClient.cs, GiveawayProcessor.cs and VenueStatusProcessor.cs. Its existing local edits need their own review before being treated as verified behavior.
 
+The plugin Overview uses the anonymous `GET /api/v1/venues/code/{venueCode}/opening` route for the selected public venue. Follow `PublicOpeningRenderer` through `PublicVenueOpeningContracts`, `VenuesController`, `SqlPublicVenueRepository` and `api.Venue_GetPublicOpeningByCode`. The read-only lookup has its own one-hour window and uses the opening's stored location. It returns confirmed DJ sets, the active Gamba Shot jackpot and active posted giveaways with their signup message links. Discord status keeps its own publication workflow. The website's existing public venue lookups use the original contracts.
+
 Database: use the [README](../../../PartyPulse.Database/README.md), complete scripts and SQL-project definitions. Folder names do not determine object types: api.Authorization_HasPermissionForActor is a function. Compatibility scripts can declare the same wrapper despite different filenames.
 
 Giveaway prizes and winner settlement flow through `GiveawayContracts`, `GiveawaysController`, `SqlGiveawayRepository` and the `api.Giveaway_*` procedures. `api.GiveawayBot_ClaimWork` selects the winner and creates the notification in one transaction. The bot captures the Discord guild nickname when an entrant signs up. The plugin's shared Giveaways renderer serves Main and Mini. Winner actions use a separate API capability guarded by `venue.finance.settlements`.

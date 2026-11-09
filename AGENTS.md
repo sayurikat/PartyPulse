@@ -14,6 +14,7 @@ Read [shared standards](docs/development/PartyPulse_Development_Standards.md) an
 - For SQL changes, provide separate scripts, synchronize complete and model definitions, add safe rollback verification and state application order.
 - Report checks actually run separately from static/manual checks. Do not claim source changes are deployed.
 - Keep the relevant shared guides and decisions current as part of each task. Use the [plugin release runbook](docs/development/BUILD_AND_VERIFY.md#partypulse-plugin-releases) for requested releases. Keep credentials and machine-specific runtime data outside source control.
+- For an authorized plugin release, include all current changes from the canonical PartyPulse checkout and use the current sibling Contracts source for the build. Use an isolated or narrower release scope only when the owner explicitly asks for it.
 
 ## Repository orientation
 

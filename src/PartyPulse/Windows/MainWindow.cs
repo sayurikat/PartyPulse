@@ -28,7 +28,7 @@ public sealed class MainWindow : Window, IDisposable
     private static readonly NavigationItem[] NavigationItems =
     [
         new(MainPage.Overview, "GENERAL", "Overview", "OV",
-            "Current character and venue status.",
+            "Public opening details and your venue access.",
             [new(MainSubtab.OverviewStatus, "Status")]),
         new(MainPage.Openings, "VENUE", "Openings", "OP",
             "Schedule openings, assign DJs, manage publication text, and review previous events.",
@@ -182,6 +182,7 @@ public sealed class MainWindow : Window, IDisposable
     ];
 
     private readonly Plugin plugin;
+    private readonly PublicOpeningRenderer publicOpening;
     private readonly VipTabRenderer vipTab;
     private readonly PhotoshootsTabRenderer photoshootsTab;
     private readonly OtherSalesTabRenderer otherSalesTab;
@@ -219,10 +220,11 @@ public sealed class MainWindow : Window, IDisposable
     private SelfCharacterSummary? pendingUnlinkCharacter;
     private bool requestOpenUnlinkPopup;
 
-    public MainWindow(Plugin plugin)
+    public MainWindow(Plugin plugin, PartyPulseApiClient apiClient)
         : base("Party Pulse###PartyPulseMain")
     {
         this.plugin = plugin;
+        publicOpening = new PublicOpeningRenderer(plugin, apiClient);
         vipTab = new VipTabRenderer(plugin);
         photoshootsTab = new PhotoshootsTabRenderer(plugin);
         otherSalesTab = new OtherSalesTabRenderer(plugin);
@@ -284,7 +286,10 @@ public sealed class MainWindow : Window, IDisposable
 
     public void Dispose()
     {
+        publicOpening.Dispose();
     }
+
+    public override void OnClose() => publicOpening.Clear();
 
     public override void Draw()
     {
@@ -316,6 +321,11 @@ public sealed class MainWindow : Window, IDisposable
                 : null;
             authenticated = authentication is not null && CanDrawAuthenticatedFeatures(authentication);
             activePage = ResolveVisiblePage(selectedVenue, authenticated);
+            if (activePage != MainPage.Overview || selectedVenue is null)
+            {
+                publicOpening.Clear();
+            }
+
             DrawSelectedPage(selectedVenue, authenticated, activePage);
         }
         ImGui.EndChild();
@@ -1355,6 +1365,17 @@ public sealed class MainWindow : Window, IDisposable
 
     private void DrawOverviewPage(VenueConnectionConfiguration? selectedVenue)
     {
+        PartyPulseUi.SectionHeader("Selected venue");
+        ImGui.TextUnformatted(selectedVenue?.VenueName ?? "Not configured");
+        if (selectedVenue is null)
+        {
+            ImGui.TextDisabled("Add a venue from Settings.");
+        }
+        else
+        {
+            publicOpening.Draw(selectedVenue);
+        }
+
         if (plugin.IdentityProvider.TryGetCurrent(out var identity, out var reason))
         {
             PartyPulseUi.SectionHeader("Current character");
@@ -1364,10 +1385,6 @@ public sealed class MainWindow : Window, IDisposable
         {
             ImGui.TextDisabled(reason);
         }
-
-        PartyPulseUi.SectionHeader("Selected venue");
-        ImGui.TextUnformatted(selectedVenue?.VenueName ?? "Not configured");
-        ImGui.TextDisabled(selectedVenue?.AddressDisplay ?? "Add a venue from Settings.");
 
         var accessText = selectedVenue?.IsRegistered == true
             ? "Registered venue account"
