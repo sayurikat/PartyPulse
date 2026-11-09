@@ -51,6 +51,14 @@ SQL model:
 
 SQL builds do not run rollback tests or verify deployed schema. API and Contracts had no dedicated test projects in the inspected inventories.
 
+## PartyPulse plugin releases
+
+For an authorized plugin release, check GitHub for the latest published version and existing tags. Increase the four-part version in `src/PartyPulse/PartyPulse.csproj` and match it in the Party Pulse entry's `AssemblyVersion`, `DownloadLinkInstall`, and `DownloadLinkUpdate` in `repo/pluginmaster.json`.
+
+Build the plugin project directly in Release to produce `src/PartyPulse/bin/Release/PartyPulse/latest.zip`. Verify that the archive contains the plugin DLL, its manifest and the Contracts DLL. Check that the assembly and manifest versions match the new listing and that the runtime bridge is excluded.
+
+Tag the exact release commit with the bare version number. Use `v` followed by the same number for the GitHub release title and upload `latest.zip`. Verify the published download before advancing `master` with the new listing, so Dalamud sees an available package when it offers the update.
+
 ## Change-specific verification
 
 For auth changes, check save-before-confirm, lost response/confirmation recovery, preserved expiry, cancelled/expired/revoked credentials, disabled users, venue/device isolation, character-link conflicts and concurrent refresh.
