@@ -1,4 +1,5 @@
 using System;
+using PartyPulse.Models;
 
 namespace PartyPulse.Giveaways;
 
@@ -29,4 +30,14 @@ public sealed record GiveawayManagementSnapshot(
         View is null || ReceivedAt is null
             ? DateTimeOffset.UtcNow
             : View.ServerNow + (DateTimeOffset.UtcNow - ReceivedAt.Value);
+}
+
+public sealed record GiveawayWinnersSnapshot(
+    PlayerIdentity? Identity,
+    GiveawayWinnersResponse? View,
+    string Message,
+    DateTimeOffset? LastAttemptAt)
+{
+    public static GiveawayWinnersSnapshot NotLoaded { get; } =
+        new(null, null, "Loading giveaway winners...", null);
 }

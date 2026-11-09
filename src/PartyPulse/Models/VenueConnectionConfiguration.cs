@@ -29,6 +29,8 @@ public sealed class VenueConnectionConfiguration
     // Local-only display/input timezone for this venue profile.
     public string DisplayTimeZoneId { get; set; } = TimeZoneInfo.Local.Id;
 
+    public string GiveawayWinnerAnnouncementMacro { get; set; } = string.Empty;
+
     public int DeviceId { get; set; }
 
     public string DeviceName { get; set; } = Environment.MachineName;

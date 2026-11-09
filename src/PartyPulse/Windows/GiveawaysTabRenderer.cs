@@ -20,6 +20,7 @@ public sealed class GiveawaysTabRenderer(Plugin plugin)
     private long giveawayChannelId;
     private string giveawayTitle = string.Empty;
     private string giveawayDescription = string.Empty;
+    private int giveawayPrizeGil;
     private string congratulationsMessage = "Congratulations <winner>!";
     private string startsAtLocal = string.Empty;
     private string endsAtLocal = string.Empty;
@@ -28,6 +29,7 @@ public sealed class GiveawaysTabRenderer(Plugin plugin)
     private long schedulerChannelId;
     private string schedulerTitle = string.Empty;
     private string schedulerDescription = string.Empty;
+    private int schedulerPrizeGil;
     private string schedulerCongratulations = "Congratulations <winner>!";
     private int firstDrawOffsetMinutes = 30;
     private int repeatIntervalMinutes = 15;
@@ -35,10 +37,21 @@ public sealed class GiveawaysTabRenderer(Plugin plugin)
     private string schedulerStartMode = GiveawaySchedulerStartModes.BeforeEachDraw;
     private int schedulerStartOffsetMinutes = 5;
     private bool schedulerEnabled = true;
+    private string announcementMacro = string.Empty;
+    private GiveawayWinnerSummary? pendingWinner;
+    private string? pendingWinnerAction;
+    private PlayerIdentity? pendingTradeTarget;
+    private bool requestWinnerConfirmation;
 
     public void Draw(VenueConnectionConfiguration venue, MainSubtab subtab)
     {
         ResetForVenueChange(venue);
+        if (subtab == MainSubtab.GiveawayWinners)
+        {
+            DrawWinners(venue);
+            return;
+        }
+
         plugin.EnsureGiveawaysLoaded(venue);
         var snapshot = plugin.Giveaways.GetSnapshot(venue);
         var view = snapshot.View;
@@ -77,6 +90,7 @@ public sealed class GiveawaysTabRenderer(Plugin plugin)
         switch (subtab)
         {
             case MainSubtab.GiveawaysManage:
+                DrawActiveGiveawayMacro(venue);
                 DrawGiveawayEditor(venue, snapshot, view, isBusy);
                 ImGui.Spacing();
                 ImGui.Separator();
@@ -89,6 +103,186 @@ public sealed class GiveawaysTabRenderer(Plugin plugin)
                 DrawSchedulers(venue, view, isBusy);
                 break;
         }
+    }
+
+    private void DrawWinners(VenueConnectionConfiguration venue)
+    {
+        plugin.EnsureGiveawayWinnersLoaded(venue);
+        var snapshot = plugin.Giveaways.GetWinnersSnapshot(venue);
+        var busy = plugin.Giveaways.IsBusy(venue.ProfileId) || plugin.IsGiveawayWinnerOperationBusy(venue.ProfileId);
+
+        ImGui.BeginDisabled(busy);
+        if (ImGui.Button("Refresh winners"))
+            plugin.RefreshGiveawayWinners(venue);
+        ImGui.EndDisabled();
+
+        if (snapshot.View is not { } view)
+        {
+            ImGui.TextWrapped(snapshot.Message);
+            return;
+        }
+
+        DrawActiveGiveawayMacro(venue);
+        if (ImGui.CollapsingHeader("Winner announcement macro"))
+        {
+            ImGui.TextWrapped("Saved for this venue on this device. Use <discordname> in the message text. It uses the guild nickname when available and the Discord username otherwise.");
+            ImGui.InputTextMultiline("##GiveawayAnnouncementMacro", ref announcementMacro, 4000,
+                new Vector2(0, 90 * ImGuiHelpers.GlobalScale));
+            var normalized = announcementMacro.Replace("\r\n", "\n", StringComparison.Ordinal)
+                .Replace('\r', '\n').TrimEnd();
+            var validMacro = string.IsNullOrWhiteSpace(normalized) || Plugin.IsValidGiveawayAnnouncementMacro(normalized);
+            ImGui.BeginDisabled(busy || !validMacro || normalized == venue.GiveawayWinnerAnnouncementMacro);
+            if (ImGui.Button("Save announcement macro"))
+            {
+                venue.GiveawayWinnerAnnouncementMacro = normalized;
+                plugin.Configuration.Save();
+            }
+            ImGui.EndDisabled();
+            if (!validMacro)
+                ImGui.TextColored(PartyPulseUi.Warning, "Use <discordname> in the message text, with up to 15 lines of 180 characters.");
+        }
+
+        if (view.Winners.Count == 0)
+            ImGui.TextDisabled("No winners awaiting payout.");
+
+        plugin.TargetProvider.TryGetCurrentTarget(out var target, out _);
+        var canAnnounce = !plugin.IsGameMacroBusy &&
+            (venue.GiveawayWinnerAnnouncementMacro?.Contains("<discordname>", StringComparison.Ordinal) ?? false);
+
+        foreach (var winner in view.Winners)
+        {
+            ImGui.PushID(winner.GiveawayId.ToString(CultureInfo.InvariantCulture));
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.TextUnformatted(winner.Title);
+            ImGui.TextWrapped($"Discord username: {winner.DiscordUsername}   ·   Guild nickname: {winner.DiscordNickname ?? "None recorded"}");
+            ImGui.TextDisabled(winner.PrizeGil is { } prize ? $"{prize:N0} gil" : "No gil prize recorded");
+            ImGui.TextDisabled($"Drawn {VenueTimeZone.Format(venue, winner.WinnerSelectedAt, "g")}");
+            ImGui.TextDisabled(winner.LastAnnouncedAt is { } announced
+                ? $"Last announced {VenueTimeZone.Format(venue, announced, "g")}"
+                : "Not announced yet");
+
+            ImGui.BeginDisabled(busy || !canAnnounce);
+            if (ImGui.SmallButton("Announce"))
+                plugin.RunGiveawayWinnerAction(venue, winner, GiveawayWinnerActions.Announce);
+            ImGui.EndDisabled();
+
+            ImGui.SameLine();
+            var hasTrade = winner.TradeAttemptId is not null;
+            ImGui.BeginDisabled(busy || target is null || winner.PrizeGil is null || hasTrade);
+            if (ImGui.SmallButton("Pay with Dropbox"))
+                OpenWinnerConfirmation(winner, GiveawayWinnerActions.BeginTrade, target);
+            ImGui.EndDisabled();
+            if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled) && target is null)
+                ImGui.SetTooltip("Target the winner's player character in game.");
+
+            ImGui.SameLine();
+            ImGui.BeginDisabled(busy);
+            if (ImGui.SmallButton("Confirm paid"))
+                OpenWinnerConfirmation(winner, GiveawayWinnerActions.ConfirmPaid);
+            ImGui.EndDisabled();
+
+            ImGui.SameLine();
+            ImGui.BeginDisabled(busy || hasTrade);
+            if (ImGui.SmallButton("Cancel win"))
+                OpenWinnerConfirmation(winner, GiveawayWinnerActions.Cancel);
+            ImGui.EndDisabled();
+
+            if (hasTrade)
+            {
+                ImGui.TextWrapped(winner.TradeStartedAt is { } started
+                    ? $"Trade reserved {VenueTimeZone.Format(venue, started, "g")}. Check the trade before retrying."
+                    : "Trade reserved. Check the trade before retrying.");
+                var canRelease = winner.TradeStartedAt is { } startedAt &&
+                    startedAt <= DateTimeOffset.UtcNow.AddSeconds(-30);
+                ImGui.BeginDisabled(busy || !canRelease);
+                if (ImGui.SmallButton("Release trade"))
+                    OpenWinnerConfirmation(winner, GiveawayWinnerActions.ReleaseTrade);
+                ImGui.EndDisabled();
+                if (!canRelease && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+                    ImGui.SetTooltip("Release becomes available 30 seconds after reserving a trade.");
+            }
+
+            ImGui.PopID();
+        }
+
+        DrawWinnerConfirmation(venue, busy);
+    }
+
+    private void OpenWinnerConfirmation(
+        GiveawayWinnerSummary winner, string action, PlayerIdentity? target = null)
+    {
+        pendingWinner = winner;
+        pendingWinnerAction = action;
+        pendingTradeTarget = target;
+        requestWinnerConfirmation = true;
+    }
+
+    private void DrawWinnerConfirmation(VenueConnectionConfiguration venue, bool busy)
+    {
+        const string popup = "Giveaway winner###PartyPulseGiveawayWinnerAction";
+        if (requestWinnerConfirmation)
+        {
+            requestWinnerConfirmation = false;
+            ImGui.OpenPopup(popup);
+        }
+        if (!ImGui.BeginPopupModal(popup, ImGuiWindowFlags.AlwaysAutoResize))
+            return;
+
+        if (pendingWinner is { } winner && pendingWinnerAction is { } action)
+        {
+            ImGui.PushTextWrapPos(390 * ImGuiHelpers.GlobalScale);
+            ImGui.TextWrapped(action switch
+            {
+                GiveawayWinnerActions.BeginTrade =>
+                    $"Start a {winner.PrizeGil:N0} gil trade to {pendingTradeTarget?.DisplayName} for {winner.DiscordUsername}? Verify this character belongs to the winner.",
+                GiveawayWinnerActions.ConfirmPaid =>
+                    $"Record {winner.DiscordUsername} as paid for this giveaway? Confirm after delivering the prize.",
+                GiveawayWinnerActions.Cancel =>
+                    $"Cancel the win for {winner.DiscordUsername}? This removes the winner from the payout queue.",
+                _ => $"Release the trade for {winner.DiscordUsername}? Check that no gil was transferred before allowing another attempt.",
+            });
+            ImGui.PopTextWrapPos();
+
+            ImGui.BeginDisabled(busy);
+            if (ImGui.Button("Confirm"))
+            {
+                plugin.RunGiveawayWinnerAction(venue, winner, action, pendingTradeTarget);
+                pendingWinnerAction = null;
+                ImGui.CloseCurrentPopup();
+            }
+            ImGui.EndDisabled();
+            ImGui.SameLine();
+        }
+
+        if (ImGui.Button("Back"))
+        {
+            pendingWinnerAction = null;
+            ImGui.CloseCurrentPopup();
+        }
+
+        ImGui.EndPopup();
+    }
+
+    private void DrawActiveGiveawayMacro(VenueConnectionConfiguration venue)
+    {
+        if (!CanSetPrize(venue))
+            return;
+
+        plugin.EnsureTimedMacrosLoaded(venue);
+        var macro = plugin.TimedMacros.GetSnapshot(venue).View?.Macros.FirstOrDefault(value =>
+            value.TypeCode == TimedMacroTypeCodes.GiveawayAdvertisement && value.CanExecute);
+        if (macro is null)
+            return;
+
+        ImGui.BeginDisabled(!macro.Enabled || !macro.IsConfigured || plugin.IsGameMacroBusy ||
+                           plugin.TimedMacros.IsBusy(venue.ProfileId));
+        if (ImGui.Button("Execute giveaway macro"))
+            plugin.RunTimedMacro(venue, macro, null);
+        ImGui.EndDisabled();
+        if (!macro.IsConfigured)
+            ImGui.TextDisabled("Configure the giveaway macro in Timed Macros > Setup.");
+        ImGui.Spacing();
     }
 
     private void DrawGiveawayEditor(
@@ -116,6 +310,8 @@ public sealed class GiveawaysTabRenderer(Plugin plugin)
             ref congratulationsMessage,
             2000,
             new Vector2(0, 65 * ImGuiHelpers.GlobalScale));
+        var canSetPrize = CanSetPrize(venue);
+        var prizeValid = !canSetPrize || DrawPrizeInput("Winner prize (gil)", ref giveawayPrizeGil);
 
         ImGui.BeginDisabled(editingPostedGiveaway);
         ImGui.SetNextItemWidth(210 * ImGuiHelpers.GlobalScale);
@@ -142,7 +338,7 @@ public sealed class GiveawaysTabRenderer(Plugin plugin)
                     : RenderedWinnerMessageLength(congratulationsMessage) > 2000
                         ? "Congratulations message is too long after replacing <winner>."
                         : string.Empty;
-        var canSave = giveawayChannelId > 0 && string.IsNullOrEmpty(timeError) && string.IsNullOrEmpty(contentError);
+        var canSave = giveawayChannelId > 0 && prizeValid && string.IsNullOrEmpty(timeError) && string.IsNullOrEmpty(contentError);
         if (!string.IsNullOrEmpty(contentError)) ImGui.TextColored(PartyPulseUi.Warning, contentError);
         else if (!string.IsNullOrEmpty(timeError)) ImGui.TextColored(PartyPulseUi.Warning, timeError);
 
@@ -157,6 +353,7 @@ public sealed class GiveawaysTabRenderer(Plugin plugin)
                 CongratulationsMessage = congratulationsMessage,
                 StartsAt = startsAt,
                 EndsAt = endsAt,
+                PrizeGil = canSetPrize && giveawayPrizeGil > 0 ? giveawayPrizeGil : null,
             });
             ClearGiveawayDraft(venue);
         }
@@ -212,6 +409,7 @@ public sealed class GiveawaysTabRenderer(Plugin plugin)
             ImGui.TableSetColumnIndex(1);
             ImGui.TextUnformatted(giveaway.Title);
             if (giveaway.SourceType == GiveawaySourceTypes.Scheduler) ImGui.TextDisabled("Scheduled");
+            if (giveaway.PrizeGil is { } prize) ImGui.TextDisabled($"{prize:N0} gil");
             if (!string.IsNullOrWhiteSpace(giveaway.WinnerDisplayName))
                 ImGui.TextDisabled($"Winner: {giveaway.WinnerDisplayName}");
             if (!string.IsNullOrWhiteSpace(giveaway.LastError))
@@ -253,6 +451,8 @@ public sealed class GiveawaysTabRenderer(Plugin plugin)
             new Vector2(0, 85 * ImGuiHelpers.GlobalScale));
         ImGui.InputTextMultiline("Scheduler congratulations", ref schedulerCongratulations, 2000,
             new Vector2(0, 65 * ImGuiHelpers.GlobalScale));
+        var canSetPrize = CanSetPrize(venue);
+        var prizeValid = !canSetPrize || DrawPrizeInput("Winner prize (gil)", ref schedulerPrizeGil);
 
         ImGui.SetNextItemWidth(140 * ImGuiHelpers.GlobalScale);
         ImGui.InputInt("First draw: minutes after opening", ref firstDrawOffsetMinutes);
@@ -304,7 +504,7 @@ public sealed class GiveawaysTabRenderer(Plugin plugin)
         else if (!contentValid)
             ImGui.TextColored(PartyPulseUi.Warning, "Select a channel and complete all text fields, including <winner>.");
 
-        ImGui.BeginDisabled(isBusy || !timingValid || !contentValid);
+        ImGui.BeginDisabled(isBusy || !timingValid || !contentValid || !prizeValid);
         if (ImGui.Button(editingSchedulerId is null ? "Create scheduler" : "Save scheduler"))
         {
             plugin.SaveGiveawayScheduler(venue, editingSchedulerId, new SaveGiveawaySchedulerRequest
@@ -319,6 +519,7 @@ public sealed class GiveawaysTabRenderer(Plugin plugin)
                 StartMode = schedulerStartMode,
                 StartOffsetMinutes = schedulerStartOffsetMinutes,
                 Enabled = schedulerEnabled,
+                PrizeGil = canSetPrize && schedulerPrizeGil > 0 ? schedulerPrizeGil : null,
             });
             ClearSchedulerDraft();
         }
@@ -354,6 +555,7 @@ public sealed class GiveawaysTabRenderer(Plugin plugin)
             ImGui.TableNextRow();
             ImGui.TableSetColumnIndex(0);
             ImGui.TextUnformatted(scheduler.Title);
+            if (scheduler.PrizeGil is { } prize) ImGui.TextDisabled($"{prize:N0} gil");
             if (!scheduler.Enabled) ImGui.TextDisabled("Disabled");
             ImGui.TableSetColumnIndex(1);
             ImGui.TextUnformatted($"#{scheduler.ChannelName}");
@@ -372,6 +574,23 @@ public sealed class GiveawaysTabRenderer(Plugin plugin)
             ImGui.PopID();
         }
         ImGui.EndTable();
+    }
+
+    private bool CanSetPrize(VenueConnectionConfiguration venue) =>
+        plugin.Giveaways.GetWinnersSnapshot(venue).View is not null;
+
+    private static bool DrawPrizeInput(string label, ref int prizeGil)
+    {
+        ImGui.SetNextItemWidth(150 * ImGuiHelpers.GlobalScale);
+        ImGui.InputInt(label, ref prizeGil, 0);
+        if (prizeGil is < 0 or > GiveawayLimits.MaxPrizeGil)
+        {
+            ImGui.TextColored(PartyPulseUi.Warning, $"Enter up to {GiveawayLimits.MaxPrizeGil:N0} gil.");
+            return false;
+        }
+        if (prizeGil == 0)
+            ImGui.TextDisabled("Zero leaves the gil prize unset or keeps the saved amount.");
+        return true;
     }
 
     private static void DrawChannelCombo(
@@ -420,6 +639,7 @@ public sealed class GiveawaysTabRenderer(Plugin plugin)
         giveawayChannelId = giveaway.ChannelId;
         giveawayTitle = giveaway.Title;
         giveawayDescription = giveaway.Description;
+        giveawayPrizeGil = giveaway.PrizeGil ?? 0;
         congratulationsMessage = giveaway.CongratulationsMessage;
         startsAtLocal = VenueTimeZone.Format(venue, giveaway.StartsAt, LocalDateTimeFormat, CultureInfo.InvariantCulture);
         endsAtLocal = VenueTimeZone.Format(venue, giveaway.EndsAt, LocalDateTimeFormat, CultureInfo.InvariantCulture);
@@ -431,6 +651,7 @@ public sealed class GiveawaysTabRenderer(Plugin plugin)
         schedulerChannelId = scheduler.ChannelId;
         schedulerTitle = scheduler.Title;
         schedulerDescription = scheduler.Description;
+        schedulerPrizeGil = scheduler.PrizeGil ?? 0;
         schedulerCongratulations = scheduler.CongratulationsMessage;
         firstDrawOffsetMinutes = scheduler.FirstDrawOffsetMinutes;
         repeatIntervalMinutes = scheduler.RepeatIntervalMinutes;
@@ -444,6 +665,9 @@ public sealed class GiveawaysTabRenderer(Plugin plugin)
     {
         if (activeProfileId == venue.ProfileId) return;
         activeProfileId = venue.ProfileId;
+        announcementMacro = venue.GiveawayWinnerAnnouncementMacro ?? string.Empty;
+        requestWinnerConfirmation = false;
+        pendingWinnerAction = null;
         ClearGiveawayDraft(venue);
         ClearSchedulerDraft();
     }
@@ -455,6 +679,7 @@ public sealed class GiveawaysTabRenderer(Plugin plugin)
         giveawayChannelId = 0;
         giveawayTitle = string.Empty;
         giveawayDescription = string.Empty;
+        giveawayPrizeGil = 0;
         congratulationsMessage = "Congratulations <winner>!";
         var now = DateTimeOffset.UtcNow.AddMinutes(5);
         startsAtLocal = VenueTimeZone.Format(venue, now, LocalDateTimeFormat, CultureInfo.InvariantCulture);
@@ -467,6 +692,7 @@ public sealed class GiveawaysTabRenderer(Plugin plugin)
         schedulerChannelId = 0;
         schedulerTitle = string.Empty;
         schedulerDescription = string.Empty;
+        schedulerPrizeGil = 0;
         schedulerCongratulations = "Congratulations <winner>!";
         firstDrawOffsetMinutes = 30;
         repeatIntervalMinutes = 15;

@@ -599,6 +599,34 @@ public sealed class PartyPulseApiClient : IDisposable
             static payload => payload.GiveawayId > 0 && payload.UpdatedAt != default,
             cancellationToken);
 
+    public Task<ApiResult<GiveawayWinnersResponse>> GetGiveawayWinnersAsync(
+        Uri baseUri,
+        string accessToken,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<GiveawayWinnersResponse>(
+            baseUri,
+            HttpMethod.Get,
+            "api/v1/giveaways/winners",
+            accessToken,
+            null,
+            static payload => payload.Winners is not null,
+            cancellationToken);
+
+    public Task<ApiResult<UpdateGiveawayWinnerResponse>> UpdateGiveawayWinnerAsync(
+        Uri baseUri,
+        string accessToken,
+        long giveawayId,
+        UpdateGiveawayWinnerRequest request,
+        CancellationToken cancellationToken) =>
+        SendAuthorizedAsync<UpdateGiveawayWinnerResponse>(
+            baseUri,
+            HttpMethod.Post,
+            $"api/v1/giveaways/winners/{giveawayId}/actions",
+            accessToken,
+            request,
+            payload => payload.GiveawayId == giveawayId && payload.RecordedAt != default,
+            cancellationToken);
+
     public Task<ApiResult<SaveGiveawayResponse>> UpdateGiveawayAsync(
         Uri baseUri,
         string accessToken,

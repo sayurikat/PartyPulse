@@ -35,6 +35,8 @@ Bot entry points include GuildReconciler.cs, DiscordIdentityMatcher.cs, DiscordR
 
 Database: use the [README](../../../PartyPulse.Database/README.md), complete scripts and SQL-project definitions. Folder names do not determine object types: api.Authorization_HasPermissionForActor is a function. Compatibility scripts can declare the same wrapper despite different filenames.
 
+Giveaway prizes and winner settlement flow through `GiveawayContracts`, `GiveawaysController`, `SqlGiveawayRepository` and the `api.Giveaway_*` procedures. `api.GiveawayBot_ClaimWork` selects the winner and creates the notification in one transaction. The bot captures the Discord guild nickname when an entrant signs up. The plugin's shared Giveaways renderer serves Main and Mini. Winner actions use a separate API capability guarded by `venue.finance.settlements`.
+
 Specifically, api.Self_LeaveVenue.sql and api.Self_LeaveVenue-compatibility.sql declare the same wrapper. Complete sources do not contain the intentional model-only api.Test and api.TestRead diagnostics; preserve them. The limited source/model textual comparison is recorded in [migration review](MIGRATION_REVIEW.md), not treated as compilation or live verification.
 
 ## Preserve these behaviors

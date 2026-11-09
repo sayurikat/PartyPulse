@@ -128,6 +128,7 @@ public sealed class TimedMacrosTabRenderer(Plugin plugin)
         var now = snapshot.EstimatedServerNow;
         foreach (var macro in view.Macros
                      .Where(value => !value.IsTemplate && (value.CanExecute || value.CanManage))
+                     .Where(value => value.TypeCode != TimedMacroTypeCodes.GiveawayAdvertisement || value.CanExecute)
                      .OrderBy(value => value.DisplayName, StringComparer.OrdinalIgnoreCase)
                      .ThenBy(value => value.TimedMacroId))
         {

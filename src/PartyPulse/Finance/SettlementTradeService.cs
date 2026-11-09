@@ -92,7 +92,8 @@ public sealed class SettlementTradeService
         string targetCharacterName,
         string targetWorldName,
         long amountGil,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<bool>? canTrade = null)
     {
         if (amountGil <= 0 || amountGil > int.MaxValue)
         {
@@ -108,9 +109,9 @@ public sealed class SettlementTradeService
         // focus target. The game does not apply FocusTarget immediately.
         var prepareResult = await RunOnFrameworkAsync(
             "prepare the Dropbox settlement target",
-            () => PrepareTarget(
-                targetCharacterName,
-                targetWorldName),
+            () => canTrade?.Invoke() == false
+                ? TradeGuardFailed()
+                : PrepareTarget(targetCharacterName, targetWorldName),
             TimeSpan.Zero,
             cancellationToken);
         if (!prepareResult.Success)
@@ -124,13 +125,19 @@ public sealed class SettlementTradeService
         // had time to apply the focus target.
         return await RunOnFrameworkAsync(
             "start the Dropbox settlement trade",
-            () => OpenQueueAndBeginTrade(
-                targetCharacterName,
-                targetWorldName,
-                (int)amountGil),
+            () => canTrade?.Invoke() == false
+                ? TradeGuardFailed()
+                : OpenQueueAndBeginTrade(targetCharacterName, targetWorldName, (int)amountGil),
             FocusTargetDelay,
             cancellationToken);
     }
+
+    private static PluginIntegrationResult TradeGuardFailed() =>
+        Failed(
+            PluginIntegrationFailureKind.Cancelled,
+            "TRADE_CONTEXT_CHANGED",
+            "The character, venue, or reservation window changed before the trade started.",
+            "validate the settlement operator");
 
     private PluginIntegrationResult PrepareTarget(
         string targetCharacterName,

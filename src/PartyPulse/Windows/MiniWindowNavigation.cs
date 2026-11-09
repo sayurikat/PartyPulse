@@ -23,6 +23,7 @@ internal enum MiniTabId
     Macros,
     Configuration,
     VipArrivals,
+    GiveawayWinners,
 }
 
 internal enum MiniTabCondition
@@ -64,6 +65,7 @@ internal static class MiniTabCatalog
         new(MiniTabId.PayStaff, "Pay Staff", MainPage.Staff, MainSubtab.StaffPayouts, MiniTabCondition.LinkedStaffTarget),
         new(MiniTabId.Settlements, "Settlements", MainPage.Finance, MainSubtab.FinanceSettlements, MiniTabCondition.PendingSettlement),
         new(MiniTabId.Macros, "Macros", MainPage.TimedMacros, MainSubtab.TimedMacrosRun, MiniTabCondition.None),
+        new(MiniTabId.GiveawayWinners, "Winners", MainPage.Giveaways, MainSubtab.GiveawayWinners, MiniTabCondition.None),
     ];
 
     private static readonly Dictionary<MiniTabId, MiniTabDefinition> FeaturesById =

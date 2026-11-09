@@ -104,7 +104,12 @@ public sealed class NotificationPollingManager : IDisposable
                     token.AccessToken,
                     20,
                     cancellationToken);
-                if (!result.Success || result.Value is null)
+                if (!identityProvider.TryGetCurrent(out var current, out _) || current != identity)
+                {
+                    return;
+                }
+
+                if (!result.Success || result.Value is null || !venue.IsRegistered)
                 {
                     continue;
                 }

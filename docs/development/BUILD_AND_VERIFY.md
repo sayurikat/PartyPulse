@@ -101,3 +101,11 @@ The one-venue fixture was parsed successfully with SQL Server 170 ScriptDom. It 
 ## 2026-11-09 opening edits and DJ payments rollout
 
 The user reported applying the SQL updates. The first API publish failed. After building Contracts in Debug, the user published the API and website, built the plugin, and confirmed PartyPulse was running.
+
+## Giveaway winners verification
+
+Apply the giveaway winner schema migration and the affected procedure scripts in the order listed in the database guide before updating the API. Build Contracts Debug first, then build the API, bot, website and plugin.
+
+In an isolated venue, use an owner or grant `venue.finance.settlements` to a payout operator. Test a separate user without that permission and a user from another venue. Verify a manual giveaway and a scheduled giveaway carry the expected gil prize into Discord. Enter once with a guild nickname and once without one. Check that a draw creates one notification, the toast logs the win in chat, and both Main and Mini show the winner.
+
+Configure an announcement such as `/sh Congrats <discordname>! Please come collect your prize.` Run it twice and check the last-announced time. Configure the giveaway advertisement under Timed Macros and verify both run buttons while entries are open and their disappearance after close. Target the verified in-game winner, check that one Dropbox reservation blocks other operators, and confirm only after the full prize has been delivered. Exercise release after 30 seconds, retry and cancellation with a different winner.

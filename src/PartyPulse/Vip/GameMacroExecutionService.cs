@@ -84,7 +84,8 @@ public sealed class GameMacroExecutionService : IDisposable
 
     public async Task<GameMacroExecutionResult> ExecuteUntargetedAsync(
         string macroText,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<bool>? canExecute = null)
     {
         if (!await gate.WaitAsync(0, cancellationToken))
             return GameMacroExecutionResult.Fail("MACRO_BUSY", "Another PartyPulse macro is already being started.");
@@ -100,7 +101,9 @@ public sealed class GameMacroExecutionService : IDisposable
                 return GameMacroExecutionResult.Fail("MACRO_LINE_TOO_LONG", "Game macro lines can contain at most 180 characters.");
 
             return await framework.RunOnTick(
-                () => ExecuteMacroLinesOnFrameworkThread(lines),
+                () => canExecute?.Invoke() == false
+                    ? GameMacroExecutionResult.Fail("PLAYER_CHANGED", "The active character or venue changed.")
+                    : ExecuteMacroLinesOnFrameworkThread(lines),
                 cancellationToken: cancellationToken);
         }
         catch (OperationCanceledException)

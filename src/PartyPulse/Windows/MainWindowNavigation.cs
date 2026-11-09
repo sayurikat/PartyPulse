@@ -102,6 +102,7 @@ public enum MainSubtab
     MyAccountLocalData,
     VipArrivalTracker,
     DjsPaymentHistory,
+    GiveawayWinners,
 }
 
 internal sealed record MainSubtabDefinition(MainSubtab Id, string Label);

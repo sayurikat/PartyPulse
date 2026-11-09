@@ -37,6 +37,8 @@ public sealed class NotificationToastWindow : Window, IDisposable
         current = next;
         hideAt = DateTimeOffset.UtcNow.Add(DisplayDuration);
         IsOpen = true;
+        if (next.Notification.NotificationType == GiveawayWinnerNotifications.Drawn)
+            Plugin.ChatGui.Print(next.Notification.Message, "PartyPulse");
     }
 
     public override void PreDraw()
@@ -94,10 +96,9 @@ public sealed class NotificationToastWindow : Window, IDisposable
         }
     }
 
-    public void Dispose()
-    {
-        current = null;
-    }
+    public void Clear() => CloseCurrent();
+
+    public void Dispose() => Clear();
 
     private void CloseCurrent()
     {

@@ -39,7 +39,7 @@ using PartyPulse.Windows;
 
 namespace PartyPulse;
 
-public sealed class Plugin : IDalamudPlugin
+public sealed partial class Plugin : IDalamudPlugin
 {
     private const string CommandName = "/pulse";
     private static readonly TimeSpan StaffFirstSeenRefreshInterval = TimeSpan.FromMinutes(1);
@@ -1659,6 +1659,12 @@ public sealed class Plugin : IDalamudPlugin
 
     public void OpenNotificationAction(QueuedPartyPulseNotification queued)
     {
+        if (queued.Notification.ActionKey == GiveawayWinnerNotifications.ActionKey)
+        {
+            mainWindow.OpenGiveawayWinners(queued.VenueProfileId);
+            return;
+        }
+
         var settlementId = string.Equals(
                 queued.Notification.ActionKey,
                 "finance.settlement",
@@ -1779,7 +1785,6 @@ public sealed class Plugin : IDalamudPlugin
 
     private void OnFrameworkUpdate(IFramework framework)
     {
-        notificationToastWindow.Tick();
         if (PartyFinderAutomation.IsRunning)
         {
             var partyFinderVenue = Configuration.VenueConnections.FirstOrDefault(
@@ -1817,6 +1822,7 @@ public sealed class Plugin : IDalamudPlugin
                 StaffFirstSeen.Clear();
                 Finance.Clear("Character logged out or changed.");
                 Notifications.Clear();
+                notificationToastWindow.Clear();
             }
 
             return;
@@ -1845,8 +1851,10 @@ public sealed class Plugin : IDalamudPlugin
             StaffFirstSeen.Clear();
             Finance.Clear("Character changed; finance data was cleared.");
             Notifications.Clear();
+            notificationToastWindow.Clear();
         }
 
+        notificationToastWindow.Tick();
         var notificationVenues = Configuration.VenueConnections
             .Where(venue =>
                 venue.IsRegistered &&

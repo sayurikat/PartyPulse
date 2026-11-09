@@ -134,6 +134,14 @@ VIP package creation and updates preserve the caller's Discord role management c
 
 On API base 5d9a5989, the offline service check dropped all three explicit confirmations. With the fix, all nine cases passed for package creation with a role, role changes, and role removal with true, false, and omitted confirmation. Contracts Debug, API Release, and five API auth checks passed. Deployed verification remains pending.
 
+## 2026-11-09 - Giveaway winners and payouts
+
+Main and Mini share a queue of drawn, unresolved winners. The announcement macro is saved on the device for each venue. The `<discordname>` placeholder uses the guild nickname captured at signup, or the recorded Discord username. Each successful macro start updates the shared last-announced time. Draw notices use the existing notification poll and appear in the local game chat log when the toast opens.
+
+The operator selects and verifies the winner's in-game character. PartyPulse reserves the payout before asking Dropbox to start the trade. The operator confirms the completed trade, or verifies that no gil moved and releases the reservation before retrying or cancelling. Manual payouts can be confirmed directly. Resolved winners leave the queue.
+
+The exact `venue.finance.settlements` permission uses the existing venue owner inheritance. It gates the queue, draw notices, prize changes and the built-in giveaway advertisement macro. Giveaway editors also need their existing giveaway management permission. Scheduled giveaways copy the configured prize when created. The advertisement timer is shared per venue and runs while at least one posted giveaway is accepting entries.
+
 ## 2026-11-09 - Plugin release workflow and installed icon
 
 Use the [plugin release runbook](BUILD_AND_VERIFY.md#partypulse-plugin-releases) for each requested release and update the shared guides as the workflow changes. The `0.1.7.2` release verified the staged order on GitHub. The release asset was published and downloaded successfully before `master` advanced to the new listing.

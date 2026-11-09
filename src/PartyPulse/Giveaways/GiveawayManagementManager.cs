@@ -19,6 +19,7 @@ public sealed class GiveawayManagementManager : IDisposable
     private readonly PlayerIdentityProvider identityProvider;
     private readonly IPluginLog log;
     private readonly ConcurrentDictionary<Guid, GiveawayManagementSnapshot> snapshots = new();
+    private readonly ConcurrentDictionary<Guid, GiveawayWinnersSnapshot> winnerSnapshots = new();
     private readonly ConcurrentDictionary<Guid, SemaphoreSlim> gates = new();
 
     public GiveawayManagementManager(
@@ -42,6 +43,63 @@ public sealed class GiveawayManagementManager : IDisposable
 
     public bool IsBusy(Guid profileId) =>
         gates.TryGetValue(profileId, out var gate) && gate.CurrentCount == 0;
+
+    public GiveawayWinnersSnapshot GetWinnersSnapshot(VenueConnectionConfiguration venue) =>
+        winnerSnapshots.TryGetValue(venue.ProfileId, out var snapshot) &&
+        identityProvider.TryGetCurrent(out var identity, out _) && identity == snapshot.Identity
+            ? snapshot
+            : GiveawayWinnersSnapshot.NotLoaded;
+
+    public bool ShouldLoadWinners(VenueConnectionConfiguration venue) =>
+        venue.IsRegistered && !IsBusy(venue.ProfileId) &&
+        (GetWinnersSnapshot(venue).LastAttemptAt is not { } last ||
+         last <= DateTimeOffset.UtcNow.Subtract(PollInterval));
+
+    public Task<ApiResult<GiveawayWinnersResponse>> LoadWinnersAsync(
+        VenueConnectionConfiguration venue,
+        CancellationToken cancellationToken) =>
+        WithGateAsync(venue, async () =>
+        {
+            identityProvider.TryGetCurrent(out var identity, out _);
+            var context = await GetAuthorizedContextAsync(venue, cancellationToken);
+            var result = context.Success
+                ? await apiClient.GetGiveawayWinnersAsync(context.BaseUri!, context.AccessToken!, cancellationToken)
+                : ApiResult<GiveawayWinnersResponse>.Failed(context.Failure!);
+
+            if (identity is not null && identityProvider.TryGetCurrent(out var current, out _) &&
+                current == identity && venue.IsRegistered)
+            {
+                var previous = GetWinnersSnapshot(venue);
+                var failure = result.Failure;
+                var view = result.Success ? result.Value
+                    : failure?.Kind is ApiFailureKind.Permission or ApiFailureKind.Authentication
+                        ? null : previous.View;
+                winnerSnapshots[venue.ProfileId] = new GiveawayWinnersSnapshot(
+                    identity, view, failure?.Message ?? "Winners loaded.", DateTimeOffset.UtcNow);
+            }
+
+            return result;
+        }, cancellationToken);
+
+    public Task<ApiResult<UpdateGiveawayWinnerResponse>> UpdateWinnerAsync(
+        VenueConnectionConfiguration venue,
+        long giveawayId,
+        UpdateGiveawayWinnerRequest request,
+        PlayerIdentity expectedActor,
+        CancellationToken cancellationToken) =>
+        WithGateAsync(venue, async () =>
+        {
+            if (!identityProvider.TryGetCurrent(out var current, out _) || current != expectedActor)
+                return ApiResult<UpdateGiveawayWinnerResponse>.Failed(new ApiFailure(
+                    ApiFailureKind.Authentication, "PLAYER_CHANGED", "The active character changed."));
+
+            var context = await GetAuthorizedContextAsync(venue, cancellationToken);
+            if (!context.Success)
+                return ApiResult<UpdateGiveawayWinnerResponse>.Failed(context.Failure!);
+
+            return await apiClient.UpdateGiveawayWinnerAsync(
+                context.BaseUri!, context.AccessToken!, giveawayId, request, cancellationToken);
+        }, cancellationToken);
 
     public bool ShouldLoad(VenueConnectionConfiguration venue)
     {
@@ -125,10 +183,15 @@ public sealed class GiveawayManagementManager : IDisposable
             ApiResult<SaveGiveawaySchedulerResponse>.Failed,
             cancellationToken);
 
-    public void RemoveProfile(Guid profileId) => snapshots.TryRemove(profileId, out _);
+    public void RemoveProfile(Guid profileId)
+    {
+        snapshots.TryRemove(profileId, out _);
+        winnerSnapshots.TryRemove(profileId, out _);
+    }
 
     public void Clear(string message = "Giveaway data was cleared.")
     {
+        winnerSnapshots.Clear();
         foreach (var pair in snapshots)
             snapshots[pair.Key] = GiveawayManagementSnapshot.NotLoaded with { Message = message };
     }
@@ -138,6 +201,7 @@ public sealed class GiveawayManagementManager : IDisposable
         foreach (var gate in gates.Values) gate.Dispose();
         gates.Clear();
         snapshots.Clear();
+        winnerSnapshots.Clear();
     }
 
     private Task<T> WithMutationAsync<T>(

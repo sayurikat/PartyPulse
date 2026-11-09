@@ -136,6 +136,7 @@ public sealed class MainWindow : Window, IDisposable
             [
                 new(MainSubtab.GiveawaysManage, "Giveaways"),
                 new(MainSubtab.GiveawaysScheduler, "Scheduler"),
+                new(MainSubtab.GiveawayWinners, "Winners"),
             ]),
         new(MainPage.DiscordStatus, "OPERATIONS", "Discord Status", "DS",
             "Configure and monitor the venue status post.",
@@ -245,6 +246,20 @@ public sealed class MainWindow : Window, IDisposable
             MinimumSize = new Vector2(820, 560),
             MaximumSize = new Vector2(float.MaxValue, float.MaxValue),
         };
+    }
+
+    internal void OpenGiveawayWinners(Guid venueProfileId)
+    {
+        var venue = plugin.Configuration.VenueConnections.FirstOrDefault(value => value.ProfileId == venueProfileId);
+        if (venue is null || !venue.IsRegistered)
+            return;
+
+        plugin.Configuration.SelectedVenueProfileId = venue.ProfileId;
+        plugin.Configuration.Save();
+        selectedPage = MainPage.Giveaways;
+        navigationState.ExpandAndSelect(venue.ProfileId, MainPage.Giveaways, MainSubtab.GiveawayWinners);
+        plugin.RefreshGiveawayWinners(venue);
+        IsOpen = true;
     }
 
     public void OpenFinance(Guid venueProfileId, long? settlementId)
@@ -820,7 +835,10 @@ public sealed class MainWindow : Window, IDisposable
                 plugin.RefreshTimedMacros(venue);
                 break;
             case MainPage.Giveaways:
-                plugin.RefreshGiveaways(venue);
+                if (subtab != MainSubtab.GiveawayWinners)
+                    plugin.RefreshGiveaways(venue);
+                plugin.EnsureGiveawayWinnersLoaded(venue);
+                plugin.EnsureTimedMacrosLoaded(venue);
                 break;
             case MainPage.DiscordStatus:
                 plugin.RefreshDiscordStatus(venue);
@@ -928,6 +946,7 @@ public sealed class MainWindow : Window, IDisposable
         plugin.RefreshStaff(venue);
         plugin.RefreshTimedMacros(venue);
         plugin.RefreshGiveaways(venue);
+        plugin.RefreshGiveawayWinners(venue);
         plugin.RefreshDiscordStatus(venue);
         plugin.RefreshVenueUsers(venue);
     }
@@ -1076,13 +1095,13 @@ public sealed class MainWindow : Window, IDisposable
             MainSubtab.StaffPayouts =>
                 plugin.Staff.GetSnapshot(venue).View?.Capabilities.CanPay,
 
-            MainSubtab.TimedMacrosRun =>
-                plugin.TimedMacros.GetSnapshot(venue).View?.Capabilities.CanExecuteAny,
-            MainSubtab.TimedMacrosSetup =>
-                plugin.TimedMacros.GetSnapshot(venue).View?.Capabilities.CanManageAny,
+            MainSubtab.TimedMacrosRun => CanAccessTimedMacros(setup: false),
+            MainSubtab.TimedMacrosSetup => CanAccessTimedMacros(setup: true),
 
             MainSubtab.GiveawaysManage or MainSubtab.GiveawaysScheduler =>
                 plugin.Giveaways.GetSnapshot(venue).View?.Capabilities.CanManage,
+            MainSubtab.GiveawayWinners =>
+                plugin.Giveaways.GetWinnersSnapshot(venue).View is not null,
             MainSubtab.DiscordStatusSettings or
                 MainSubtab.DiscordStatusNotifications or
                 MainSubtab.DiscordStatusPublication =>
@@ -1109,6 +1128,17 @@ public sealed class MainWindow : Window, IDisposable
         };
 
         return subtabVisibility.Resolve(visibilityKey, visibility);
+
+        bool? CanAccessTimedMacros(bool setup)
+        {
+            var view = plugin.TimedMacros.GetSnapshot(venue).View;
+            if (view is null)
+                return null;
+
+            return (setup ? view.Capabilities.CanManageAny : view.Capabilities.CanExecuteAny) ||
+                view.Macros.Any(macro => macro.TypeCode == TimedMacroTypeCodes.GiveawayAdvertisement &&
+                    (setup ? macro.CanManage : macro.CanExecute));
+        }
 
         bool? CanManageOpeningDjs()
         {
