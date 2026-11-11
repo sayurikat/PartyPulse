@@ -234,7 +234,9 @@ public sealed partial class Plugin : IDalamudPlugin
 #if PARTYPULSE_RUNTIME_STATUS
         if (OperatingSystem.IsWindows() && PluginInterface.IsDev)
         {
-            runtimeStatusBridge = RuntimeStatusBridge.TryStart(Framework, ClientState, Log, LifetimeToken);
+            var gameChecks = new RuntimeGameChecks(dropboxApi, ShoutrunnerDuty);
+            runtimeStatusBridge = RuntimeStatusBridge.TryStart(Framework, ClientState,
+                IdentityProvider, TargetProvider, LocationProvider, Log, LifetimeToken, gameChecks.Read);
         }
 #endif
 

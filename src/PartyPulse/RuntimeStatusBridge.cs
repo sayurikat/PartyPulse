@@ -12,6 +12,8 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Dalamud.Plugin.Services;
+using PartyPulse.Models;
+using PartyPulse.Services;
 
 namespace PartyPulse;
 
@@ -20,13 +22,19 @@ internal sealed class RuntimeStatusBridge(
     NamedPipeServerStream pipe,
     IFramework framework,
     IClientState clientState,
+    PlayerIdentityProvider identityProvider,
+    TargetPlayerProvider targetProvider,
+    VenueLocationProvider locationProvider,
     IPluginLog log,
-    CancellationToken stopping) : IDisposable
+    CancellationToken stopping,
+    Func<VenueAddress?, object>? readFeatures) : IDisposable
 {
     private const byte StatusRequest = 1;
+    private const byte GameStateRequest = 2;
     private const int ProtocolVersion = 1;
-    private const int MaxReplyBytes = 2048;
+    private const int MaxReplyBytes = 4096;
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(3);
+    private static readonly JsonSerializerOptions GameStateJson = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
     private static readonly Assembly PluginAssembly = typeof(RuntimeStatusBridge).Assembly;
     private static readonly Guid BuildId = PluginAssembly.ManifestModule.ModuleVersionId;
     private static readonly string Version = PluginAssembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()
@@ -37,8 +45,12 @@ internal sealed class RuntimeStatusBridge(
     public static RuntimeStatusBridge? TryStart(
         IFramework framework,
         IClientState clientState,
+        PlayerIdentityProvider identityProvider,
+        TargetPlayerProvider targetProvider,
+        VenueLocationProvider locationProvider,
         IPluginLog log,
-        CancellationToken stopping)
+        CancellationToken stopping,
+        Func<VenueAddress?, object>? readFeatures = null)
     {
         try
         {
@@ -55,7 +67,8 @@ internal sealed class RuntimeStatusBridge(
             var pipe = NamedPipeServerStreamAcl.Create(FormattableString.Invariant($"PartyPulse.RuntimeStatus.v{ProtocolVersion}.{Environment.ProcessId}"),
                 PipeDirection.InOut, 1, PipeTransmissionMode.Byte,
                 PipeOptions.Asynchronous | PipeOptions.FirstPipeInstance, 0, MaxReplyBytes, security);
-            var bridge = new RuntimeStatusBridge(pipe, framework, clientState, log, stopping);
+            var bridge = new RuntimeStatusBridge(pipe, framework, clientState,
+                identityProvider, targetProvider, locationProvider, log, stopping, readFeatures);
             _ = Task.Run(bridge.ServeAsync);
             log.Information("PartyPulse runtime status bridge is listening.");
             return bridge;
@@ -114,15 +127,18 @@ internal sealed class RuntimeStatusBridge(
     private async Task ReplyAsync(CancellationToken cancellationToken)
     {
         var opcode = new byte[1];
-        if (await pipe.ReadAsync(opcode, cancellationToken).ConfigureAwait(false) != 1 || opcode[0] != StatusRequest)
+        if (await pipe.ReadAsync(opcode, cancellationToken).ConfigureAwait(false) != 1 ||
+            opcode[0] is not (StatusRequest or GameStateRequest))
         {
             return;
         }
 
+        var includeGameState = opcode[0] == GameStateRequest;
         var snapshot = await framework.RunOnTick(() => new
         {
             SampledAtUtc = DateTimeOffset.UtcNow,
             LoggedIn = clientState.IsLoggedIn,
+            GameState = includeGameState ? ReadGameState() : null,
         }, cancellationToken: cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
 
         var payload = new ArrayBufferWriter<byte>();
@@ -136,6 +152,11 @@ internal sealed class RuntimeStatusBridge(
             json.WriteString("version", Version);
             json.WriteString("sampledAtUtc", snapshot.SampledAtUtc);
             json.WriteBoolean("loggedIn", snapshot.LoggedIn);
+            if (snapshot.GameState is not null)
+            {
+                json.WritePropertyName("gameState");
+                JsonSerializer.Serialize(json, snapshot.GameState, GameStateJson);
+            }
             json.WriteEndObject();
         }
 
@@ -151,6 +172,35 @@ internal sealed class RuntimeStatusBridge(
 
         // Disconnect discards unread bytes. The client closes after reading the framed reply.
         await pipe.ReadAsync(opcode, cancellationToken).ConfigureAwait(false);
+    }
+
+    private delegate bool TryRead<T>(out T? value, out string reason) where T : class;
+
+    private sealed record GameRead<T>(T? Value, string? Reason) where T : class;
+
+    private object ReadGameState()
+    {
+        var address = Read<VenueAddress>(locationProvider.TryGetCurrentHousingAddress);
+        return new
+        {
+            Character = Read<PlayerIdentity>(identityProvider.TryGetCurrent),
+            Target = Read<PlayerIdentity>(targetProvider.TryGetCurrentTarget),
+            Location = Read<VenueLocation>(locationProvider.TryGetCurrentLocation),
+            HousingAddress = address,
+            Features = readFeatures?.Invoke(address.Value),
+        };
+    }
+
+    private static GameRead<T> Read<T>(TryRead<T> read) where T : class
+    {
+        try
+        {
+            return read(out var value, out var reason) ? new(value, null) : new(null, reason);
+        }
+        catch (Exception exception)
+        {
+            return new(null, $"Game read failed ({exception.GetType().Name}).");
+        }
     }
 }
 #endif

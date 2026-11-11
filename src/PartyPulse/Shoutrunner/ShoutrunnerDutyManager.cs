@@ -329,7 +329,7 @@ public sealed class ShoutrunnerDutyManager(
             key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
     }
 
-    private bool TryGetCurrentLocation(out ShoutrunnerCurrentLocation? location)
+    internal bool TryGetCurrentLocation(out ShoutrunnerCurrentLocation? location)
     {
         location = null;
         if (!playerState.IsLoaded || !clientState.IsLoggedIn || !playerState.CurrentWorld.IsValid)

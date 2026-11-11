@@ -125,7 +125,7 @@ public sealed class GiveawaysTabRenderer(Plugin plugin)
         DrawActiveGiveawayMacro(venue);
         if (ImGui.CollapsingHeader("Winner announcement macro"))
         {
-            ImGui.TextWrapped("Saved for this venue on this device. Use <discordname> in the message text. It uses the guild nickname when available and the Discord username otherwise.");
+            ImGui.TextWrapped("Saved for this venue on this device. Use <discordname> in the message text to insert the winner's guild nickname, saved display name, or username in that order.");
             ImGui.InputTextMultiline("##GiveawayAnnouncementMacro", ref announcementMacro, 4000,
                 new Vector2(0, 90 * ImGuiHelpers.GlobalScale));
             var normalized = announcementMacro.Replace("\r\n", "\n", StringComparison.Ordinal)
@@ -155,7 +155,11 @@ public sealed class GiveawaysTabRenderer(Plugin plugin)
             ImGui.Spacing();
             ImGui.Separator();
             ImGui.TextUnformatted(winner.Title);
-            ImGui.TextWrapped($"Discord username: {winner.DiscordUsername}   ·   Guild nickname: {winner.DiscordNickname ?? "None recorded"}");
+            var (name, label) = Plugin.GetWinnerDiscordName(winner);
+            var discordDetails = $"{label}: {name}";
+            if (!string.Equals(name, winner.DiscordUsername, StringComparison.Ordinal))
+                discordDetails += $"   ·   Discord username: {winner.DiscordUsername}";
+            ImGui.TextWrapped(discordDetails);
             ImGui.TextDisabled(winner.PrizeGil is { } prize ? $"{prize:N0} gil" : "No gil prize recorded");
             ImGui.TextDisabled($"Drawn {VenueTimeZone.Format(venue, winner.WinnerSelectedAt, "g")}");
             ImGui.TextDisabled(winner.LastAnnouncedAt is { } announced

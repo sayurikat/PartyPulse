@@ -188,13 +188,28 @@ public sealed class VenueLocationProvider(
         return true;
     }
 
-    private bool TryGetCurrentLocationName(out string locationName, out string reason)
+    private unsafe bool TryGetCurrentLocationName(out string locationName, out string reason)
     {
-        var territory = dataManager.GetExcelSheet<TerritoryType>().GetRow(clientState.TerritoryType);
+        var territories = dataManager.GetExcelSheet<TerritoryType>();
+        var territoryId = clientState.TerritoryType;
+        var territory = territories.GetRow(territoryId);
         var placeName = territory.PlaceName.Value.Name.ToString();
         var zoneName = territory.PlaceNameZone.Value.Name.ToString();
         var regionName = territory.PlaceNameRegion.Value.Name.ToString();
         locationName = ResolveTerritoryLocationName(placeName, zoneName, regionName);
+
+        if (locationName.Length == 0 && HousingManager.Instance() != null)
+        {
+            // Renovated housing interiors can have an unnamed territory row.
+            var originalTerritoryId = HousingManager.GetOriginalHouseTerritoryTypeId();
+            if (originalTerritoryId != 0 && originalTerritoryId != territoryId &&
+                territories.TryGetRow(originalTerritoryId, out var originalTerritory))
+            {
+                var originalName = NormalizeHousingDistrictName(originalTerritory.PlaceName.Value.Name.ToString());
+                IsHousingDistrictName(originalName, out locationName);
+            }
+        }
+
         if (locationName.Length == 0)
         {
             reason = "The current location name could not be determined.";

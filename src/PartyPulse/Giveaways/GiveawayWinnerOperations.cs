@@ -12,6 +12,15 @@ public sealed partial class Plugin
     private const string DiscordNamePlaceholder = "<discordname>";
     private readonly ConcurrentDictionary<Guid, byte> giveawayWinnerOperations = new();
 
+    internal static (string Name, string Label) GetWinnerDiscordName(GiveawayWinnerSummary winner)
+    {
+        if (!string.IsNullOrWhiteSpace(winner.DiscordNickname))
+            return (winner.DiscordNickname, "Guild nickname");
+        if (!string.IsNullOrWhiteSpace(winner.DiscordDisplayName))
+            return (winner.DiscordDisplayName, "Discord display name");
+        return (winner.DiscordUsername, "Discord username");
+    }
+
     internal static bool IsValidGiveawayAnnouncementMacro(string macro)
     {
         if (!macro.Contains(DiscordNamePlaceholder, StringComparison.Ordinal))
@@ -100,9 +109,7 @@ public sealed partial class Plugin
                         return;
                     }
 
-                    var discordName = string.IsNullOrWhiteSpace(currentWinner.DiscordNickname)
-                        ? currentWinner.DiscordUsername
-                        : currentWinner.DiscordNickname;
+                    var (discordName, _) = GetWinnerDiscordName(currentWinner);
                     // Keep Discord-supplied text on one line and prevent it from injecting game tags.
                     var safeName = new string(discordName
                         .Where(character => !char.IsControl(character) && character is not '\u2028' and not '\u2029')

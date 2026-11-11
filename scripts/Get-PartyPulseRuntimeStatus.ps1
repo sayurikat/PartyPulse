@@ -4,7 +4,9 @@
 param(
     [Parameter(Mandatory)]
     [ValidateRange(1, 2147483647)]
-    [int] $GameProcessId
+    [int] $GameProcessId,
+
+    [switch] $IncludeGameState
 )
 
 $ErrorActionPreference = 'Stop'
@@ -33,13 +35,17 @@ function Read-StatusBytes {
     param(
         [System.IO.Pipes.NamedPipeClientStream] $Pipe,
         [byte[]] $Buffer,
-        [System.Threading.CancellationToken] $CancellationToken
+        [System.Threading.CancellationToken] $CancellationToken,
+        [switch] $ExpectGameStateHeader
     )
 
     $offset = 0
     while ($offset -lt $Buffer.Length) {
         $count = $Pipe.ReadAsync($Buffer, $offset, $Buffer.Length - $offset, $CancellationToken).GetAwaiter().GetResult()
         if ($count -eq 0) {
+            if ($ExpectGameStateHeader -and $offset -eq 0) {
+                throw 'No game-state response. Verify that the running PartyPulse development build supports -IncludeGameState.'
+            }
             throw 'PartyPulse closed the connection before sending a complete status response.'
         }
 
@@ -62,13 +68,14 @@ try {
         throw 'The status pipe does not belong to the selected game process.'
     }
 
-    $request = [byte[]] @(0x01)
+    $request = [byte[]] @(if ($IncludeGameState) { 0x02 } else { 0x01 })
     [void] $pipe.WriteAsync($request, 0, $request.Length, $deadline.Token).GetAwaiter().GetResult()
 
     $header = [byte[]]::new(4)
-    Read-StatusBytes -Pipe $pipe -Buffer $header -CancellationToken $deadline.Token
+    Read-StatusBytes -Pipe $pipe -Buffer $header -CancellationToken $deadline.Token -ExpectGameStateHeader:$IncludeGameState
     $length = [BitConverter]::ToUInt32($header, 0)
-    if ($length -lt 1 -or $length -gt 2048) {
+    $maxLength = if ($IncludeGameState) { 4096 } else { 2048 }
+    if ($length -lt 1 -or $length -gt $maxLength) {
         throw 'PartyPulse returned an invalid status response length.'
     }
 
@@ -93,6 +100,9 @@ try {
         $version = $status.GetProperty('version').GetString()
         $sampledAtUtc = $status.GetProperty('sampledAtUtc').GetDateTimeOffset()
         $loggedIn = $status.GetProperty('loggedIn').GetBoolean()
+        if ($IncludeGameState) {
+            $gameState = $status.GetProperty('gameState').GetRawText() | ConvertFrom-Json -AsHashtable
+        }
     } finally {
         $document.Dispose()
     }
@@ -106,7 +116,7 @@ if ($protocolVersion -ne 1 -or $reportedProcessId -ne $GameProcessId -or
     throw 'PartyPulse returned unexpected status metadata.'
 }
 
-[ordered] @{
+$result = [ordered] @{
     protocolVersion = $protocolVersion
     processId = $reportedProcessId
     sessionId = $sessionId
@@ -114,4 +124,8 @@ if ($protocolVersion -ne 1 -or $reportedProcessId -ne $GameProcessId -or
     version = $version
     sampledAtUtc = $sampledAtUtc
     loggedIn = $loggedIn
-} | ConvertTo-Json -Compress
+}
+if ($IncludeGameState) {
+    $result.gameState = $gameState
+}
+$result | ConvertTo-Json -Compress -Depth 6

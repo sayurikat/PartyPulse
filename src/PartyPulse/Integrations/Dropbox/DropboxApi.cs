@@ -57,6 +57,15 @@ public sealed class DropboxApi : ExternalPluginIpcClient
                 _ = GetItemQuantities();
             });
 
+#if PARTYPULSE_RUNTIME_STATUS
+    internal object ReadRuntimeStatus() => new
+    {
+        BusyOrStatusError = EnsureNotBusy().Failure?.Code,
+        QueueError = ValidateQueueAccess().Failure?.Code,
+        BeginTradeRegistered = beginTradingQueue.HasAction,
+    };
+#endif
+
     public PluginIntegrationResult ClearQueue() =>
         ExecutePluginCall(
             "clear the Dropbox item queue",
