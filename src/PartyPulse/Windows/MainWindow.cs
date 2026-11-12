@@ -28,7 +28,7 @@ public sealed class MainWindow : Window, IDisposable
     private static readonly NavigationItem[] NavigationItems =
     [
         new(MainPage.Overview, "GENERAL", "Overview", "OV",
-            "Public opening details and your venue access.",
+            "",
             [new(MainSubtab.OverviewStatus, "Status")]),
         new(MainPage.Openings, "VENUE", "Openings", "OP",
             "Schedule openings, assign DJs, manage publication text, and review previous events.",
@@ -619,6 +619,13 @@ public sealed class MainWindow : Window, IDisposable
             return;
         }
 
+        if (activePage == MainPage.Overview)
+        {
+            publicOpening.Draw(selectedVenue);
+            ImGui.EndChild();
+            return;
+        }
+
         PartyPulseUi.PageHeader($"{item.Label} · {subtab.Label}", item.Description);
 
         if (TryDrawManagedSubtab(
@@ -642,9 +649,6 @@ public sealed class MainWindow : Window, IDisposable
         {
             switch (activePage)
             {
-                case MainPage.Overview:
-                    DrawOverviewPage(selectedVenue);
-                    break;
                 case MainPage.Users:
                 {
                     var snapshot = plugin.UserManagement.GetSnapshot(selectedVenue!);
@@ -666,12 +670,9 @@ public sealed class MainWindow : Window, IDisposable
 
         ImGui.EndChild();
 
-        if (activePage != MainPage.Overview)
-        {
-            var now = DateTimeOffset.UtcNow;
-            refreshDeferral.Observe(ImGui.GetIO().WantTextInput, now);
-            RunActivePageAutoRefresh(selectedVenue!, activePage, subtab.Id);
-        }
+        var now = DateTimeOffset.UtcNow;
+        refreshDeferral.Observe(ImGui.GetIO().WantTextInput, now);
+        RunActivePageAutoRefresh(selectedVenue!, activePage, subtab.Id);
     }
 
     private bool TryDrawManagedSubtab(
@@ -1361,41 +1362,6 @@ public sealed class MainWindow : Window, IDisposable
                (snapshot.Status == AuthenticationStatus.Connecting ||
                 snapshot.Status == AuthenticationStatus.Expired ||
                 snapshot.Status == AuthenticationStatus.Failed);
-    }
-
-    private void DrawOverviewPage(VenueConnectionConfiguration? selectedVenue)
-    {
-        PartyPulseUi.SectionHeader("Selected venue");
-        ImGui.TextUnformatted(selectedVenue?.VenueName ?? "Not configured");
-        if (selectedVenue is null)
-        {
-            ImGui.TextDisabled("Add a venue from Settings.");
-        }
-        else
-        {
-            publicOpening.Draw(selectedVenue);
-        }
-
-        if (plugin.IdentityProvider.TryGetCurrent(out var identity, out var reason))
-        {
-            PartyPulseUi.SectionHeader("Current character");
-            ImGui.TextUnformatted(identity!.DisplayName);
-        }
-        else
-        {
-            ImGui.TextDisabled(reason);
-        }
-
-        var accessText = selectedVenue?.IsRegistered == true
-            ? "Registered venue account"
-            : "Visitor access";
-        var accessColor = selectedVenue?.IsRegistered == true
-            ? PartyPulseUi.Success
-            : PartyPulseUi.Muted;
-        PartyPulseUi.SectionHeader("Access");
-        ImGui.TextColored(accessColor, accessText);
-        ImGui.TextWrapped(
-            "Use the navigation on the left to move between operational areas. Only pages available to this venue account are shown.");
     }
 
     private void DrawMyAccountPage(
