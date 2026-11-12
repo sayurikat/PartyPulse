@@ -18,9 +18,11 @@ public enum PartyFinderAutomationState
     WaitingForRefresh,
     WaitingForDetail,
     WaitingForConditions,
+    ReadingExistingListing,
+    VerifyingRefresh,
 }
 
-public sealed unsafe class PartyFinderAutomationService
+public sealed unsafe partial class PartyFinderAutomationService
 {
     private enum TransientIssue
     {
@@ -126,6 +128,9 @@ public sealed unsafe class PartyFinderAutomationService
         transientInterruptionStartedAt = null;
         transientIssue = TransientIssue.None;
 
+        if (BeginDevSession(venue, currentlyRecruiting, DateTimeOffset.UtcNow))
+            return true;
+
         if (currentlyRecruiting)
         {
             BeginRefresh(DateTimeOffset.UtcNow);
@@ -148,6 +153,7 @@ public sealed unsafe class PartyFinderAutomationService
 
     public void Stop(string message = "Party Finder refresher stopped.")
     {
+        EndDevSession("stopped");
         State = PartyFinderAutomationState.Idle;
         StatusMessage = message;
         NextRefreshAt = null;
@@ -190,6 +196,12 @@ public sealed unsafe class PartyFinderAutomationService
             return;
         }
 
+        if (IsUsingCoordination && playerState.ContentId != 0 && playerState.ContentId != devCharacterId)
+        {
+            Stop("Party Finder refresher stopped because the character changed.");
+            return;
+        }
+
         var agent = AgentLookingForGroup.Instance();
         if (agent == null)
         {
@@ -206,6 +218,20 @@ public sealed unsafe class PartyFinderAutomationService
         var currentText = agent->StoredRecruitmentInfo.CommentString.ToString();
         if (!string.Equals(currentText, expectedText, StringComparison.Ordinal))
         {
+            if (IsUsingCoordination && !condition[ConditionFlag.UsingPartyFinder] &&
+                string.IsNullOrWhiteSpace(currentText))
+            {
+                if (State == PartyFinderAutomationState.WaitingForRefresh)
+                {
+                    TickDevMissingListing(venue, agent, now, snapshot.EstimatedServerNow);
+                    return;
+                }
+                if (State == PartyFinderAutomationState.VerifyingRefresh)
+                {
+                    TickDevRefreshConfirmation(venue, agent, now, snapshot.EstimatedServerNow);
+                    return;
+                }
+            }
             if (!condition[ConditionFlag.UsingPartyFinder] || string.IsNullOrWhiteSpace(currentText))
             {
                 PauseForTransientInterruption(
@@ -216,6 +242,7 @@ public sealed unsafe class PartyFinderAutomationService
                 return;
             }
 
+            EndDevSession("removed");
             Stop("Party Finder refresher stopped because the in-game description was changed. PartyPulse did not overwrite it.");
             return;
         }
@@ -273,6 +300,11 @@ public sealed unsafe class PartyFinderAutomationService
                 break;
 
             case PartyFinderAutomationState.WaitingForRefresh:
+                if (IsUsingCoordination)
+                {
+                    TickDevRenewal(venue, agent, now, snapshot.EstimatedServerNow);
+                    break;
+                }
                 if (!condition[ConditionFlag.UsingPartyFinder])
                 {
                     PauseForTransientInterruption(
@@ -290,6 +322,11 @@ public sealed unsafe class PartyFinderAutomationService
             case PartyFinderAutomationState.WaitingForDetail:
                 if (!condition[ConditionFlag.UsingPartyFinder])
                 {
+                    if (IsUsingCoordination)
+                    {
+                        FailDevRefresh(now, "Party Finder recruitment became unavailable before the renewal could be opened.");
+                        break;
+                    }
                     PauseForTransientInterruption(
                         now,
                         TransientIssue.RecruitmentUnavailable,
@@ -298,6 +335,8 @@ public sealed unsafe class PartyFinderAutomationService
                     return;
                 }
                 ClearTransientInterruption(TransientIssue.RecruitmentUnavailable);
+                if (IsUsingCoordination && !PrepareDevRefresh(agent, now))
+                    break;
                 if (TryClickButton("LookingForGroupDetail", 109))
                 {
                     State = PartyFinderAutomationState.WaitingForConditions;
@@ -306,13 +345,26 @@ public sealed unsafe class PartyFinderAutomationService
                 }
                 else if (stageDeadline is { } detailDeadline && now >= detailDeadline)
                 {
+                    if (IsUsingCoordination)
+                    {
+                        CloseDevOwnDetail(agent);
+                        FailDevRefresh(now, "The Party Finder renewal button could not be opened.");
+                        break;
+                    }
                     Stop("Party Finder refresher stopped because the listing details window could not be opened.");
                 }
                 break;
 
             case PartyFinderAutomationState.WaitingForConditions:
+                if (IsUsingCoordination && !CanSubmitDevRefresh(venue, agent, now, snapshot.EstimatedServerNow))
+                    break;
                 if (TryClickButton("LookingForGroupCondition", 113))
                 {
+                    if (IsUsingCoordination)
+                    {
+                        BeginDevRefreshConfirmation(now);
+                        break;
+                    }
                     NextRefreshAt = now + interval;
                     State = PartyFinderAutomationState.WaitingForRefresh;
                     stageDeadline = null;
@@ -320,14 +372,40 @@ public sealed unsafe class PartyFinderAutomationService
                 }
                 else if (stageDeadline is { } conditionsDeadline && now >= conditionsDeadline)
                 {
+                    if (IsUsingCoordination)
+                    {
+                        CloseDevConditions();
+                        CloseDevOwnDetail(agent);
+                        FailDevRefresh(now, "The Party Finder Recruit button could not be submitted.");
+                        break;
+                    }
                     Stop("Party Finder refresher stopped because the Recruit button could not be submitted.");
                 }
+                break;
+            case PartyFinderAutomationState.ReadingExistingListing:
+                TickDevAdoption(venue, agent, now, snapshot.EstimatedServerNow);
+                break;
+
+            case PartyFinderAutomationState.VerifyingRefresh:
+                TickDevRefreshConfirmation(venue, agent, now, snapshot.EstimatedServerNow);
                 break;
         }
     }
 
     private void BeginRefreshCountdown(VenueConnectionConfiguration venue, DateTimeOffset now, string prefix)
     {
+        if (IsUsingCoordination)
+        {
+            if (playerState.ContentId != devCharacterId)
+            {
+                State = PartyFinderAutomationState.AwaitingInitialRecruitment;
+                StatusMessage = "Waiting for Party Finder to confirm the new listing.";
+                return;
+            }
+
+            ConfirmDevListing(venue, 0, now, publications.GetSnapshot(venue).EstimatedServerNow, DevListingLifetime, "started", prefix);
+            return;
+        }
         NextRefreshAt = now + interval;
         State = PartyFinderAutomationState.WaitingForRefresh;
         stageDeadline = null;

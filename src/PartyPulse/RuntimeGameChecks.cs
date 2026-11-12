@@ -11,11 +11,13 @@ using FFXIVClientStructs.FFXIV.Component.GUI;
 using PartyPulse.Integrations.Dropbox;
 using PartyPulse.Integrations.Lifestream;
 using PartyPulse.Models;
+using PartyPulse.PartyFinder;
 using PartyPulse.Shoutrunner;
 
 namespace PartyPulse;
 
-internal sealed class RuntimeGameChecks(DropboxApi dropbox, ShoutrunnerDutyManager shoutrunner)
+internal sealed class RuntimeGameChecks(
+    DropboxApi dropbox, ShoutrunnerDutyManager shoutrunner, PartyFinderAutomationService partyFinder)
 {
     private readonly LifestreamApi lifestream = new(Plugin.PluginInterface, Plugin.Log);
 
@@ -82,14 +84,30 @@ internal sealed class RuntimeGameChecks(DropboxApi dropbox, ShoutrunnerDutyManag
         };
     }
 
-    private static unsafe object ReadPartyFinder() => new
+    private unsafe object ReadPartyFinder()
     {
-        AgentAvailable = AgentLookingForGroup.Instance() != null,
-        Recruiting = Plugin.Condition[ConditionFlag.UsingPartyFinder],
-        RecruitButton = ReadPartyFinderButton("LookingForGroup", 46),
-        SubmitButton = ReadPartyFinderButton("LookingForGroupCondition", 113),
-        RefreshButton = ReadPartyFinderButton("LookingForGroupDetail", 109),
-    };
+        var agent = AgentLookingForGroup.Instance();
+        var characterId = Plugin.PlayerState.ContentId;
+        var refreshButton = ReadPartyFinderButton("LookingForGroupDetail", 109);
+        var ownDetail = agent != null && refreshButton.HasValue && characterId != 0 &&
+            agent->ListingContentId == characterId && agent->LastViewedListing.LeaderContentId == characterId;
+
+        return new
+        {
+            AgentAvailable = agent != null,
+            Recruiting = Plugin.Condition[ConditionFlag.UsingPartyFinder],
+            HasAgentOwnListingId = agent != null && agent->OwnListingId != 0,
+            OwnDetailVisible = ownDetail,
+            OwnDetailHasListingId = ownDetail && agent->LastViewedListing.ListingId != 0,
+            OwnDetailTimeLeft = ownDetail ? (uint?)agent->LastViewedListing.TimeLeft : null,
+            RecruitButton = ReadPartyFinderButton("LookingForGroup", 46),
+            SubmitButton = ReadPartyFinderButton("LookingForGroupCondition", 113),
+            RefreshButton = refreshButton,
+            AutomationState = partyFinder.State.ToString(),
+            AutomationStatus = partyFinder.StatusMessage,
+            partyFinder.NextRefreshAt,
+        };
+    }
 
     private static unsafe bool? ReadPartyFinderButton(string addonName, uint buttonId)
     {

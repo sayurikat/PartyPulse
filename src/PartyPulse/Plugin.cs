@@ -172,6 +172,10 @@ public sealed partial class Plugin : IDalamudPlugin
             GameGui,
             PlayerState,
             Log);
+        PartyFinderCoordination = new PartyFinderCoordinator(
+            Configuration, Authentication, apiClient, IdentityProvider, LocationProvider, OpeningPublications,
+            Log, LifetimeToken);
+        PartyFinderAutomation.Coordinator = PartyFinderCoordination;
         NearbyVipPlayers = new NearbyVipPlayerTracker(ObjectTable, TargetManager);
         VipArrivalNearby = new VipArrivalNearbyTracker(ObjectTable);
         GreeterNearby = new GreeterNearbyTracker(ObjectTable);
@@ -234,7 +238,7 @@ public sealed partial class Plugin : IDalamudPlugin
 #if PARTYPULSE_RUNTIME_STATUS
         if (OperatingSystem.IsWindows() && PluginInterface.IsDev)
         {
-            var gameChecks = new RuntimeGameChecks(dropboxApi, ShoutrunnerDuty);
+            var gameChecks = new RuntimeGameChecks(dropboxApi, ShoutrunnerDuty, PartyFinderAutomation);
             runtimeStatusBridge = RuntimeStatusBridge.TryStart(Framework, ClientState,
                 IdentityProvider, TargetProvider, LocationProvider, Log, LifetimeToken, gameChecks.Read);
         }
@@ -293,6 +297,7 @@ public sealed partial class Plugin : IDalamudPlugin
     public OpeningPublicationManagementManager OpeningPublications { get; }
 
     public PartyFinderAutomationService PartyFinderAutomation { get; }
+    public PartyFinderCoordinator PartyFinderCoordination { get; }
 
     public ShoutrunnerDutyManager ShoutrunnerDuty { get; }
 
@@ -558,6 +563,7 @@ public sealed partial class Plugin : IDalamudPlugin
         OpeningPublications.RemoveProfile(venue.ProfileId);
         if (PartyFinderAutomation.ProfileId == venue.ProfileId)
             PartyFinderAutomation.Stop("Party Finder refresher stopped because venue authorization changed.");
+        PartyFinderCoordination.RemoveProfile(venue.ProfileId);
         NearbyVipPlayers.ClearProfile(venue.ProfileId);
         VipArrivalNearby.Clear();
         GreeterNearby.Clear();
@@ -1818,6 +1824,7 @@ public sealed partial class Plugin : IDalamudPlugin
                 Djs.Clear("Character logged out or changed.");
                 OpeningPublications.Clear("Character logged out or changed.");
                 PartyFinderAutomation.Stop("Party Finder refresher stopped because the character logged out or changed.");
+                PartyFinderCoordination.Clear();
                 NearbyVipPlayers.Clear();
                 VipArrivalNearby.Clear();
                 GreeterNearby.Clear();
@@ -1847,6 +1854,7 @@ public sealed partial class Plugin : IDalamudPlugin
             Djs.Clear("Character changed; DJ data was cleared.");
             OpeningPublications.Clear("Character changed; opening-publication data was cleared.");
             PartyFinderAutomation.Stop("Party Finder refresher stopped because the character changed.");
+            PartyFinderCoordination.Clear();
             NearbyVipPlayers.Clear();
             VipArrivalNearby.Clear();
             GreeterNearby.Clear();
@@ -1863,6 +1871,10 @@ public sealed partial class Plugin : IDalamudPlugin
                 Authentication.GetSnapshot(venue).Status is
                     AuthenticationStatus.Connected or AuthenticationStatus.Expired)
             .ToArray();
+        PartyFinderCoordination.Tick(identity!, notificationVenues,
+            PartyFinderAutomation.IsRunning ? PartyFinderAutomation.ProfileId : null,
+            PartyFinderAutomation.CoordinatedOpeningId, Condition[Dalamud.Game.ClientState.Conditions.ConditionFlag.UsingPartyFinder],
+            message => ChatGui.Print(message, "PartyPulse"), EnsureOpeningPublicationsLoaded);
         if (Notifications.IsPollDue && notificationVenues.Length > 0)
         {
             Observe(
@@ -2010,8 +2022,12 @@ public sealed partial class Plugin : IDalamudPlugin
         TimedMacros.RemoveProfile(venue.ProfileId);
         Djs.RemoveProfile(venue.ProfileId);
         OpeningPublications.RemoveProfile(venue.ProfileId);
-        if (PartyFinderAutomation.ProfileId == venue.ProfileId)
-            PartyFinderAutomation.Stop("Party Finder refresher stopped because venue authorization changed.");
+        await Framework.RunOnTick(() =>
+        {
+            if (PartyFinderAutomation.ProfileId == venue.ProfileId)
+                PartyFinderAutomation.Stop("Party Finder refresher stopped because venue authorization changed.");
+            PartyFinderCoordination.RemoveProfile(venue.ProfileId);
+        }, cancellationToken: LifetimeToken);
         NearbyVipPlayers.ClearProfile(venue.ProfileId);
         VipArrivalNearby.Clear();
         GreeterNearby.Clear();
